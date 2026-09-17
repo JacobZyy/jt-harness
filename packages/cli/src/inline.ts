@@ -54,8 +54,8 @@ export async function inlineMain(root: string, args: string[]) {
         if (failure) throw new Error(failure.error)
         const job = await jobStatus(pool, receipt.submission_id)
         let worker
-        try { worker = await startWorker(root, config) } catch (error) {
-          worker = { started: false, error: safeError(error, config), recovery: 'jth memo work' }
+        try { worker = await startWorker(root, config, true) } catch (error) {
+          worker = { started: false, error: safeError(error, config), recovery: 'jth memo work --index' }
           process.exitCode = 1
         }
         result = { ...job, status: 'accepted', index_status: job.status, worker }

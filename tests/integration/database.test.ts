@@ -418,7 +418,7 @@ test('native PostgreSQL + pgvector: durable queue, atomic publication, scope iso
       const lock = await pool.connect()
       await lock.query("SELECT pg_advisory_lock(hashtextextended('jt_memo:worker', 0))")
       const start = performance.now()
-      const receipt = await cli('send', inputPath, '--legacy')
+      const receipt = await cli('send', inputPath)
       assert.equal(receipt.status, 'queued')
       assert.equal(receipt.worker.started, true)
       assert(performance.now() - start < 5000, 'send must not wait for extraction or worker lock')

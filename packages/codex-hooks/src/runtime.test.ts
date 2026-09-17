@@ -40,7 +40,7 @@ test('six hooks remain idempotent and preserve other tools; startup supplies the
     assert.equal((await registerCaptures(f.config)).received, 1)
     assert.equal((await registerCaptures(f.config)).received, 0)
     const status = await captureStatus(f.config)
-    assert.equal(status.mode, 'in-session')
+    assert.equal(status.mode, 'dsh')
     assert.equal(status.sessions[0].session_id, 'parent')
     assert.equal(status.pending_records, 0)
     assert.deepEqual((await deliverRecords(f.config, async () => { throw new Error('No implicit extraction or delivery is allowed') })).accepted, [])

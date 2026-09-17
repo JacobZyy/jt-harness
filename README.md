@@ -1,137 +1,249 @@
-# jt-harness
+# jt-harness · jth
 
-本地 `jth` CLI。当前 Codex 会话提取可复用记忆，正文先落库，后台只负责 Embedding 与索引发布。默认路径不启动 DSH，不把整段会话交给第二个模型。
+`jth` 是本地 TypeScript CLI。它接收 Codex 会话材料，通过 DSH SDK 运行已验收的提炼 Agent，再调用 Embedding API，将候选记忆和来源保存在 PostgreSQL + pgvector。
 
-## 模块
+本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。DSH SDK 启动自己的本地子进程，通过 stdio 通信，不调用 3080 Web 接口。
 
-- `packages/memo`：来源与候选契约、PostgreSQL/pgvector、版本校验、修订、索引任务和查询。`./legacy` 单独提供旧 DSH 导入。
-- `packages/codex-hooks`：六阶段 Hook、会话身份与原始证据、候选文件暂存。不会自动生成总结或执行 SQL。
-- `packages/cli`：命令解析、配置、投递编排、后台进程启动；调用前两个 package。
+## 模块与运行模式
 
-根目录 `bin/jth.mjs` 是稳定入口，保留已安装 Hook 的命令和信任信息。
+生产代码分为 `packages/memo`（DSH Agent、存储、队列）、`packages/codex-hooks`（六阶段 Hook、增量来源采集）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
 
-## 本地使用
+默认恢复 DSH：Hook 保存事件，后台 `memo work` 收集增量会话，交给 DSH 提炼及关系比较，再生成向量并发布。Hook 不等待模型。SessionStart 不再注入会话内提取说明；已有会话中的旧说明需恢复会话后刷新。
 
-需要 Node.js 24.21+、pnpm 10、PostgreSQL 15+ 和 pgvector。本机已使用 PostgreSQL 18.6 / pgvector 0.8.6。
+数据库保留 schema v4 和所有已有记录。表中的 `kind=legacy` 是 DSH 队列的历史字段名，不代表当前停用。`memo work --legacy` 与默认 DSH 路径兼容；`memo work --index` 仅恢复先前手动 record 的索引任务。失败任务仍需显式 retry，不自动重跑旧失败记录。
+
+会话内 `prepare / evidence / record` 保留为手动工具，不再由 Hook 指示 Agent 自动调用。`record` 自己启动 index worker，不会额外进入 DSH。
+
+## 当前本机使用
+
+当前工作区已构建，并安装 `~/.local/bin/jth` 软链。配置位于本工具目录的 `.env`。
 
 ```sh
-pnpm install
+jth --help
+jth memo send examples/conversation.json
+jth memo status jth-cli-example-1
+jth memo search '这个项目如何使用 CLI？' --project jth-cli-verification
+jth memo read <entry-id>
+jth memo read --submission jth-cli-example-1
+```
+
+`send` 默认在 PostgreSQL 持久化材料后返回，不等待模型和 Embedding。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成；待审条目是否进入默认搜索还由 `claim_status` 决定，状态输出包含 `candidate_count` 和 `publication_notes`。示例会话限定在 `jth-cli-verification` 项目范围内。
+
+本机开发库位于 `~/.jth/postgres`。`jth` 使用 `~/.jth/run` 私有 Unix socket；图形客户端使用仅监听本机的 `127.0.0.1:5432`。没有注册开机启动，系统重启后需先启动数据库：
+
+```sh
+/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$HOME/.jth/postgres" -l "$HOME/.jth/postgres.log" start
+/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$HOME/.jth/postgres" status
+/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$HOME/.jth/postgres" -m fast stop
+```
+
+停止数据库前完成正在执行的任务。再次启动后运行 `jth memo work` 恢复已接收但未完成的任务。移除 CLI 软链可运行 `unlink "$HOME/.local/bin/jth"`；该操作不删除配置或记忆数据库。
+
+### DataGrip / Navicat 查看数据
+
+新建 PostgreSQL 连接，填写下面的信息。该连接账号仅用于查看数据，记忆写入继续由 `jth` 管理。
+
+| 字段 | 值 |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Port | `5432` |
+| Database | `jth` |
+| User | `jth_viewer` |
+| Password | 本机 `~/.jth/gui-connection.env` 中的 `PGPASSWORD` |
+| Schema | `jt_memo` |
+| SSL | 关闭；连接仅限本机回环地址 |
+
+密码文件权限为 0600，保存在工作区之外。不要将密码复制进项目文档或 JDBC URL。DataGrip 可使用 `jdbc:postgresql://127.0.0.1:5432/jth`，用户名和密码填写在各自输入框；在 Schemas 中勾选 `jt_memo` 后即可浏览表。
+
+`entries` 是记忆正文，`embeddings` 是向量，`jobs` 是任务状态。客户端查询中可用 `embedding::text` 查看向量的数值列表。
+
+本机已验证密码认证、表与向量可读、写操作拒绝。`entry_states` 视图展示每条记忆的当前状态，`entry_relations` 保存更正、补充和冲突关系；`entries` 保留全部历史正文。监听地址通过 PostgreSQL 原生 `ALTER SYSTEM` 配置；账号拥有当前表的 SELECT 权限，并自动获得 `jacobzha` 后续在 `jt_memo` 中创建的表的 SELECT 权限。
+
+## 本地构建与配置
+
+需要 Node.js ≥ 24.21.0、pnpm 10，以及已经安装并构建的 DeepSeek Harness。当前 SDK 和开发工具依赖仍链接到相邻 `../deepseek-harness` 工作区，已验证版本为 `0.1.6-alpha.1`；这是本机源码交付，不是可独立分发到任意机器的 npm 包。
+
+```sh
+pnpm install --frozen-lockfile
 pnpm build
-# 首次安装时复制模板；不要覆盖已有密钥配置。
-cp .env.example .env
+node bin/jth.mjs --help
+# 初次配置时复制模板；已有 .env 时不要覆盖。
+cp -n .env.example .env
 chmod 600 .env
+# 配置 PostgreSQL 连接与 Embedding API 后：
 node bin/jth.mjs memo init
 ```
 
-已有 `.env` 请直接保留。配置 `JTH_DATABASE_URL`、`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_DIMENSIONS`、`EMBEDDING_API_KEY`；文件被 Git 忽略。环境变量覆盖文件值；`--env-file` 可指定文件。默认数据目录为 `~/.jth`，可用 `JTH_DATA_DIR` 调整。
+`memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将已有 v1/v2/v3 库事务性升级到 v4，保留原材料、条目、向量与回执。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装或启动 PostgreSQL；连接用户需要相应建表、扩展权限，未知版本会被拒绝。
 
-当前为本地 workspace 交付。DSH SDK 链接仅供 legacy adapter 开发和评测；普通调用不需要 DSH 服务在线。不是独立发布的 npm 安装包。
+`.env.local` 已改为 `.env`。`.gitignore` 忽略 `.env` 和 `.env.*`，只允许无凭据的 `.env.example`。仓库已初始化并托管于 GitHub 私有仓库 `JacobZyy/jt-harness`。打包文件采用白名单，同样不包含 `.env`。实际部署的凭据注入后续处理。
 
-`memo init` 事务性迁移到 schema v4，保留旧正文、来源、向量和回执。旧任务标记为 `legacy`，默认 worker 不再处理它们。
+默认读取**工具安装目录**下的 `.env`，不读取业务项目当前目录中的同名文件。`--env-file /absolute/path/.env` 或 `JTH_ENV_FILE` 可指定配置；进程环境变量优先于文件。配置内的相对目录、DSH 入口路径以配置文件所在目录为基准。环境变量不会写回 `.env`，文件内容也不会整体导出给 DSH。
 
-## 写入与读取
+| 配置 | 用途 |
+| --- | --- |
+| `JTH_DATABASE_URL` | PostgreSQL 连接地址，必须配置 |
+| `EMBEDDING_BASE_URL` | OpenAI-compatible API 根地址，以 `/v1` 结尾；CLI 添加 `/embeddings` |
+| `EMBEDDING_API_KEY` | API 密钥，只在调用 Embedding 时使用 |
+| `EMBEDDING_MODEL` | 本机配置为 `qwen3.7-text-embedding-flash` |
+| `EMBEDDING_DIMENSIONS` | 默认 1024 |
+| `EMBEDDING_TIMEOUT_MS` | 单次调用超时，默认 60000 ms |
+| `JTH_DSH_PROVIDER` / `JTH_DSH_MODEL` | 默认读取 `packages/memo/src/agents/runtime.json` |
+| `JTH_DSH_REASONING_EFFORT` / `JTH_DSH_MAX_TOKENS` | 可选模型参数 |
+| `JTH_DSH_TIMEOUT_MS` | 当前运行配置为 600000 ms，可按模型延迟调整 |
+| `JTH_DSH_BIN` / `JTH_DSH_HOME` | 可选 DSH JS 入口及 DSH 配置目录 |
+| `JTH_DATA_DIR` | 默认 `~/.jth`，存放 worker 日志和 Agent 工作目录 |
+
+DSH 模型密钥继续由现有 DSH credentials/settings 管理，不复制进本项目。DSH 子进程继承调用者网络代理环境；如本机代理影响模型服务，可按实际网络配置 `NO_PROXY`，不修改全局代理。
+
+## 指令和输入契约
+
+`send` 支持 JSON 文件和 stdin。输入格式见 `examples/conversation.json`：`submission_id` 必须稳定，消息必须有稳定、唯一的 `message_id`。同一 ID、同一材料重复投递返回原任务；同一 ID、不同材料报冲突。新增会话增量使用新 ID，保留足够上下文。
 
 ```sh
-jth memo prepare --session <当前真实会话ID>
-jth memo evidence <evidence-id> --message <message-id>
-jth memo record <record.json>
-jth memo status <返回的submission-id>
-jth memo search '查询内容' --project jt-harness
-jth memo read <entry-id>
+cat examples/conversation.json | jth memo send -
+jth memo send examples/conversation.json --wait
+jth memo send new-conversation.json --provider deepseek-official --model deepseek-v4-flash
+jth memo status
+jth memo retry <failed-submission-id>
+# 为已经失败、仍保存旧预算的任务显式延长 Agent 时间预算：
+jth memo retry <failed-submission-id> --timeout-ms 600000
+jth memo work
 ```
 
-`prepare` 默认预览最近 12 条用户/助手消息，最多 40 条；工具材料必须显式使用 `--include-tools`。`--before <message-id>` 向前翻页；可重复 `--message <message-id>` 精确选择来源。超过预览的正文用 `evidence` 读取。来源来自已登记会话的原始 JSONL，不允许提交者自填会话文本或伪造消息 ID。
+`--wait` 适合手动联调，会等待队列处理。Codex 自动采集入口使用下方六阶段适配器，不等待 Agent 或 Embedding。
 
-`record.json` 示例（替换真实 ID）：
+任务接收时会保存执行配置。调整 `.env` 的 `JTH_DSH_TIMEOUT_MS` 只影响新任务；已有失败任务可通过 `retry --timeout-ms` 显式覆盖时间预算。该选项不改变原文、模型、Embedding 空间或已保存的提炼检查点。Agent 执行错误现在携带 DSH session ID，可用于关联 DSH 中的请求轨迹。
 
-```json
-{
-  "evidence_id": "prepare 返回的 evidence-id",
-  "extraction": {
-    "schema_version": 1,
-    "memories": [{
-      "content": "独立、可复用的事实",
-      "scope": "project",
-      "source_message_ids": ["真实消息 ID"],
-      "basis": "user_statement"
-    }],
-    "proposals": [],
-    "revisions": []
-  },
-  "changes": []
-}
-```
+## Codex 自动投递
 
-当前 Agent 负责选择值得记忆的内容。用户明确声明使用 `user_statement`；用户确认助手建议需要同时引用建议及后续确认，使用 `user_confirmed`；工具观察使用 `tool_observation`。未确认的建议留在 `proposals`，不会直接成为用户事实。程序验证来源角色、顺序、原文、作用域和修订权限，但不能保证模型的语义概括永远正确。
-
-`record` 先保存本地材料，再在同一个数据库事务中保存正文及索引任务。`accepted` 表示正文已保存，`index_status=complete` 才表示向量已发布。数据库断开时返回 `staged`、退出码 1，材料保留；不能将其视为已入库。相同候选重复提交返回同一批次，不自动进行语义去重。
-
-正文可立即通过 `read --submission <id>` 检查。语义 `search` 依赖已完成的向量。当前仅持久化短小候选和明确修订，不把整个工具日志作为记忆。
-
-## 更正与并发
-
-明确更正先 `search` 找到旧条目，再 `read` 获取 `version`。在 `changes` 中声明 `previous_entry_id`、`expected_version`、`current_memory_index`、`kind`、`revision_index`、`source_message_ids`、`evidence_quote`、`explanation`、`resolved_revision_conflict_ids`。
-
-- 提交时旧版本已变：拒绝本次提交，旧事实不变；重新读取后生成新的决定。
-- 接受后、索引发布前旧版本改变：新条目保留为待审核候选，旧事实不被覆盖。
-- 有效修订和向量在一个事务中发布；时间、生效区间、作用域、证据规则继续适用。
-
-没有明确证据就不猜测替代关系。自动语义去重、自动发现全部矛盾不属于后台 worker 的职责。既有 review、archive、历史读取功能保持可用。
-
-## Hook
+在需要开启记忆采集的项目中执行安装命令。项目 ID 由调用者明确指定；多个项目共享业务知识时可以额外指定 `--business`。
 
 ```sh
 jth memo codex install --project jt-harness
 jth memo codex status
+jth memo work
+# 关闭当前项目的自动采集，保留已经接收的材料和记忆：
 jth memo codex uninstall
 ```
 
-仅配置当前项目 `.codex/hooks.json`，保留其他工具的处理器和原来的安装时间：
+`--workspace /absolute/project/path` 可以安装到其他项目。安装仅修改该项目的 `.codex/hooks.json`，保留其他工具的 Hook，更新前备份到 `~/.jth/codex/backups/`。重复安装不会重复注册。Codex 要求通过 `/hooks` 审阅并信任新的定义；本工具不绕过该信任机制。
 
-- `SessionStart` / `SubagentStart`：登记来源，注入会话内提交说明。
-- `Stop` / `Interrupt` / `SessionEnd` / `SubagentStop`：保留原始来源、唤醒待投递和索引任务。
+安装六个事件，全部调用同一个 `jth memo codex capture` 入口：`SessionStart`、`Stop`、`Interrupt`、`SessionEnd`、`SubagentStart`、`SubagentStop`。没有注册其他阶段。启动事件登记来源并补采；停止事件提交增量。子 Agent 用自己的 `agent_id` 作为来源会话 ID，保留父会话 ID，不把父 Agent 的委派当作用户直接陈述。
 
-这些 Hook 不调用另一个模型。Agent 若没有主动 `record`，Hook 不会凭空补出总结；中断时只保留已产生的材料。子 Agent 的委派内容属于助手材料，不能冒充用户确认。父会话继承片段不重复导入。
+Hook 短暂同步保存本地交接记录后启动独立 worker，超时为 3 秒，成功时不向 Codex 输出内容。Hook 内不连接数据库、不调用模型、不等待 Embedding。数据库离线时，本地记录仍保留；恢复数据库后执行 `jth memo work`，或者等待下次 Hook 唤醒。`SessionEnd` 返回后 Codex 可能删除原会话文件，因此采集入口用本地硬链接保留来源 inode，并执行 fsync。来源和 `JTH_DATA_DIR` 必须位于支持硬链接的同一文件系统；跨文件系统会明确报错，不假装完成投递。
 
-新装 Hook 需要 Codex 加载并信任配置。已安装入口不变时，恢复/开始会话后加载新说明；本轮已收到新的原生 `SessionStart` 登记。
+默认仅采集安装时间之后的新内容，不自动补录全部历史。采集读取已登记会话的文本消息、助手报告和工具结果，排除系统/开发者注入、推理内容和压缩摘要的重复表示。图片和音频二进制不送入文字记忆。读取适配已核对本机 Codex 0.153.0 的实际日志；官方不保证 transcript 格式稳定，升级后遇到未知格式会保留进度并报错。
 
-## 恢复与状态
+`~/.jth/codex/` 保存本地交接记录、来源硬链接、采集游标、未获回执的固定批次和安装备份。JSON 文件权限为 0600，目录为 0700。硬链接继承原来源文件权限，目录限制其访问。卸载停止继续发现新内容，已经接收的批次仍可处理；不会删除历史记忆或来源。当前没有自动回收硬链接的策略。
+
+每批有稳定 ID；同一个来源片段被多个 Hook 重复触发也只接收一次。游标只在 PostgreSQL 返回持久化接收回执后推进；回执不确定时先重发完全相同的批次。完整 UTF-8 日志行才会被消费，大消息按字符边界拆片。批次附带最多两条前序对话作为 `context_only`，供确认和代词消歧使用；输出必须引用新增消息，不能只靠前序上下文重复写入旧事实。
+
+启动/恢复和 `memo work` 会补采已登记的父子会话，因此子 Agent 没有正常触发 `SubagentStop` 时仍有恢复入口。没有常驻文件监听器或定时任务；如果此后没有任何唤醒，补采会等待下一次 Hook 或手动 `memo work`。查看接收、等待来源和错误状态用 `jth memo codex status`，查看提炼和向量发布状态仍用 `jth memo status`。
+
+实现与验收边界见 [Codex Hook 验证报告](docs/codex-hooks-verification.md)。
+
+Agent 模型、向量空间和原材料在接收时固定；重复提交不会悄悄换模型。凭据在处理时从对应 `.env` 重新读取，支持修复或轮换密钥。改变模型、维度或 Embedding 地址会产生不同向量空间；未完成任务必须恢复原配置后重试。本版本没有全库重建索引命令。
+
+`status` 列出状态计数与最近 20 个任务；指定 ID 后显示尝试次数、错误、提炼和比较两个阶段的 DSH session ID、索引提交回执及直接修订数量。`read --submission` 可以查看完整提炼结果和修订证据。
+
+`search` 必须显式指定一种范围，默认 10 条、最多 50 条；只输出 400 字符以内的正文预览，不返回向量。完整正文和引用原文通过 `read` 获取。
+
+默认搜索只返回已入库、当前有效、未归档且具有可用来源资格的条目。`state` 区分 `pending/active/conflicted/superseded/scheduled/expired`，`claim_status` 区分来源和审核资格，`archived` 单独表示归档。`--history` 包含被更正、过期、未生效的条目；`--candidates` 包含待审条目（兼容原 `--proposals`）；`--archived` 包含归档。被拒绝的条目仍可按 ID 读取，不进入默认或候选搜索。
+
+`read` 保留原文、双方证据和审核/归档日志，关系与动作各最多 100 条并注明是否截断。DataGrip 中可查看 `entry_states`、`entry_relations`、`entry_actions`。
 
 ```sh
-jth memo work                  # 投递本地候选，处理 index 任务
-jth memo retry <submission-id> # 重试失败的 index 任务
-jth memo status               # index_counts 与 legacy_counts 分开
-jth memo codex status         # 登记会话、本地候选、投递错误
-jth memo doctor               # 只读一致性检查
+jth memo search '接口约定' --project project-a
+jth memo search '共同约定' --project project-a --project project-b
+jth memo search '发货状态' --business shipping
+jth memo search '本次任务' --session codex-session-id
+jth memo search '个人偏好' --user
+jth memo search '范围未明确的信息' --submission submission-id
+jth memo search '尚未确认的建议' --project project-a --proposals --limit 5
+jth memo search '已经更正的旧约定' --project project-a --history
+jth memo search '当时的接口约定' --project project-a --as-of '2026-09-16T12:00:00+08:00'
+```
+
+## 事实粒度、时间与审核
+
+新提炼要求一条记忆表达一个可独立更正的事实，保留限定条件与多条必要来源；`entities` 只能引用消息中实际出现的对象、路径或符号。程序校验实体和时间证据，语义上是否完全原子仍需模型判断；原有条目不会被静默拆写。
+
+每条输入消息可带 `occurred_at`（带时区的 ISO 8601）；已提供的时间必须与消息顺序一致。只有全部引用消息都有时间，才保存其最后时间为 `source_occurred_at`；缺失时保持 null。`received_at` 是持久化接收时间，`stored_at` 是提炼检查点时间，`published_at` 是向量发布时刻。`valid_from/valid_until` 来自明确的时间原文，未知时为 null，不用今天补齐。
+
+`search/read --as-of` 重现指定时刻已记录、已发布及已生效的状态，同时考虑当时的审核、归档和替代关系。它不会把今天才生成的提炼结果泄露进过去的快照。未来时刻查询仅基于当前已记录的有效期，不代表未来必然发生。
+
+旧材料晚到、较早任务重试晚完成、缺失可比较来源时间、过期材料或未来生效的自动更正，会转入待审并写明原因，旧事实保持有效。未来更正不会由后台定时自动作废旧事实。审核确认只是认可条目，不会偷偷执行原先被拦截的替代计划；存在相反说法时保留冲突，继续通过明确更正裁决。
+
+| claim_status | 含义 |
+| --- | --- |
+| `asserted` | 用户直接陈述 |
+| `observed` | 工具观察，保留观测局限 |
+| `verified` | 用户明确确认，或本机 CLI 审核确认 |
+| `candidate` | 助手建议、推断、显式待审材料或被时间规则拦截的自动更正 |
+| `rejected` | 本机 CLI 明确拒绝 |
+
+这些是来源和审核状态，不是程序对客观真假的保证。模型输出不能设置审核状态，DSH 运行器没有审核工具；操作记录中的 actor 是实际数据库账号，origin 区分本机 CLI 与运行时。本版面向个人本机，不提供多用户身份认证。
+
+```sh
+jth memo send conversation.json --review
 jth memo review list
-jth memo stats
+jth memo read <entry-id>
+jth memo review approve <entry-id> --reason '已核对实际配置' --evidence 'docs/decision.md#api'
+jth memo review reject <entry-id> --reason '该建议未采用'
 ```
 
-不增加队列服务。PostgreSQL 的 `jobs` 表保存索引状态；单 worker 锁避免重复发布。失败不无限重试；下一次 Hook/`memo work` 可以恢复中断任务，明确失败使用 `retry`。Embedding 重试复用已落库正文，不重新提取。
+确认必须提供理由和依据引用；引用由操作者提供，不自动联网核验。所有决定追加到 `entry_actions`，不改写原始正文或 `basis`。确认已被替代的历史条目不会使其重新成为当前版本。
 
-本地材料在 `~/.jth/codex`：`inbox/events` 保存登记，`sources` 保留原始日志，`evidence` 保存选定证据，`records/record-errors/receipts` 保存投递状态。后台日志在 `~/.jth/worker.log`。PostgreSQL 内容通过数据库客户端或 `jth memo read` 查看，不把其数据文件当普通文档编辑。
-
-## 旧 DSH 流程
-
-仅在明确需要重放旧任务或导入历史会话时使用：
+## 体检、容量与归档
 
 ```sh
-jth memo send <submission.json> --legacy
-jth memo work --legacy
-jth memo retry <legacy-submission-id> --legacy
+jth memo doctor
+jth memo stats
+jth memo archive <entry-id> --reason '暂时移出活跃记忆'
+jth memo archive --session <session-id> --reason '该任务已结束'
+jth memo archives
+jth memo restore <entry-id> --reason '继续处理这条记忆'
 ```
 
-`JTH_DSH_PROVIDER` / `JTH_DSH_MODEL` / `JTH_DSH_TIMEOUT_MS` 只影响这条旧路径。旧失败任务保留，默认不会重新启动 DSH。模型提炼和历史质量评测资料在 `packages/memo/src/agents`。
+`doctor` 在只读一致性快照内检查来源契约、正文及向量哈希、数量、维度、完成回执、关系范围/证据和版本循环。错误退出码为 1；旧数据缺少来源时间等警告不会伪装成损坏，也不会自动修复或删除数据。
+
+`stats` 显示按范围、生命周期、审核和归档状态分组的数量，以及各表含索引/TOAST 的物理大小。按会话归档只影响 `current_task`，不会顺带归档该会话产生的长期项目规则。不会根据记录年龄自行推断任务结束。
+
+归档是可恢复的可见性变更，保留原文、来源、向量与全部关系，不释放物理空间。恢复归档不撤销拒绝、失效或更正状态。数据增长后的冷存储导出和物理清理仍需独立设计。
+
+所有命令返回 JSON。错误写入 stderr，退出码为 1。`send` 若已落库但无法启动后台进程，仍返回包含 `submission_id` 的回执、`worker.started: false` 和恢复指令；材料不会丢失，也不会被误报为已完成。
+
+## 持久化与恢复边界
+
+- PostgreSQL 同时持有记忆处理队列与记忆数据，不另设队列服务器或本地状态数据库。Codex 适配器的本地文件仅负责数据库接收之前的交接、来源保留和增量进度。
+- 后台进程串行消费同一库，队列空后退出。数据库 session advisory lock 防止并发消费，锁与全部写入共用同一连接；连接失效后旧进程无法继续提交。
+- Agent 提炼成功先保存检查点。Embedding 失败后 `retry` 复用该结果，不重复调用 Agent。
+- 整批向量、向量空间与索引回执在同一事务内提交；提交失败全部回滚。已提交索引但未更新任务状态的中断，可恢复为完成，不重复嵌入。
+- 零候选同样生成 `noop` 提交回执。失败不会无限自动重试；修复原因后显式 `retry`。
+- 异常退出后，下一次 `send` 启动的 worker 或手动 `memo work` 会恢复遗留 `running` 任务。没有常驻守护进程，因此整机重启不会自动唤醒队列。
+- 当前 API 实测批量响应重复返回 `index: 0`，无法安全据此绑定来源。本版本逐条调用 Embedding 并校验模型、数量、序号、1024 维及 float32 有限非零值，不猜测批量响应顺序。
+- 精确余弦搜索只提供关系比较候选。独立 DSH 比较阶段判断更正、补充和冲突，程序校验来源、范围、时间与审核资格后，与向量在同一事务里提交。v3 为提炼 Agent 增加原子事实和元数据约定，保留已有来源与角色规则。
+- 更正建立替代关系，旧正文和来源保留，默认查询隐藏旧版本；补充保留双方并关联；冲突保留双方依据并标记 `conflicted`。只有用户明确更正的引文能授权替代，时间更新或相似度更高都不是替代依据。
+- 仅更新冲突一方时，未决争议会跟随新版本保留。明确裁决双方时才解除冲突。若新批次只产生 conflict revision，也能把该证据关联到既有记忆；没有命中旧记忆的批内冲突仍保存在批次证据中，通过 `read --submission` 查看。
+- 比较阶段每个查询探针最多取 5 条同范围候选，去重后最多 20 条旧记忆，整体比较材料上限 384000 UTF-8 字节；超限明确失败，不截断证据。召回和模型语义判断不能保证发现所有冲突；未检出的关系不会被程序凭空建立。
+- 暂无 ANN、全库同义去重或跨空间重建索引。方案参考和后续清单见 [Rex 记忆机制参考](docs/rex-memory-reference.md)。
+- 多项目/多业务输入尚未细分每条记忆的独立范围，所以采取保守匹配：涉及 A、B 的记录只在查询同时包含 A、B 时返回，单独查 A 不混入 B。
 
 ## 验证
 
 ```sh
-pnpm build
 pnpm typecheck
 pnpm test
 pnpm test:postgres
-# 真实 API 与数据库，隔离的合成来源；完成后归档测试条目。
-node scripts/verify-inline.ts --live
 ```
 
-详细结果见 [会话内记忆重构验收](docs/inline-memory-verification.md)。真实 API 验收与原生 Hook 触发证据分别记录，不把合成事件当成原生端到端证明。
+默认测试不调用真实模型或 Embedding。PostgreSQL 测试启动独立临时数据库并在结束时关闭、删除；需要 PostgreSQL + pgvector。macOS 默认使用 `/opt/homebrew/opt/postgresql@18/bin`，其他安装位置通过 `PG_BIN` 指定。
+
+真实端到端证据见 [交付验证报告](docs/jth-delivery-verification.md)。当前技术设计见 [记忆系统设计](docs/memory-plugin-technical-design.md)。Agent 语义评测已由用户收口，本次仅验证新增 CLI、存储、恢复和调用串联。
+
+修订功能验证见 [三条规则验证报告](docs/memory-revisions-verification.md)。手动运行 `node scripts/verify-revisions.ts --live` 会使用真实模型/API，在独立测试项目中验证新增、更正、补充、冲突和裁决；`DSH_RECONCILE_LIVE=1 node --test packages/memo/src/agents/reconcile.test.ts` 验证没有明确更正时不得覆盖旧事实。
+
+v3 五项存储能力及真实 CLI 验证见 [存储增强验证报告](docs/memory-storage-v3-verification.md)。`node scripts/verify-storage-v3.ts --live` 会调用真实 DSH/Embedding，在独立测试项目中验证原子提炼、时间窗口、候选审核、归档恢复与体检。
+
+本次默认流程恢复与真实 DSH 验收见 [恢复记录](docs/dsh-restore-verification.md)。

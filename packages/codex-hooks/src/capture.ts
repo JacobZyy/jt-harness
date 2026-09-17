@@ -111,7 +111,12 @@ export async function captureStatus(config: { dataDir: string }) {
     const id = capture.event.agent_id ?? capture.event.session_id
     if (!sessions.has(id) || sessions.get(id)!.received_at < capture.received_at) sessions.set(id, capture)
   }
-  return { directory, mode: 'in-session', pending_events: inbox.length, pending_records: records.length, evidence_count: evidence.length,
+  const streams = await Promise.all((await list('streams')).map(async file => {
+    const state = await readJson(resolve(directory, 'streams', file)) as Record<string, unknown>
+    return { session_id: state.session_id, last_event: state.last_event, last_receipt: state.last_receipt,
+      message_count: Array.isArray(state.seen) ? state.seen.length : 0, pending_batch: Boolean(state.pending), error: state.error, waiting_for_transcript: state.waiting_for_transcript ?? false }
+  }))
+  return { streams, directory, mode: 'dsh', pending_events: inbox.length, pending_records: records.length, evidence_count: evidence.length,
     delivery_errors: await Promise.all(errors.map(async file => ({ submission_id: file.slice(0, -5), ...await readJson(resolve(directory, 'record-errors', file)) as object }))),
     sessions: [...sessions.values()].map(capture => ({ session_id: capture.event.agent_id ?? capture.event.session_id,
       parent_session_id: capture.event.agent_id ? capture.event.session_id : undefined, scope: capture.settings.scope,

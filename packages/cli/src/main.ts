@@ -13,7 +13,7 @@ import { MemoStorage } from '@jt-harness/memo'
 import { listManagedEntries, manageEntry, storageStats } from '@jt-harness/memo'
 import { storageDoctor } from '@jt-harness/memo'
 import { startWorker } from './background.ts'
-import { receiveRecords } from './ingest.ts'
+import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 
 const help = `jth memo <command>
 
@@ -21,10 +21,10 @@ const help = `jth memo <command>
   prepare --session <id>       为当前 Agent 返回可引用来源
   record <file.json|->         保存会话内候选，后台仅生成向量
   evidence <id> --message <id>  读取来源原文
-  send <file.json|-> --legacy   显式旧版 DSH 提炼导入
+  send <file.json|->            DSH 提取、Embedding 和入库
   codex <command>             Codex 六阶段采集：install / uninstall / status / capture
   status [submission-id]       队列、提炼和入库状态
-  work [--legacy]              默认仅处理候选投递和向量队列
+  work [--index]               默认采集会话并运行 DSH；--index 仅恢复手动候选
   retry <submission-id>        重试失败任务，复用已保存提炼
   search <query> <scope>       返回候选摘要，默认排除助手建议
   read <entry-id>              读取正文与来源证据
@@ -59,11 +59,11 @@ const optionTypes = {
   history: { type: 'boolean' },
   'as-of': { type: 'string' }, candidates: { type: 'boolean' }, archived: { type: 'boolean' }, review: { type: 'boolean' },
   reason: { type: 'string' }, evidence: { type: 'string' },
-  'timeout-ms': { type: 'string' }, legacy: { type: 'boolean' },
+  'timeout-ms': { type: 'string' }, legacy: { type: 'boolean' }, index: { type: 'boolean' },
 } as const
 
 const commandOptions: Record<string, string[]> = {
-  init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: [], work: ['legacy'], retry: ['timeout-ms', 'legacy'],
+  init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: [], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy'],
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
   read: ['submission', 'as-of'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
@@ -148,8 +148,9 @@ export async function main(root: string, args = process.argv.slice(2)) {
       case 'archive':
       case 'restore': result = await manageEntry(pool, { action: command, entry_id: operands[0], source_session_id: values.session, reason: values.reason ?? '' }); break
       case 'work': {
-        const capture = values.legacy ? undefined : await receiveRecords(pool, config)
-        const counts = values.legacy
+        if (values.legacy && values.index) throw new Error('--legacy 和 --index 不可同时使用')
+        const capture = values.index ? await receiveRecords(pool, config) : await receiveDshCaptures(pool, config, controller.signal)
+        const counts = !values.index
           ? await (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
           : await runIndexWorker(pool, file => loadConfig(root, file), controller.signal)
         if (counts.failed > 0 || (capture?.errors.length ?? 0) > 0) process.exitCode = 1
@@ -174,10 +175,11 @@ export async function main(root: string, args = process.argv.slice(2)) {
       }
       case 'send':
       case 'retry': {
-        if (command === 'send' && !values.legacy) throw new Error('原始会话导入需要显式 --legacy；日常写入请使用 memo prepare / record')
+        let indexOnly = false
         if (command === 'retry') {
           const previous = await jobStatus(pool, operands[0])
-          if ((previous.kind === 'legacy') !== Boolean(values.legacy)) throw new Error('旧提炼任务重试需 --legacy；索引任务不使用该选项')
+          indexOnly = previous.kind === 'index'
+          if (indexOnly && values.legacy) throw new Error('索引任务不使用 --legacy')
         }
         config.agent = optionsSchema.parse({ ...config.agent, model: values.model ?? config.agent.model, provider: values.provider ?? config.agent.provider })
         const receipt = command === 'send'
@@ -188,7 +190,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
           result = await jobStatus(pool, receipt.submission_id)
           if ((result as { status: string }).status !== 'complete') process.exitCode = 1
         } else if (receipt.status === 'queued' || receipt.status === 'running') {
-          try { result = { ...receipt, worker: await startWorker(root, config, Boolean(values.legacy)) } } catch (error) {
+          try { result = { ...receipt, worker: await startWorker(root, config, indexOnly) } } catch (error) {
             // Acceptance already committed. Report launch failure without losing
             // the submission ID or pretending the source was not received.
             result = { ...receipt, worker: { started: false, error: safeError(error, config), recovery: 'jth memo work' } }

@@ -1,4 +1,4 @@
-> Legacy DSH adapter。默认 `jth memo record / work` 不使用此 Agent；以下命令仅用于显式旧流程导入或评测。
+> 默认 `jth memo send / work` 使用此 DSH Agent；`record / work --index` 仅处理手动候选。
 
 # DSH 记忆提炼 Agent
 

@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
 import type { Config } from '@jt-harness/memo/config'
-import { captureSettingsSchema, captureEvent, captureStatus, configureHooks, startInstructions } from '@jt-harness/codex-hooks'
+import { captureSettingsSchema, captureEvent, captureStatus, configureHooks } from '@jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
 
 export async function codexMain(root: string, args: string[]) {
@@ -40,9 +40,6 @@ export async function codexMain(root: string, args: string[]) {
       }
       const capture = await captureEvent(JSON.parse(Buffer.concat(chunks).toString('utf8')), settings, config)
       await startWorker(root, config)
-      if (['SessionStart', 'SubagentStart'].includes(capture.event.hook_event_name)) {
-        process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: capture.event.hook_event_name, additionalContext: startInstructions(capture) } }) + '\n')
-      }
       // Hook stdout belongs to Codex's control protocol, not the memo CLI receipt.
       return
     }
