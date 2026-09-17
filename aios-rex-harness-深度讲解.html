@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AIOS 与 rex-harness 两个仓库的深度讲解：小白入门篇 + 技术实现深挖 + 关联性评价。">
+  <title>AIOS 与 rex-harness 深度讲解：从"它是干嘛的"到"它是怎么做到的"</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #dbe5f1;
+      --paper: #ffffff;
+      --soft: #f8fafc;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --purple: #7c3aed;
+      --purple-soft: #faf5ff;
+      --green: #16a34a;
+      --green-soft: #f0fdf4;
+      --orange: #ea580c;
+      --orange-soft: #fff7ed;
+      --red: #dc2626;
+      --red-soft: #fef2f2;
+      --amber-soft: #fefce8;
+      --amber-line: #fde68a;
+      --radius: 18px;
+      --shadow: 0 18px 60px rgba(15, 23, 42, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef2f9 0%, #f6f8fc 320px, #f6f8fc 100%);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      font-size: 16px;
+      line-height: 1.85;
+    }
+
+    .page {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+
+    header.hero {
+      background: linear-gradient(135deg, #101a33 0%, #1e3a8a 55%, #3b82f6 100%);
+      color: #fff;
+      border-radius: 24px;
+      padding: 44px 40px 38px;
+      box-shadow: var(--shadow);
+    }
+
+    header.hero h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      line-height: 1.4;
+      letter-spacing: .5px;
+    }
+
+    header.hero .sub {
+      color: rgba(255, 255, 255, .85);
+      font-size: 15px;
+      margin: 0 0 22px;
+    }
+
+    .hero-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .hero-tags span {
+      background: rgba(255, 255, 255, .14);
+      border: 1px solid rgba(255, 255, 255, .25);
+      border-radius: 999px;
+      padding: 3px 14px;
+      font-size: 13px;
+    }
+
+    .meta-card {
+      margin-top: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .meta-card table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .meta-card th, .meta-card td { padding: 10px 18px; border-bottom: 1px solid var(--soft); text-align: left; vertical-align: top; }
+    .meta-card th { width: 130px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+    .meta-card tr:last-child th, .meta-card tr:last-child td { border-bottom: none; }
+
+    nav.toc {
+      margin-top: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px 28px;
+    }
+
+    nav.toc h2 { margin: 0 0 12px; font-size: 17px; }
+
+    nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 40px; }
+    nav.toc li { margin: 4px 0; break-inside: avoid; }
+    nav.toc a { color: var(--blue); text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    nav.toc .toc-note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+    section { margin-top: 44px; }
+
+    .part-banner {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .part-badge {
+      flex: none;
+      width: 52px;
+      height: 52px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .part-badge.p1 { background: linear-gradient(135deg, #16a34a, #4ade80); }
+    .part-badge.p2 { background: linear-gradient(135deg, #2563eb, #60a5fa); }
+    .part-badge.p3 { background: linear-gradient(135deg, #ea580c, #fb923c); }
+    .part-badge.p4 { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
+    .part-badge.p5 { background: linear-gradient(135deg, #0f766e, #2dd4bf); }
+    .part-badge.p6 { background: linear-gradient(135deg, #475569, #94a3b8); }
+
+    .part-banner h2 { margin: 0; font-size: 24px; line-height: 1.35; }
+    .part-banner .part-desc { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+
+    h3 {
+      margin: 34px 0 12px;
+      font-size: 19px;
+      padding-left: 12px;
+      border-left: 4px solid var(--blue);
+      line-height: 1.5;
+    }
+
+    h4 { margin: 24px 0 8px; font-size: 16px; }
+
+    p { margin: 10px 0; }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px 28px;
+      margin: 16px 0;
+    }
+
+    .callout {
+      border-radius: 14px;
+      padding: 14px 20px;
+      margin: 16px 0;
+      font-size: 15px;
+      border: 1px solid;
+    }
+
+    .callout .co-title { font-weight: 700; display: block; margin-bottom: 4px; }
+
+    .callout.tip { background: var(--green-soft); border-color: #bbf7d0; }
+    .callout.warn { background: var(--amber-soft); border-color: var(--amber-line); }
+    .callout.danger { background: var(--red-soft); border-color: #fecaca; }
+    .callout.info { background: var(--blue-soft); border-color: #bfdbfe; }
+    .callout.key { background: var(--purple-soft); border-color: #e9d5ff; }
+
+    code {
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, "PingFang SC", monospace;
+      font-size: .88em;
+      background: #eef2f7;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 1px 6px;
+      word-break: break-all;
+    }
+
+    pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 14px;
+      padding: 18px 22px;
+      overflow-x: auto;
+      font-size: 13.5px;
+      line-height: 1.7;
+      margin: 14px 0;
+    }
+
+    pre code { background: none; border: none; color: inherit; padding: 0; font-size: inherit; }
+
+    pre .c { color: #94a3b8; }
+    pre .g { color: #86efac; }
+    pre .y { color: #fde047; }
+    pre .o { color: #fdba74; }
+    pre .b { color: #93c5fd; }
+
+    table.data {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      font-size: 14px;
+      margin: 14px 0;
+      box-shadow: var(--shadow);
+    }
+
+    table.data th {
+      background: #f1f5f9;
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 2px solid var(--line);
+      white-space: nowrap;
+    }
+
+    table.data td { padding: 10px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+    table.data tr:last-child td { border-bottom: none; }
+    table.data td.center, table.data th.center { text-align: center; }
+
+    /* ---------- 流程图 ---------- */
+    .flow {
+      display: flex;
+      align-items: stretch;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 18px 0;
+    }
+
+    .flow .node {
+      background: var(--paper);
+      border: 2px solid var(--blue);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 13.5px;
+      line-height: 1.5;
+      text-align: center;
+      flex: 1 1 120px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .flow .node small { color: var(--muted); font-size: 12px; }
+
+    .flow .arr {
+      align-self: center;
+      color: var(--muted);
+      font-size: 18px;
+      font-weight: 700;
+      flex: 0 0 auto;
+      padding: 0 2px;
+    }
+
+    .flow .node.blue { border-color: var(--blue); }
+    .flow .node.orange { border-color: var(--orange); }
+    .flow .node.green { border-color: var(--green); background: var(--green-soft); }
+    .flow .node.red { border-color: var(--red); background: var(--red-soft); }
+    .flow .node.purple { border-color: var(--purple); background: var(--purple-soft); }
+    .flow .node.gray { border-color: #94a3b8; background: var(--soft); }
+
+    .vflow { display: flex; flex-direction: column; align-items: stretch; margin: 18px 0; }
+    .vflow .node { text-align: center; }
+    .vflow .down { text-align: center; color: var(--muted); font-size: 16px; line-height: 1.2; padding: 2px 0; }
+
+    .branch { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+    .branch .node { flex: 1 1 160px; }
+
+    .layer-stack { display: flex; flex-direction: column; gap: 8px; margin: 18px 0; }
+    .layer {
+      border: 2px solid var(--blue);
+      border-radius: 12px;
+      background: var(--paper);
+      padding: 10px 16px;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .layer .lname { font-weight: 700; flex: 0 0 170px; font-size: 14.5px; }
+    .layer .ldesc { flex: 1 1 300px; font-size: 13.5px; color: #334155; }
+    .layer .lfile { flex-basis: 100%; font-size: 12px; color: var(--muted); font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+    .layer.hl { border-color: var(--orange); background: var(--orange-soft); }
+    .layer.dim { border-style: dashed; border-color: #94a3b8; }
+
+    .duo { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0; }
+    .duo > div {
+      flex: 1 1 340px;
+      border-radius: var(--radius);
+      border: 2px solid;
+      padding: 18px 22px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .duo .box-aios { border-color: var(--blue); }
+    .duo .box-rex { border-color: var(--orange); }
+    .duo h4 { margin-top: 0; font-size: 17px; }
+    .duo ul { margin: 8px 0 0; padding-left: 20px; }
+    .duo li { margin: 4px 0; font-size: 14.5px; }
+
+    .tree {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 14px;
+      padding: 18px 22px;
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.75;
+      overflow-x: auto;
+      margin: 14px 0;
+      white-space: pre;
+    }
+    .tree .d { color: #93c5fd; font-weight: 700; }
+    .tree .f { color: #e2e8f0; }
+    .tree .note { color: #94a3b8; }
+    .tree .hl { color: #fde047; }
+
+    .footer {
+      margin-top: 60px;
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+      color: var(--muted);
+      font-size: 13.5px;
+    }
+
+    .kbd { white-space: nowrap; }
+
+    sup.src { color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 720px) {
+      header.hero { padding: 30px 22px; }
+      nav.toc ol { columns: 1; }
+      .layer .lname { flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <h1>AIOS 与 rex-harness 深度讲解</h1>
+    <p class="sub">上半场讲给"完全没接触过的人"听：这两个东西是干嘛的、能帮你做什么。<br>下半场站到技术员视角：架构分层、每层怎么实现、AI 本地记忆是怎么做的、两个仓库如何咬合。</p>
+    <div class="hero-tags">
+      <span>AIOS v5.9.0</span>
+      <span>rex-harness v0.5.1</span>
+      <span>纯本地运行 · 数据不出机器</span>
+      <span>Node.js 24 · TypeScript + ESM JavaScript</span>
+    </div>
+  </header>
+
+  <div class="meta-card">
+    <table>
+      <tr><th>分析对象</th><td><a href="https://github.com/rexleimo/aios">github.com/rexleimo/aios</a>（commit <code>9284171</code>，2026-09-04）<br><a href="https://github.com/rexleimo/rex-harness">github.com/rexleimo/rex-harness</a>（commit <code>4434a43</code>，2026-09-02）</td></tr>
+      <tr><th>分析方式</th><td>两个仓库完整克隆到本地，逐文件走读源码（含 3 路并行深度探索：ContextDB 记忆系统 / rex 工作流内核 / aios 编排层），结论均基于代码证据</td></tr>
+      <tr><th>阅读对象</th><td>第一~二章面向零基础读者；第三~六章面向技术读者</td></tr>
+      <tr><th>日期</th><td>2026-09-05</td></tr>
+    </table>
+  </div>
+
+  <nav class="toc">
+    <h2>目录</h2>
+    <ol>
+      <li><a href="#part0">导读：30 秒版本</a></li>
+      <li><a href="#part1">小白篇：这两个东西是干嘛的</a></li>
+      <li><a href="#part2">AIOS 架构篇：一共几层、每层是什么</a></li>
+      <li><a href="#part3">rex-harness 深挖：让 AI "交作业" 的引擎</a></li>
+      <li><a href="#part4">AI 本地记忆深挖（重点）</a></li>
+      <li><a href="#part5">关联性评价与整体解读</a></li>
+      <li><a href="#part6">概念速查表</a></li>
+    </ol>
+    <p class="toc-note">提示：全文所有结论都来自源码走读，关键处标注了文件路径，可自行到仓库核对。</p>
+  </nav>
+
+  <!-- ============================================================ -->
+  <section id="part0">
+    <div class="part-banner">
+      <div class="part-badge p6">0</div>
+      <div>
+        <h2>导读：30 秒版本</h2>
+        <p class="part-desc">如果只看这一节，请看这里。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <p><strong>一句话：</strong>这两个仓库合起来，是给 AI 编码助手（Codex、Claude Code、Gemini CLI、OpenCode 等）装的一套"外挂大脑"——让你的 AI <strong>记得住事（记忆）</strong>、<strong>按规矩干活（流程）</strong>、<strong>拿证据说话（验证）</strong>，而且全部运行在你自己的电脑上，数据不出门。</p>
+      <div class="duo">
+        <div class="box-aios">
+          <h4>🏠 AIOS —— 宿主 / 总管（外层大房子）</h4>
+          <ul>
+            <li><strong>是什么：</strong>一个本地优先的 AI 编码编排系统（约 15 万行 JS/TS）。</li>
+            <li><strong>管什么：</strong>项目记忆（ContextDB）、任务路由（Workflow Policy）、多 Agent 并行（team）、可恢复长任务（harness）、安全隐私门（privacy guard）。</li>
+            <li><strong>类比：</strong>一家公司的"总部"——有档案室、有调度台、有保安，但真正按工序生产零件的"核心车间"不是它自己造的。</li>
+          </ul>
+        </div>
+        <div class="box-rex">
+          <h4>⚙️ rex-harness —— 内核 / 工序引擎（核心车间）</h4>
+          <ul>
+            <li><strong>是什么：</strong>一个可独立运行的"软件工程控制面"（约 58 个源码文件的纯函数内核）。</li>
+            <li><strong>管什么：</strong>把任何开发任务拆成"观察 → 事实 → 能力 → 工单 → 证据"的循环，一次只发一张工单，干完必须交证据，证据不合格就阻塞。</li>
+            <li><strong>类比：</strong>工厂里铁面无私的"工序卡 + 质检员"——AI 想跳步？不行。想口头汇报"我做完了"？拿测试回执来。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout key">
+        <span class="co-title">两者的关系（一句话）</span>
+        rex-harness 以 <strong>git submodule（子模块）</strong> 的形式内嵌在 AIOS 仓库里（<code>.gitmodules</code> 中登记的唯一子模块），是 AIOS 声明的"必需规划内核"；AIOS 通过<strong>直接调用它的 JS API</strong> 来复用整套工作流状态机，并在外面补上记忆、执行、安全、协作这些"水电煤"。rex 单独也能用（独立模式），接上 AIOS 后获得全部宿主增强。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part1">
+    <div class="part-banner">
+      <div class="part-badge p1">1</div>
+      <div>
+        <h2>小白篇：这两个东西到底是干嘛的</h2>
+        <p class="part-desc">不涉及任何代码细节，先把"人话版"讲明白。</p>
+      </div>
+    </div>
+
+    <h3>1.1 先说痛点：现在的 AI 编码助手有三大毛病</h3>
+    <p>你可能用过 Codex、Claude Code 这类"终端里的 AI 程序员"。它们很聪明，但有三个老大难问题（aios 文档站里专门有一篇 <code>why-agents-forget-context.md</code> 讲这个）：</p>
+    <table class="data">
+      <tr><th>毛病</th><th>具体表现</th><th>后果</th></tr>
+      <tr>
+        <td><strong>😵 失忆</strong></td>
+        <td>每开一个新会话，AI 把上周聊过的决策、改过的文件、踩过的坑全部忘光。</td>
+        <td>你不得不反复解释背景；AI 重复犯错、重复提问。</td>
+      </tr>
+      <tr>
+        <td><strong>🃏 瞎干</strong></td>
+        <td>你说"重构认证模块"，它一口气改十几个文件，跳过测试、跳过设计，一步到底。</td>
+        <td>改动太大没法审查；出问题不知道是哪一步引入的。</td>
+      </tr>
+      <tr>
+        <td><strong>🤥 不自证</strong></td>
+        <td>它说"修复完成、测试通过"，但你不知道它到底跑没跑测试——它可能只是"觉得"应该能过。</td>
+        <td>口头承诺不可信，最终还得你自己验证一遍。</td>
+      </tr>
+    </table>
+
+    <h3>1.2 AIOS：给 AI 装的"三件套外挂"</h3>
+    <p>AIOS 的 slogan 是<span class="kbd"><strong>"一句话，搞定任何复杂任务"</strong></span>。它的思路不是再造一个 AI 客户端让你换掉，而是<strong>垫在你现有客户端下面</strong>补能力。装好之后（一条安装脚本 + <code>aios init --all</code>），你照常用 codex / claude / gemini，AIOS 在底下做四件事：</p>
+
+    <div class="flow">
+      <div class="node blue">你说一句话<br><small>"重构认证模块"</small></div>
+      <div class="arr">→</div>
+      <div class="node purple">AIOS 记忆<br><small>翻出上周的相关决策</small></div>
+      <div class="arr">→</div>
+      <div class="node orange">rex 工序引擎<br><small>拆成一步一步的工单</small></div>
+      <div class="arr">→</div>
+      <div class="node blue">AIOS 执行<br><small>单干 / 并行 / 长任务</small></div>
+      <div class="arr">→</div>
+      <div class="node green">验证证据<br><small>测试回执、审查记录</small></div>
+      <div class="arr">→</div>
+      <div class="node green">交付<br><small>经过验证的结果</small></div>
+    </div>
+
+    <p>对应到功能清单：</p>
+    <table class="data">
+      <tr><th>能力</th><th>命令</th><th>人话解释</th></tr>
+      <tr><td><strong>项目记忆</strong></td><td><code>aios memo add / search</code>、ContextDB</td><td>给项目配一个"本地档案室"：重要的决策记下来，下次自动翻出来用。</td></tr>
+      <tr><td><strong>任务路由</strong></td><td><code>aios plan auto-gate</code></td><td>判断这句话是小问题（直接答）、小改动（加门禁）还是大活（先立计划），防止杀鸡用牛刀。</td></tr>
+      <tr><td><strong>多 Agent 并行</strong></td><td><code>aios team 3:codex "..."</code></td><td>把活拆给 3 个 AI 同时干，各管各的文件，最后汇总。</td></tr>
+      <tr><td><strong>可恢复长任务</strong></td><td><code>aios harness run --objective ...</code></td><td>让 AI 跑通宵大任务：每一步存档（检查点），断了可以接着跑，还在独立的 git worktree 里干，不弄脏你的工作区。</td></tr>
+      <tr><td><strong>验证与安全</strong></td><td><code>aios doctor</code>、privacy guard</td><td>体检安装状态；敏感文件（密钥等）在分享给模型前先脱敏。</td></tr>
+    </table>
+
+    <div class="callout tip">
+      <span class="co-title">"你的数据保持本地"是认真的吗？</span>
+      是的。README 原话："你的数据保持本地。一切——记忆、日志、验证——都在你的机器上运行。什么都不离开。" 所有记忆都是你项目目录里的普通文件（<code>.aios/</code> 文件夹），可以直接用文本编辑器打开、用 git 备份、不想要了直接删。唯一出网的流量是模型 API 本身（这跟你平时用 AI 客户端一样）。
+    </div>
+
+    <h3>1.3 rex-harness：那个"铁面无私的质检员"</h3>
+    <p>rex-harness 解决的是上面第二、第三个毛病。它的核心循环用大白话讲就是：</p>
+    <div class="card">
+      <p><strong>第 1 步 · 看情况：</strong>收集"观察"（Observation），比如"测试挂了""用户要改行为"，推导出"事实"（Fact）。每条事实都必须附上来源证据，<strong>AI 拍脑袋的直觉不算数</strong>。</p>
+      <p><strong>第 2 步 · 发一张工单：</strong>根据事实，从 13 种标准工序（需求澄清、设计、规划、测试设计、TDD、调试、最小实施、代码审查……）里挑<strong>正好一个</strong>，生成一张工单（Provider Command），告诉 AI："现在只做这一件事，做完要交这些材料。"</p>
+      <p><strong>第 3 步 · 验收：</strong>AI 干完交回"证据"（Evidence）。rex 检查：证据类型对不对？引用是不是真的？测试回执的退出码是不是符合预期（红测试必须非零退出，绿测试必须零退出）？<strong>不合格就阻塞，绝不放行。</strong></p>
+      <p><strong>第 4 步 · 循环：</strong>验收通过，发下一张工单；所有工序完成，任务才算"完成"。<strong>"完成"这个词由 rex 定义，不由 AI 嘴上说。</strong></p>
+    </div>
+    <div class="callout info">
+      <span class="co-title">一个防作弊的巧思</span>
+      每张工单都带一个<strong>一次性令牌（commandToken）</strong>。AI 提交证据时必须带上当前令牌；证据被接受后令牌立刻换新，旧的作废。这样 AI 就不能用"上次任务的旧回复"来冒充本次的交付——类似银行转账的动态口令。
+    </div>
+
+    <h3>1.4 它俩怎么配合：总部与核心车间</h3>
+    <p>把两个仓库放在一起看，分工非常清楚：</p>
+    <table class="data">
+      <tr><th>问题</th><th class="center">rex-harness（内核）</th><th class="center">AIOS（宿主）</th></tr>
+      <tr><td>活该怎么一步步干（工序）？</td><td class="center">✅ 它定</td><td class="center">照办，无权改</td></tr>
+      <tr><td>AI 说"做完了"，怎么验证？</td><td class="center">✅ 它验</td><td class="center">复用它的验收逻辑</td></tr>
+      <tr><td>谁来真正运行模型、跑命令？</td><td class="center">❌ 不管</td><td class="center">✅ 它调</td></tr>
+      <tr><td>跨会话记忆、交接文档？</td><td class="center">❌ 没有</td><td class="center">✅ ContextDB / memo</td></tr>
+      <tr><td>并行多 Agent、断点续跑？</td><td class="center">❌ 没有</td><td class="center">✅ team / harness</td></tr>
+      <tr><td>隐私脱敏、安装体检、审计？</td><td class="center">❌ 没有</td><td class="center">✅ doctor / privacy guard</td></tr>
+    </table>
+    <p>物理上，rex-harness 整个仓库作为子模块放在 <code>aios/rex-harness/</code> 里；AIOS 的安装脚本甚至会在子模块缺失时自动执行 <code>git submodule update --init</code> 把它拉下来。rex-harness 自己的 README 也明说："它可以单独辅助各类 AI Agent；接入 AIOS 后，再获得模型执行、ContextDB、Team、长任务恢复和安全治理等宿主增强。"</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part2">
+    <div class="part-banner">
+      <div class="part-badge p2">2</div>
+      <div>
+        <h2>AIOS 架构篇：一共几层、每层是什么、怎么实现</h2>
+        <p class="part-desc">先看运行时的 7 层，再深入你最关心的"数据分几层"。</p>
+      </div>
+    </div>
+
+    <h3>2.1 运行时分层：自上而下 7 层</h3>
+    <p>官方架构文档（<code>docs-site/architecture.md</code>）给出的分层与源码完全对得上。下面每一层都标注了实际实现文件：</p>
+
+    <div class="layer-stack">
+      <div class="layer"><span class="lname">① 客户端入口层</span><span class="ldesc">把"项目指引 + 路由提示"写进各客户端的原生配置面：往 CLAUDE.md / AGENTS.md / GEMINI.md 里写标记注释，把技能（Skill）投影到各客户端的技能目录。</span><span class="lfile">scripts/lib/native/emitters/*.mjs（每个客户端一个 emitter）· client-sources/ · scripts/contextdb-shell.zsh</span></div>
+      <div class="layer"><span class="lname">② 启动桥接层</span><span class="ldesc">决定"包一层启动"还是"直接放行"，并在一次性运行里自动完成：建会话 → 记录用户输入 → 跑真正的 AI 客户端 → 记录回复 → 自动写检查点。</span><span class="lfile">scripts/contextdb-shell-bridge.mjs · scripts/ctx-agent.mjs → scripts/lib/ctx-agent-core/run.mjs</span></div>
+      <div class="layer hl"><span class="lname">③ ContextDB 记忆层</span><span class="ldesc">本地项目记忆库：会话、检查点、memo、上下文包的存储与检索（第四章详解）。</span><span class="lfile">mcp-server/src/contextdb/（TypeScript：core.ts / sqlite.ts / semantic.ts / hygiene.ts）+ 磁盘目录 .aios/context-db/</span></div>
+      <div class="layer"><span class="lname">④ 工作流策略层</span><span class="ldesc">给每个请求定风险等级：noop（无事）/ direct（直接答）/ guarded（小改动+门禁）/ planned（大活先立计划）/ blocked（信息不足）。纯函数实现，不猜语义。</span><span class="lfile">scripts/lib/planning/workflow-policy.mjs · auto-gate.mjs · cli.mjs</span></div>
+      <div class="layer"><span class="lname">⑤ 运营调度层</span><span class="ldesc">真正派活的层：team（多 Agent 并行）、harness（可恢复长任务）、orchestrate（分阶段 DAG）、HUD（状态仪表盘）。</span><span class="lfile">scripts/aios.mjs（入口仅 34 行）→ scripts/lib/cli/dispatch.mjs → lib/lifecycle/、lib/harness/</span></div>
+      <div class="layer dim"><span class="lname">⑥ 浏览器运行时</span><span class="ldesc">通过 CDP 协议驱动 Chrome 做"读→做→验证"的网页操作循环（旧 Playwright MCP 保留为兼容路径）。</span><span class="lfile">scripts/run-browser-use-mcp.sh · config/browser-profiles.json</span></div>
+      <div class="layer dim"><span class="lname">⑦ RL 研究层</span><span class="ldesc">隔离的多环境强化学习实验场（训练/评测脚本），官方明确说明它不属于生产路径，只是研究证据。</span><span class="lfile">scripts/lib/rl-core/ · rl-shell-v1/ · rl-mixed-v1/</span></div>
+    </div>
+
+    <div class="callout warn">
+      <span class="co-title">第④层的实现哲学值得单独说</span>
+      workflow-policy.mjs 源码里写了一段"北极星原则"注释：本模块<strong>绝不用关键词正则从自由文本里猜</strong>"用户想干嘛"，只认两类输入——显式协议前缀（比如 <code>/plan:</code>、<code>/team:</code> 这样的斜杠命令，以及中英文的确认词）和调用方<strong>显式声明的意图</strong>（explicitIntent）。语义判断交给 AI，记账和路由交给确定性代码。这个"模型管语义、代码管簿记"的原则贯穿整个 AIOS。
+    </div>
+
+    <h3>2.2 数据分层：你问的"哪几层数据"——答案在这里</h3>
+    <p>AIOS 的所有状态都落在项目根目录的 <code>.aios/</code> 下。它可以分成<strong>四大区、六个抽象层次</strong>：</p>
+
+    <div class="tree"><span class="d">.aios/</span>                                <span class="note">← AIOS 状态根目录（可整目录备份/删除）</span>
+├── <span class="d">context-db/</span>                        <span class="note">← 会话记忆区（ContextDB）</span>
+│   ├── <span class="hl">index.json</span>                     <span class="note">L-1 源注册表：告诉客户端"这里有哪些记忆源可查"</span>
+│   ├── <span class="d">sessions/&lt;会话id&gt;/</span>            <span class="note">L0~L2 原始数据层（唯一的"事实源"）</span>
+│   │   ├── meta.json                 <span class="note">会话元信息：目标/标签/状态</span>
+│   │   ├── <span class="hl">l0-summary.md</span>             <span class="note">L0 摘要层：这段会话干了啥（每次 checkpoint 重写）</span>
+│   │   ├── <span class="hl">l1-checkpoints.jsonl</span>     <span class="note">L1 检查点层：一条行=一次存档（进度/下一步/产物）</span>
+│   │   ├── <span class="hl">l2-events.jsonl</span>          <span class="note">L2 原始事件层：用户说了啥、AI 答了啥，逐条流水账</span>
+│   │   ├── state.json                <span class="note">游标：读到第几条事件/检查点了</span>
+│   │   ├── continuity.json + .md     <span class="note">连续性摘要：改过哪些文件、接下来干嘛</span>
+│   │   └── handoff.json              <span class="note">交接包：给"下一个接手的会话"看的</span>
+│   ├── <span class="d">index/</span>                        <span class="note">L-2 派生索引层（可以随时删掉重建的缓存）</span>
+│   │   ├── sessions/events/checkpoints .jsonl   <span class="note">倒排索引行</span>
+│   │   └── <span class="hl">context.db</span>                <span class="note">SQLite 库 + FTS5 全文索引（注释明说"可重建缓存"）</span>
+│   └── <span class="d">exports/</span>                      <span class="note">L-3 导出层：人工挑选打包的上下文包（带 sha256 清单）</span>
+├── <span class="d">memo/</span>                              <span class="note">← 持久决策记忆区（比会话更"长期"）</span>
+│   ├── file/events.jsonl             <span class="note">默认后端：只追加的事件流（一行一条 memo）</span>
+│   ├── split/                        <span class="note">可选后端：一条 memo 一个 JSON 文件 + pinned 置顶</span>
+│   ├── derived/                      <span class="note">检索用派生层（可重建）</span>
+│   ├── dream/                        <span class="note">记忆生命周期：提案/治理/归档（老记忆"睡一觉"再决定去留）</span>
+│   └── memory-recall-feedback.jsonl  <span class="note">反馈层：记录"哪条记忆真的被用过"</span>
+├── <span class="d">offload/</span>                           <span class="note">大体积工具输出外置区（画布索引 + 节点引用）</span>
+└── <span class="d">tasks/ workspace/</span>                 <span class="note">任务与工作区状态</span>
+
+<span class="d">.rex-harness/</span>                         <span class="note">← rex 侧的独立状态（在 rex 独立模式下使用）</span>
+├── workflows/                        <span class="note">work-item 索引（sha256 文件名）</span>
+├── activations/                      <span class="note">完整工作流状态 JSON（规范状态）</span>
+├── evidence/                         <span class="note">只追加的 NDJSON 证据日志</span>
+└── receipts/                         <span class="note">命令执行回执（退出码 + 输出哈希）</span></div>
+
+    <p>把上面的物理结构抽象一下，AIOS 的数据一共是这<strong>六个逻辑层次</strong>：</p>
+    <table class="data">
+      <tr><th class="center">层</th><th>名字</th><th>内容</th><th>特点</th></tr>
+      <tr><td class="center"><strong>L0</strong></td><td>摘要层</td><td><code>l0-summary.md</code></td><td>一屏读完"这段会话干了什么"，每次存档被重写</td></tr>
+      <tr><td class="center"><strong>L1</strong></td><td>检查点层</td><td><code>l1-checkpoints.jsonl</code></td><td>结构化进度条：目标/状态/下一步/产物，长任务恢复靠它</td></tr>
+      <tr><td class="center"><strong>L2</strong></td><td>原始事件层</td><td><code>l2-events.jsonl</code></td><td>逐条流水账，最完整也最大；检索的主要对象</td></tr>
+      <tr><td class="center"><strong>L-1</strong></td><td>注册表层</td><td><code>index.json</code>（源注册表）</td><td>只存"指针"：有哪些记忆源、多大（~1KB 级）、优先级，<strong>不复制内容</strong></td></tr>
+      <tr><td class="center"><strong>L-2</strong></td><td>索引层</td><td><code>index/*.jsonl</code> + SQLite FTS5</td><td>纯派生缓存，删了可用 <code>index:rebuild</code> 从 L0-L2 全量重建</td></tr>
+      <tr><td class="center"><strong>L-3</strong></td><td>导出层</td><td><code>exports/*-context.md</code></td><td>按 token 预算精选打包的上下文包，附 sha256 清单防篡改</td></tr>
+    </table>
+
+    <div class="callout key">
+      <span class="co-title">这套分层最重要的设计原则</span>
+      <strong>原始层（L0/L1/L2 + memo JSONL）是唯一事实源，一切索引都是可丢弃、可重建的缓存。</strong>SQLite 只做全文检索加速（FTS5 虚拟表），源码注释原话是 "SQLite sidecar is a rebuildable cache; canonical session files already persisted"。这意味着：记忆不怕索引损坏、不怕换工具——所有数据都是人类可读的 Markdown 和 JSONL。
+    </div>
+
+    <h3>2.3 每层怎么实现：三个有代表性的机制</h3>
+
+    <h4>机制一：写检查点 = 一次写七处（事务式簿记）</h4>
+    <p>当一次会话到达存档点，<code>core.ts</code> 里的 <code>writeCheckpoint()</code> 会原子地完成一整套动作：</p>
+    <div class="vflow">
+      <div class="node blue">追加一条到 l1-checkpoints.jsonl</div><div class="down">↓</div>
+      <div class="node blue">重写 l0-summary.md（摘要刷新）</div><div class="down">↓</div>
+      <div class="node blue">重写 continuity.json / continuity-summary.md</div><div class="down">↓</div>
+      <div class="node blue">更新 meta.json 状态 + state.json 游标</div><div class="down">↓</div>
+      <div class="node blue">追加到 index/checkpoints.jsonl（索引层同步）</div><div class="down">↓</div>
+      <div class="node blue">SQLite + FTS5 upsert（检索缓存同步）</div>
+    </div>
+    <p>并发安全靠会话级文件锁（<code>.session.lock</code>，10 秒超时）。长任务（<code>aios harness run</code>）每轮迭代都会调这个检查点，所以断电、崩溃、Ctrl-C 之后都能从 L1 检查点续跑。</p>
+
+    <h4>机制二：三种执行模式（team / orchestrate / harness）</h4>
+    <table class="data">
+      <tr><th>模式</th><th>适用</th><th>实现要点</th></tr>
+      <tr>
+        <td><strong>aios team</strong><br>多 Agent 并行</td>
+        <td>几个互不依赖的活</td>
+        <td>源码注释明说"team 命令最终复用 orchestrate"——它只是把"3 个 codex"翻译成 3 个本地派发参数。每个并行任务通过 <code>phase-rex.mjs</code> 绑定各自的 rex activation 和 <code>ownedPathPrefixes</code>（文件所有权），<strong>禁止两个 Agent 同时改同一个文件</strong>。实时并行需显式开启 <code>LIVE_EXECUTION_ENV=1</code>，默认是安全的 dry-run。</td>
+      </tr>
+      <tr>
+        <td><strong>aios orchestrate</strong><br>分阶段 DAG</td>
+        <td>有依赖关系的多阶段工程</td>
+        <td>内置 4 种蓝图（feature / bugfix / refactor / security）× 4 种角色（planner / implementer / reviewer / security-reviewer），生成带 <code>dependsOn</code> 的任务图；4 种运行时（本地演练 / 真实子代理 / 群聊 / 仿真）可切换；跑之前先过质量门（quality gate + doctor）。</td>
+      </tr>
+      <tr>
+        <td><strong>aios harness run</strong><br>可恢复长任务</td>
+        <td>一个明确的长期目标（如"今晚完成发布交接"）</td>
+        <td>三件套：① 每轮迭代写检查点到 ContextDB；② <code>git worktree add --detach</code> 在临时目录开独立工作区，不弄脏你的分支；③ 状态机 running / done / blocked / failed / backoff / human-gate / stopped——遇到需要人的决策就停在 human-gate，断线可 resume。结束时若有未合并改动或异常状态，worktree 会被保留供你检查。</td>
+      </tr>
+    </table>
+
+    <h4>机制三：init / doctor——装得上，更要查得出问题</h4>
+    <p><code>aios init --all</code> 按固定顺序做八件事：确保 rex 子模块就绪 → 用 <code>which</code> 探测你装了哪些客户端 → 建工作区（注册表、技能索引、常驻"工作区记忆会话"）→ 征求同意后装压缩工具链（RTK / Caveman / Headroom）→ 往 CLAUDE.md / AGENTS.md / GEMINI.md 写指针标记 → 写客户端钩子配置 → 迁移 MCP 配置 → 投影 rex 技能。<code>aios doctor</code> 则是 366 行的聚合体检：rex 子模块是否存在（<strong>硬性必需，缺了直接报错</strong>）、浏览器 MCP、ContextDB 技能、token 纪律、安全配置等，支持 <code>--fix --dry-run</code> 先演习再修复。</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part3">
+    <div class="part-banner">
+      <div class="part-badge p3">3</div>
+      <div>
+        <h2>rex-harness 深挖：让 AI"交作业"的引擎</h2>
+        <p class="part-desc">约 58 个源码文件的纯函数内核，每一处细节都指向同一个目标：AI 的自由行动必须收敛为"可验证的单步循环"。</p>
+      </div>
+    </div>
+
+    <h3>3.1 领域模型：一条严格的数据链</h3>
+    <div class="flow">
+      <div class="node gray">Observation<br><small>观察：发生了什么（14 种）</small></div>
+      <div class="arr">→</div>
+      <div class="node blue">Fact<br><small>事实：可追溯的结论（26 种）</small></div>
+      <div class="arr">→</div>
+      <div class="node purple">Capability<br><small>能力：选正好一个（13 种）</small></div>
+      <div class="arr">→</div>
+      <div class="node orange">Command<br><small>工单：当前唯一要做的事</small></div>
+      <div class="arr">→</div>
+      <div class="node green">Evidence<br><small>证据：类型化交付物</small></div>
+    </div>
+    <p>每一环的数据结构都在 <code>src/domain/</code> 下，全部是<strong>冻结对象（Object.freeze）</strong>，字段多一个少一个都直接抛异常：</p>
+    <table class="data">
+      <tr><th>概念</th><th>定义文件</th><th>关键字段与硬规则</th></tr>
+      <tr>
+        <td><strong>Observation</strong></td>
+        <td><code>domain/observation-kinds.mjs</code></td>
+        <td>14 种枚举（如 <code>test.regression-observed</code>、<code>change.behavior-requested</code>）；只允许 <code>{kind, evidenceRefs, changeRisk}</code> 三个字段；风险维度（changeKind / blastRadius / externalEffect / reversibility / uncertainty）只有一种观察允许携带。</td>
+      </tr>
+      <tr>
+        <td><strong>Fact</strong></td>
+        <td><code>domain/fact-kinds.mjs</code> · <code>facts.mjs</code></td>
+        <td>26 种枚举（如 <code>explicit-intent</code>、<code>honest-red-candidate</code>、<code>execution-failed</code>）；<strong>每条 Fact 必须带 <code>evidenceRefs</code></strong>——源码注释明说：这是为了"避免使用无法追溯的模型直觉作为路由理由"。</td>
+      </tr>
+      <tr>
+        <td><strong>Capability</strong></td>
+        <td><code>domain/capability-ids.mjs</code> · <code>capabilities/*/capability.mjs</code></td>
+        <td>13 个稳定 ID（需求澄清 / 设计 / 规划 / 测试设计 / TDD / 严格 TDD / 加固 / 根因调试 / 最小实施 / 执行 / 规范审查 / 专项审查 / 寻路）。每个能力自带：优先级、激活条件（<code>activate(facts)</code> 纯函数）和内部工序（recipe）。</td>
+      </tr>
+      <tr>
+        <td><strong>Activation</strong></td>
+        <td><code>domain/activations.mjs</code></td>
+        <td>一次能力激活的完整状态：<code>{stageIndex, stageId, completedStages[], evidence[]}</code>。注释强调"只保存可恢复的语义状态"。</td>
+      </tr>
+      <tr>
+        <td><strong>Command</strong></td>
+        <td><code>domain/commands.mjs</code></td>
+        <td>当前唯一工单：<code>{provider, objective, expectedEvidence[]}</code>——白纸黑字告诉 AI"交什么"。</td>
+      </tr>
+      <tr>
+        <td><strong>Evidence</strong></td>
+        <td><code>domain/evidence.mjs</code></td>
+        <td><code>{kind, refs[]}</code>；每个引用必须带协议前缀（如 <code>artifact:requirements</code>、<code>receipt:xxx</code>）；同 kind 的引用可累积合并。</td>
+      </tr>
+    </table>
+
+    <h3>3.2 两层状态机：外层选工序，内层推进度</h3>
+    <p>rex 有两个嵌套的状态机，这也是它架构文档里最核心的一节：</p>
+
+    <div class="card">
+      <h4 style="margin-top:0">外层 · 软件工作流运行时（<code>workflows/software-workflow-runtime.mjs</code>）</h4>
+      <p>决定"下一个该干哪道工序"。每完成一道工序，它基于<strong>更新后的事实集 + 已完成工序 + 证据</strong>重新选择下一个能力（而不是按写死的剧本走）。三个著名的阻塞规则：</p>
+      <ul>
+        <li>意图未知 → <code>blocked: explicit-intent-unknown</code>（不让 AI 猜任务）</li>
+        <li>想审查但没有 diff 证据 → <code>blocked: review-requires-diff</code></li>
+        <li>想调试但没有可复现的失败 → <code>blocked: debug-requires-reproducible-failure</code></li>
+      </ul>
+      <p>选择算法是确定性的：过滤掉已完成和未启用的能力，按<strong>优先级降序 + ID 字典序</strong>取第一个。没有任何随机性、没有 LLM 调用。</p>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">内层 · 能力内部工序状态机（<code>application/advance-activation.mjs</code>）</h4>
+      <p>以 TDD 为例，内部是经典三段（但每段都有独立的证据门）：</p>
+      <div class="flow">
+        <div class="node red">red 红阶段<br><small>先写失败测试<br>要求：失败测试已观察<br>+ 失败原因已记录</small></div>
+        <div class="arr">→</div>
+        <div class="node green">green 绿阶段<br><small>最小实现转绿<br>要求：通过测试已观察<br>+ 实现差异已记录</small></div>
+        <div class="arr">→</div>
+        <div class="node blue">refactor 重构阶段<br><small>清理不改性<br>要求：重构检查已记录<br>+ 测试差异已复审</small></div>
+      </div>
+      <p>两层的衔接规则：内层没走完 → 外层保持 active，给当前阶段重发工单；内层走完 → 外层重新基于事实选下一道工序；测试可行性决策为 blocked → 触发 <strong>replan</strong>（重新规划）而不是硬闯。另有一条防重复的等价规则：TDD/严格TDD/加固完成即视为"测试设计"与"实施执行"已满足，避免同一片代码被实施两遍。</p>
+    </div>
+
+    <h3>3.3 防造假机制：五层门禁，全部 fail-closed</h3>
+    <p>这是 rex-harness 最精彩的部分。AI 提交的证据要过五道关，任何一道不过都是<strong>阻塞而非报错继续</strong>（fail-closed 哲学：宁可停下来等人，绝不带着问题往下走）：</p>
+    <table class="data">
+      <tr><th class="center">#</th><th>门禁</th><th>实现（<code>application/validate-command-evidence.mjs</code> 等）</th></tr>
+      <tr><td class="center"><strong>1</strong></td><td>种类白名单</td><td>只能提交<strong>当前工单声明过</strong>的证据种类（<code>expectedEvidence</code>）。想交"计划外的证据"蒙混？直接拒绝。</td></tr>
+      <tr><td class="center"><strong>2</strong></td><td>引用格式</td><td>必须匹配协议前缀正则 <code>/^[a-z][a-z0-9+.-]*:.+/iu</code>，且命中 <code>/artifact-or-command-ref|placeholder|真实存在|todo|tbd/iu</code> 的占位词直接判无效——<strong>连中文占位词"真实存在"都被防了</strong>。</td></tr>
+      <tr><td class="center"><strong>3</strong></td><td>执行回执</td><td>关键证据必须附 <code>receipt:</code> 引用：红测试（<code>failing-test-observed</code>）的回执退出码必须<strong>非零</strong>，绿测试（<code>passing-test-observed</code>）必须<strong>为零</strong>。回执由 rex 亲自 spawn 命令捕获（<code>rex-harness receipt -- &lt;命令&gt;</code>），记录退出码、绝对工作目录、stdout/stderr 的 sha256，还要核对该命令与决策声明的场景命令逐项一致。</td></tr>
+      <tr><td class="center"><strong>4</strong></td><td>一次性令牌</td><td>每次成功写盘前给工单盖新 <code>randomUUID()</code> 令牌；提交证据必须带当前令牌，验收通过即换新，<strong>旧令牌重放立即被拒</strong>。被拒时保留旧令牌让调用方原身份重试——细节考虑得很周到。</td></tr>
+      <tr><td class="center"><strong>5</strong></td><td>状态自愈为零</td><td>所有写盘走"临时文件 + rename"原子替换；读盘时校验 schema 和命令契约；<strong>状态损坏不会猜测性修复</strong>，而是阻塞并要求人显式处理。证据日志（NDJSON）只追加、永不覆盖，审计可回放。</td></tr>
+    </table>
+
+    <h3>3.4 SKILL.md：rex 是怎么"指挥"AI 的</h3>
+    <p>rex 不注入任何提示词黑盒，而是把行为规范写成客户端原生可发现的技能文档（<code>skill-sources/</code>）。编排入口 <code>rex-workflow/SKILL.md</code> 的第一步是一张<strong>真值表</strong>：</p>
+    <pre><code><span class="c"># rex-workflow 给 AI 的指令（节选意译）</span>
+收到 rex-harness 返回的紧凑对象后，按真值表行动：
+  status=active   且 command 非空            <span class="g">→ 只执行这张工单</span>
+  status=completed 且 command=null 且无缺失  <span class="g">→ 停止，任务完成</span>
+  其他任何组合                            <span class="y">→ 状态损坏：fail-closed。
+                                            不执行残留 Provider、
+                                            不声明完成、不猜测补造证据</span></code></pre>
+    <p>几个代表性 Provider 技能的"诚实性条款"：</p>
+    <ul>
+      <li><strong>rex-tdd：</strong>"语法错误、环境问题导致的失败不算合法的 RED"；"删测试、削弱断言来换 GREEN"被明令禁止；不得用实现反推测试。</li>
+      <li><strong>rex-code-review：</strong>双轴独立审查（规范轴 + 规格轴，各 ≤400 字），每条发现必须带位置、证据、严重度；专项审查按风险域从 5 名内置评审专家（安全 / 正确性与数据 / API 兼容 / 性能与并发 / 前端可访问性）里<strong>按证据选恰好一名</strong>——"没有风险证据时拒绝角色表演"。</li>
+      <li><strong>评测集：</strong>每个技能目录带 <code>evals/evals.json</code>，不仅有标准问答，还有 <code>pressures</code> 压力场景（deadline 诱导、权威诱导、沉没成本诱导）——专门测试 AI 会不会在压力下作弊。</li>
+    </ul>
+
+    <h3>3.5 CLI 与安装投影：面向模型的"低带宽协议"</h3>
+    <p>rex 的 CLI 默认只返回一个叫 <code>rex.cli.workflow-command.v1</code> 的紧凑对象——只有当前状态、工单、缺失证据清单和一次性令牌，<strong>完整历史留在磁盘里不进上下文</strong>（省 token 的设计）。需要诊断时加 <code>--full</code>。而 <code>rex-harness init --client claude</code> 会把技能投影到对应客户端目录（<code>.claude/skills</code> 等），安全机制相当完备：</p>
+    <ul>
+      <li><strong>内容寻址：</strong>对投影目录做规范化 sha256，写入 <code>.rex-projection.json</code> 标记 + 投影历史；</li>
+      <li><strong>决策表：</strong>目标不存在→安装；内容相同→跳过；内容不同但在历史中→更新；否则→<strong>conflict 报错退出（绝不覆盖你的同名用户文件）</strong>；</li>
+      <li><strong>防呆：</strong>拒绝符号链接、拒绝路径逃逸、staged copy + 备份 + 失败回滚，连"上次安装中断的残留"都有专门恢复逻辑。</li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part4">
+    <div class="part-banner">
+      <div class="part-badge p4">4</div>
+      <div>
+        <h2>AI 本地记忆深挖（重点章节）</h2>
+        <p class="part-desc">你特别问的"AI 本地化记忆"：AIOS 在这块下了最大的功夫，设计上有几个非常独特的点。</p>
+      </div>
+    </div>
+
+    <h3>4.1 核心理念：拉取式（pull-based），不是灌注式</h3>
+    <p>大多数"AI 记忆"产品的做法是把历史记录<strong>塞进</strong>每次对话（prompt 注入）。AIOS 明确反对这条路——<code>AGENTS.md</code> 里写着 "Runtime context is pull-based: do not inject session history"。它的模型是：</p>
+    <div class="flow">
+      <div class="node gray">客户端启动<br><small>读到项目指引里的指针</small></div>
+      <div class="arr">→</div>
+      <div class="node blue">index.json 注册表<br><small>"有哪些记忆源可查"</small></div>
+      <div class="arr">→</div>
+      <div class="node purple">Agent 按需检索<br><small>只拉当前任务需要的</small></div>
+      <div class="arr">→</div>
+      <div class="node green">带着最少够用的上下文干活</div>
+    </div>
+    <p>为什么要这样？因为<strong>全量注入记忆的方案会随着历史增长而失控</strong>：上下文窗口被旧流水账占满，token 费用飙升，AI 反而更容易被噪音带偏。拉取式把"记什么"和"何时用"解耦了——记忆可以无限长，每次使用的成本恒定。</p>
+
+    <h3>4.2 记忆的三条读取链路</h3>
+    <table class="data">
+      <tr><th>链路</th><th>适用客户端</th><th>工作方式</th></tr>
+      <tr>
+        <td><strong>① 钩子自动注入</strong></td>
+        <td>Claude Code、Codex（支持 hook 的）</td>
+        <td>你每发一条消息，<code>user-prompt-submit</code> 钩子先跑统一搜索（<code>unified-search.mjs</code>），把命中的记忆以 <code>## AIOS RECALL</code> 块注入本轮上下文。预算极克制：<strong>最多 6 条、总共 2000 字符、单条 320 字符</strong>。查询还有"梯子"：先用原句搜，搜不到就降级到内容词，再降级到 token 二元组——逐级放宽，保证不空手而归也不一次灌满。</td>
+      </tr>
+      <tr>
+        <td><strong>② MCP 工具调用</strong></td>
+        <td>Gemini、Hermes 等无 hook 的客户端</td>
+        <td>v5.9.0 新增 <code>aios-memory</code> MCP 服务器（stdio JSON-RPC），提供三个工具：<code>memory_recall</code>（检索）、<code>memory_write</code>（落 memo）、<code>memory_checkpoint</code>（存档）。配套一份"记忆触发契约"写进各客户端指引：<strong>新会话先 recall、说"继续"先 recall、验证出结论立刻 write、声称做完之前必须 checkpoint</strong>。</td>
+      </tr>
+      <tr>
+        <td><strong>③ 显式 CLI / 技能指令</strong></td>
+        <td>所有客户端的兜底</td>
+        <td>Agent 通过技能指令学会标准检索姿势：<code>contextdb search</code> 找事件 → <code>timeline</code> 看时序 → <code>event:get</code> 钻取单条；外置大输出则 <code>canvas show</code> 看任务图 → <code>refs grep</code> 窄搜 → <code>refs read</code> 只读需要的节点。</td>
+      </tr>
+    </table>
+
+    <h3>4.3 最独特的设计：记忆使用反馈闭环</h3>
+    <div class="callout key">
+      <span class="co-title">这是我见过的比较少见的记忆设计</span>
+      AIOS 不满足于"召回记忆"，它还追踪<strong>"召回的记忆到底有没有被用上"</strong>。流程是：钩子注入记忆时，同时要求 AI 在回复末尾附一个声明块 <code>&lt;!--memory: verified=yes, useful=&lt;eventId&gt;...--&gt;</code>；系统解析这个声明，<strong>只有 AI 明确声明"确实用过且有用"的记忆</strong>才记入 <code>memory-recall-feedback.jsonl</code>；下次检索时，被证实有用的记忆获得排序加权（feedback boost）。这相当于给记忆系统装了一个"实用性回流"机制——记忆不是越多越好，而是越被验证有用越靠前。
+    </div>
+    <p>写入侧同样讲究"模型决策、代码执行"：<code>memo</code> 技能的原则是 <em>"you decide, the harness executes"</em>——什么值得记、什么该被新结论替代（supersede），由 AI 语义判断；文件锁、追加写、版本链、权限校验，全部由确定性代码完成。memo 还支持 <strong>scope 分级</strong>：<code>project_shared</code>（全客户端共享）和 <code>agent_private</code>（仅本 Agent 可见，且 30 天后自动隐藏但不删除——只隐不删，留了反悔余地）。</p>
+
+    <h3>4.4 一个必须坦白的真相：没有任何向量检索</h3>
+    <div class="callout warn">
+      <span class="co-title">如果你以为"AI 记忆 = embedding + 向量数据库"，这里会颠覆认知</span>
+      全仓库<strong>找不到任何 embedding 模型或向量库</strong>。源码注释直说了这一点："there is <strong>no vector backend yet</strong>, but documents intent for future sqlite-vec integration"。唯一的"语义"组件是一个可选开关（<code>CONTEXTDB_SEMANTIC=1</code>）下的 token 重排器：Jaccard 相似度 0.6 + 包含度 0.4 的<strong>词元重叠打分</strong>。
+    </div>
+    <p>那检索靠什么？纯关键词/token 统计，但做得相当细（<code>memo/storage/query.mjs</code>）：</p>
+    <ul>
+      <li><strong>分词：</strong>拉丁词按词切；中文用 ICU 的 <code>Intl.Segmenter</code> 分词，并加 CJK 二元组（bigram）兜底——处理"认证"vs"登录验证"这类部分匹配；</li>
+      <li><strong>打分：</strong>子串命中 +2/+1 分，token 覆盖率 ×4/×2，加反馈加权；命中率阈值按查询长度自适应（≤2 词需 100% 命中，≤6 词需 50%，更长 34%）；</li>
+      <li><strong>过滤链：</strong>时间有效性（被替代的旧记忆不出现）→ 可见性（private 记忆别人看不到）→ dream 归档过滤 → 预算裁剪。</li>
+    </ul>
+    <p>为什么不用向量？源码里有一句原则性注释：<strong>"语义判断是 LLM 的工作，绝不是手工维护的对照表"</strong>——检索层只负责把候选粗筛出来，"这两条记忆说的是不是一回事"这种语义理解交给已经读完候选的 AI 自己判断。这是一个明确的工程取舍：用零成本、零依赖、完全离线、结果可解释的词法检索，换取 embedding 模型的部署成本和不可解释性。<strong>代价</strong>是：换一种说法、跨语言改述的同义记忆可能漏召回——这是它未来明确预留 sqlite-vec 的原因。</p>
+
+    <h3>4.5 记忆的"压缩"与"外置"：token 预算的艺术</h3>
+    <p>当确实需要导出一段历史时（context pack），AIOS 的选材逻辑是个三层漏斗：</p>
+    <div class="vflow">
+      <div class="node blue">组装候选：L0 摘要 + 最新检查点 + 连续性摘要 + 外置画布 + 过滤去重后的事件</div>
+      <div class="down">↓</div>
+      <div class="node purple">smart 召回策略：最近 50~180 条的池子里，一半保最新，另一半按"与目标+检查点的 token 重叠度"打分挑选（72 小时半衰期加权——越久远的记忆权重越低）</div>
+      <div class="down">↓</div>
+      <div class="node green">token 策略：先无损压缩文本 → 不够就按优先级丢事件 → 最后逐条截断；全程统计"压缩了多少/丢了多少/截断了多少"写进导出报告</div>
+    </div>
+    <p>配套的还有一套五层 token 纪律体系（决策门 Ponytail → shell 输出过滤 RTK → 简洁风格 Caveman → 显式压缩 MCP Headroom → <strong>ContextDB 按需召回替代全量注入</strong>），以及一个很实用的 <strong>offload 机制</strong>：超过约 2KB 的工具输出（比如一次巨大的网页抓取）不进上下文，落到 <code>.aios/offload/</code>，上下文里只留一个 Mermaid 任务画布和节点 ID，AI 需要时用 <code>refs grep</code> 窄搜、<code>refs read</code> 精读——"省下来的是未来的上下文空间"。</p>
+
+    <h3>4.6 隐私与记忆的交界：在"读出端"设卡</h3>
+    <p>privacy guard 的配置在 <code>~/.rexcil/privacy-guard.json</code>，检测两类风险：敏感路径（glob 规则）和敏感内容（私钥、<code>sk-</code>、<code>AKIA</code>、<code>ghp_</code>、JWT 等特征）。脱敏支持三种模式：<code>regex</code>（纯正则）、<code>ollama</code>（本地小模型判断，失败自动回退正则）、<code>hybrid</code>（混合）。关键的设计决策是：<strong>写入记忆时不强制脱敏</strong>（保持原始层 append-only 的完整性），而是在<strong>读出/分享路径上拦截</strong>——skill 里明确要求"节点可能含密钥时，先过 <code>aios privacy read</code> 再分享"，子代理的执行上下文也会先过脱敏器。这个取舍和它"原始层不可篡改"的原则是自洽的。</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part5">
+    <div class="part-banner">
+      <div class="part-badge p5">5</div>
+      <div>
+        <h2>关联性评价与整体解读</h2>
+        <p class="part-desc">把两仓库放回一起，给出我的整体判断。</p>
+      </div>
+    </div>
+
+    <h3>5.1 关系全景：一个刻意做薄的边界</h3>
+    <div class="flow">
+      <div class="node blue">AIOS 宿主<br><small>记忆 · 执行 · 安全 · 协作</small></div>
+      <div class="arr">⇄</div>
+      <div class="node orange" style="border-width:3px">唯一适配边界<br><small>rex-harness-adapter.mjs<br>只调 JS API，不解析 CLI</small></div>
+      <div class="arr">⇄</div>
+      <div class="node orange">rex-harness 内核<br><small>Fact→Capability→Evidence 状态机</small></div>
+    </div>
+    <p>集成方式有四个值得记录的事实：</p>
+    <ul>
+      <li><strong>物理形态：</strong>rex-harness 是 AIOS 仓库唯一的 git submodule（<code>.gitmodules</code> 注明用 HTTPS URL 是为了 CI 无 SSH key 也能拉取）；release 安装包已内置固定版本，用户不需要装第二个 npm 包。</li>
+      <li><strong>代码边界：</strong>AIOS 侧的 <code>scripts/lib/workflows/rex-harness-adapter.mjs</code> 文件头自述"AIOS 与 rex-harness 的唯一适配边界"，直接相对路径 import rex 的 <code>src/index.mjs</code>，调用 <code>startSoftwareWorkflow / advanceSoftwareWorkflow / evaluateSoftwareRequest</code> 等——<strong>不走 CLI、不解析 stdout</strong>，因为 JS API 保留完整 Workflow 对象，而 CLI 紧凑协议是留给"外部 Agent 直连"场景的。</li>
+      <li><strong>反向声明：</strong>rex 侧的 <code>src/aios/manifest.mjs</code> 只输出可序列化的声明式清单（剥离函数闭包），注释写道"宿主跨越此边界消费的是声明，而不是可执行闭包"——两边都在刻意防止对方伸手指进来。</li>
+      <li><strong>纪律约束：</strong>rex 的架构文档用一张"所有权表"明确禁止宿主做的事：AIOS <strong>不得重选 Capability、不得重写证据契约、不得重排阶段、不得绕过状态机</strong>；适配层甚至不能替换 Provider。"软件工作流的唯一运行时事实源是 software-workflow-runtime.mjs" 这句话在两个仓库里反复出现。</li>
+    </ul>
+
+    <h3>5.2 设计哲学评价：四个我认为最值得学习的决策</h3>
+
+    <div class="card">
+      <h4 style="margin-top:0">① "模型管语义，代码管簿记"——贯穿始终的分工律</h4>
+      <p> workflow-policy 拒绝从自然语言猜意图、rex 的 Capability 选择是纯函数查表、memo 的写入由模型决策而持久化由代码执行。凡是需要"理解"的地方交给模型，凡是需要"可靠"的地方交给确定性代码，且两者之间的接口是<strong>显式声明</strong>而不是猜测。这直接回答了"AI 系统怎么做到可测试"：因为核心状态机不依赖模型，<code>npm test</code> 就能把 58 个内核文件全部测透（rex 的测试甚至覆盖了"token 重放被拒""损坏状态 fail-closed"这类对抗场景）。</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">② "证据优先于结果"——把信任问题变成工程问题</h4>
+      <p>AI 最大的可靠性问题不是"不会做"，而是"说做了其实没做"。rex 的回应是不接受任何口头汇报：测试回执必须由 rex 亲自 spawn 并核对退出码（红=非零、绿=零）、stdout/stderr 存哈希防篡改、命令与声明的场景逐项比对、一次性令牌防重放。这本质上是把"信任"从人际承诺降级为<strong>密码学级别的簿记</strong>。配套的 fail-closed 哲学（损坏不修复、只阻塞；宁可停机也不带病运行）在两个仓库里高度一致。</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">③ "文件优先，数据库只是缓存"——本地优先的彻底执行</h4>
+      <p>所有状态都是人类可读的 Markdown/JSONL：会话是 <code>l2-events.jsonl</code>，决策是 <code>memo/file/events.jsonl</code>，证据是 NDJSON 日志。SQLite + FTS5 只是可重建的加速层。好处是三重的：数据可随时用 git 备份/同步、格式永不锁定（换工具迁移零成本）、调试时直接 <code>cat</code>。配合"原始层只追加、派生层可丢弃"的分层，这套系统的数据健壮性远超一般脚本项目。</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">④ "拉取式记忆 + 使用反馈"——对记忆系统的清醒认知</h4>
+      <p>大多数记忆产品在堆"存得多"，AIOS 在抠"用得准"：6 条/2000 字符的注入预算、查询降级梯子、offload 外置、smart 召回的 72 小时半衰期，以及那个少见的<strong>声明式反馈闭环</strong>（只有被 AI 证实"真的用过"的记忆才获得排序加权）。这套设计承认了一个行业普遍回避的事实：记忆系统的瓶颈不在存储，而在<strong>每次调用的注意力预算</strong>。</p>
+    </div>
+
+    <h3>5.3 局限与风险：同样值得知道的另一面</h3>
+    <table class="data">
+      <tr><th>局限</th><th>说明</th></tr>
+      <tr>
+        <td><strong>词法检索的天花板</strong></td>
+        <td>没有 embedding 意味着"换了说法的记忆"可能搜不到（比如当初记的是"登录鉴权"，你问"认证"能否命中取决于 bigram 重叠度）。仓库已预留 sqlite-vec 意图，但今天它就是关键词级的。好在"语义判断交给 LLM"的兜底 + 查询降级梯子缓解了大半。</td>
+      </tr>
+      <tr>
+        <td><strong>显式协议的上手成本</strong></td>
+        <td>"绝不猜语义"意味着输入端必须守协议：意图要显式声明、确认要走确认词。用户随手一句模糊的话可能得到 <code>blocked: explicit-intent-unknown</code>。对新手有摩擦，换来的是行为的可预测性——这是取舍，不是缺陷，但需要适应。</td>
+      </tr>
+      <tr>
+        <td><strong>规模与复杂度</strong></td>
+        <td>AIOS 的 scripts/ 有约 1080 个文件、15 万行，虽然"薄壳入口 + 门面 + 子域拆分"的组织相当整齐，但理解全貌的成本不低；文档与代码偶有漂移（例如 rex README 说 <code>.rex-harness/</code> 有三个子目录，代码实际是四个——<code>receipts/</code> 是后加的）。</td>
+      </tr>
+      <tr>
+        <td><strong>客户端能力不均匀</strong></td>
+        <td>hook 自动注入只在部分客户端可用（codex/opencode/hermes/grok 靠桥接或 MCP 兜底），不同客户端的体验深度不同，官方也只能让你"以 doctor 的本机结果为准"。</td>
+      </tr>
+      <tr>
+        <td><strong>submodule 的双刃剑</strong></td>
+        <td>固定版本保证了可复现，但普通 clone（不带 <code>--recurse-submodules</code>）会缺失内核——好在这点被 init/doctor 的自动拉取和明确报错兜住了。</td>
+      </tr>
+    </table>
+
+    <h3>5.4 总评</h3>
+    <div class="callout key">
+      <span class="co-title">一句话总评</span>
+      这是一对<strong>"把 AI 当成一个能力很强但需要被制度约束的员工"来设计的系统</strong>：rex-harness 证明了 AI 工作流的核心可以做成纯函数状态机 + 类型化证据门（可测试、可审计、防作弊），AIOS 证明了在它之上可以叠出完整的本地优先操作系统（记忆、并行、恢复、隐私），而两者用"唯一适配边界 + 所有权纪律"维持了教科书级的关注点分离。如果你想研究"AI Agent 的可靠性工程"，rex 的防造假五门禁和 AIOS 的拉取式记忆反馈闭环，是我认为最值得逐行精读的两处。
+    </div>
+    <p>用官方架构文档里的 "Graph Engine" 视角收个尾，两个仓库各自的角色一目了然：</p>
+    <table class="data">
+      <tr><th>图引擎概念</th><th>由谁实现</th></tr>
+      <tr><td>节点（每个节点一个带契约的循环）</td><td>rex 的 13 个 Capability：Fact → 能力 → 证据</td></tr>
+      <tr><td>边（按检查结果路由）</td><td>AIOS Workflow Policy 的 direct / guarded / planned 分流</td></tr>
+      <tr><td>共享状态</td><td>AIOS ContextDB 项目记忆（拉取式）</td></tr>
+      <tr><td>扇出/扇入</td><td>AIOS team 并行 Agent + 汇聚屏障</td></tr>
+      <tr><td>隔离</td><td>AIOS harness 的 git worktree</td></tr>
+      <tr><td>失败路由</td><td>rex 的证据门 + blocked 终态（重规划/升级/停止）</td></tr>
+    </table>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part6">
+    <div class="part-banner">
+      <div class="part-badge p6">6</div>
+      <div>
+        <h2>概念速查表</h2>
+        <p class="part-desc">按拼音/逻辑分组，遇到不认识的词回来查。</p>
+      </div>
+    </div>
+
+    <table class="data">
+      <tr><th>术语</th><th>解释</th><th>所属</th></tr>
+      <tr><td><strong>ContextDB</strong></td><td>AIOS 的本地项目记忆库：会话事件、检查点、memo 的存储与检索，落盘在 <code>.aios/context-db/</code></td><td>AIOS</td></tr>
+      <tr><td><strong>memo</strong></td><td>持久项目决策的记事系统（append-only JSONL），支持共享/私有两种可见域</td><td>AIOS</td></tr>
+      <tr><td><strong>L0 / L1 / L2</strong></td><td>会话数据三层：摘要 / 检查点 / 原始事件；原始层是唯一事实源</td><td>AIOS</td></tr>
+      <tr><td><strong>pull-based（拉取式）</strong></td><td>Agent 按需检索记忆，而不是每次把全量历史塞进对话</td><td>AIOS</td></tr>
+      <tr><td><strong>Workflow Policy</strong></td><td>任务风险路由器：noop / direct / guarded / planned / blocked 五种处置</td><td>AIOS</td></tr>
+      <tr><td><strong>team / orchestrate / harness</strong></td><td>三种执行模式：多 Agent 并行 / 分阶段 DAG / 可恢复长任务（worktree 隔离 + 检查点）</td><td>AIOS</td></tr>
+      <tr><td><strong>HUD</strong></td><td>状态仪表盘，读 ContextDB 会话文件渲染并行任务进度</td><td>AIOS</td></tr>
+      <tr><td><strong>privacy guard</strong></td><td>隐私门：敏感路径/内容检测 + 正则或本地模型脱敏，在读出/分享路径拦截</td><td>AIOS</td></tr>
+      <tr><td><strong>offload</strong></td><td>大体积工具输出外置机制：上下文只留画布索引 + 节点引用，按需精读</td><td>AIOS</td></tr>
+      <tr><td><strong>Fact（事实）</strong></td><td>从观察推导、必须带证据引用的结论（26 种），是路由的唯一依据</td><td>rex</td></tr>
+      <tr><td><strong>Capability（能力）</strong></td><td>13 种标准工序（需求/设计/规划/测试/TDD/调试/实施/审查/寻路），一次只激活一个</td><td>rex</td></tr>
+      <tr><td><strong>Activation</strong></td><td>一次能力激活的状态对象：当前阶段、已完成阶段、已收集证据</td><td>rex</td></tr>
+      <tr><td><strong>Provider Command（工单）</strong></td><td>发给 AI 的当前唯一指令：目标 + 期望证据清单，带一次性令牌</td><td>rex</td></tr>
+      <tr><td><strong>Evidence（证据）</strong></td><td>类型化交付物 <code>{kind, refs[]}</code>，引用必须带协议前缀，占位词直接判无效</td><td>rex</td></tr>
+      <tr><td><strong>receipt（回执）</strong></td><td>rex 亲自执行命令捕获的回执：退出码、工作目录、输出 sha256</td><td>rex</td></tr>
+      <tr><td><strong>commandToken</strong></td><td>一次性工单令牌：验收通过即轮换，旧令牌重放被拒</td><td>rex</td></tr>
+      <tr><td><strong>fail-closed</strong></td><td>失败关闭原则：状态损坏/证据不合格时阻塞等人，绝不猜测修复或带病运行</td><td>两者通用</td></tr>
+      <tr><td><strong>submodule（子模块）</strong></td><td>git 机制：把一个仓库作为另一个仓库的固定版本依赖内嵌；rex-harness 之于 AIOS 即是</td><td>关系</td></tr>
+      <tr><td><strong>adapter（适配层）</strong></td><td><code>rex-harness-adapter.mjs</code>：AIOS 与 rex 的唯一代码边界，只调 JS API</td><td>关系</td></tr>
+    </table>
+
+    <div class="footer">
+      <p><strong>来源：</strong>本文档全部结论基于两仓库源码走读（aios commit <code>9284171</code> / rex-harness commit <code>4434a43</code>），关键文件路径已在文中标注，可自行核对。官方文档站：<a href="https://cli.rexai.top/zh/">cli.rexai.top/zh</a>。</p>
+      <p><strong>方法说明：</strong>三个并行深读任务分别覆盖 ContextDB 记忆系统（mcp-server/src/contextdb、scripts/lib/memo、search、contextdb）、rex 工作流内核（src/domain、application、workflows、standalone、clients、skill-sources）与 AIOS 编排层（scripts/lib/planning、lifecycle、harness、native、workflows）。</p>
+      <p><em>AIOS 与 rex-harness 深度讲解 · 2026-09-05</em></p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

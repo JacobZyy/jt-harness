@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "submission_id": "jth-cli-example-1",
+  "source": { "provider": "codex", "session_id": "jth-cli-verification" },
+  "scope": { "project_ids": ["jth-cli-verification"], "business_ids": [] },
+  "messages": [
+    {
+      "message_id": "u1",
+      "role": "user",
+      "text": "这个验证项目采用独立本地 jth CLI，以 TypeScript 直接调用 DSH SDK，不做 HTTP 服务，也不并入 jt-cli。"
+    },
+    {
+      "message_id": "u2",
+      "role": "user",
+      "text": "这个验证项目的 Embedding 凭据保存在本地 .env，必须由 .gitignore 排除；部署时再单独配置。"
+    },
+    {
+      "message_id": "a1",
+      "role": "assistant",
+      "text": "对于这个验证项目，建议未来增加记忆冲突管理页面。这只是建议，尚未获得用户确认。"
+    }
+  ]
+}

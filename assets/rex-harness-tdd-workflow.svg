@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 930" width="1200" height="930" role="img" aria-labelledby="diagram-title diagram-desc" data-generator="fireworks-tech-graph" data-schema-version="1" data-style-id="1" data-visual-theme="Flat Icon" data-diagram-type="flowchart" data-quality-profile="showcase" data-max-bends-per-edge="2" data-max-total-bends="32" data-max-route-stretch="4" data-max-bridged-crossings="0" data-min-node-gap="40" data-min-container-gutter="20" data-min-label-clearance="4" data-min-segment-length="16">
+  <title id="diagram-title">核心 TDD Workflow</title>
+  <desc id="diagram-desc">Rex Harness 测试设计、可测试性判断、风险分级 TDD 与审查流程。</desc>
+  <defs>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#ea580c"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <style>
+      text { font-family: 'Helvetica Neue', Helvetica, Arial, 'PingFang SC', 'Microsoft YaHei', 'Microsoft JhengHei', 'SimHei', sans-serif; }
+      .title { font-size: 30px; font-weight: 700; fill: #111827; }
+      .subtitle { font-size: 14px; font-weight: 500; fill: #6b7280; }
+      .section { font-size: 13px; font-weight: 700; fill: #2563eb; letter-spacing: 1.2px; }
+      .node-title { font-size: 16px; font-weight: 700; fill: #111827; }
+      .node-sub { font-size: 12px; font-weight: 500; fill: #6b7280; }
+      .node-type { font-size: 10px; font-weight: 700; fill: #94a3b8; letter-spacing: 1px; }
+      .edge-label { font-size: 12px; font-weight: 600; fill: #4b5563; }
+      .legend { font-size: 12px; font-weight: 500; fill: #6b7280; }
+      .footer { font-size: 11px; font-weight: 500; fill: #94a3b8; }
+    </style>
+  </defs>
+  <rect data-graph-role="background" width="1200" height="930" fill="#ffffff"/>
+  <g data-graph-role="reserved" data-reserved-kind="title" data-graph-bounds="30,20,1170,92">
+    <text x="600.0" y="52" text-anchor="middle" class="title">核心 TDD Workflow</text>
+    <text x="600.0" y="78" text-anchor="middle" class="subtitle">先确认测试范围与诚实 RED；再选择 TDD、Strict TDD、Hardening 或 Replan</text>
+  </g>
+  <g id="container-scope" data-graph-role="container" data-container-id="scope" data-graph-bounds="40,100,1160,280">
+    <rect x="40" y="100" width="1120" height="180" rx="16" fill="none" stroke="#dbe5f1" stroke-width="1.4" stroke-dasharray="6 5"/>
+    <text x="58" y="125" class="section">SCOPE AND TESTABILITY</text>
+    <rect data-graph-role="reserved" data-reserved-kind="container-header" x="48" y="106" width="220" height="30" fill="none" stroke="none"/>
+  </g>
+  <g id="container-delivery" data-graph-role="container" data-container-id="delivery" data-graph-bounds="40,310,1160,700">
+    <rect x="40" y="310" width="1120" height="390" rx="16" fill="none" stroke="#dbe5f1" stroke-width="1.4" stroke-dasharray="6 5"/>
+    <text x="58" y="335" class="section">DELIVERY BRANCHES</text>
+    <rect data-graph-role="reserved" data-reserved-kind="container-header" x="48" y="316" width="220" height="30" fill="none" stroke="none"/>
+  </g>
+  <g id="container-assurance" data-graph-role="container" data-container-id="assurance" data-graph-bounds="40,720,1160,850">
+    <rect x="40" y="720" width="1120" height="130" rx="16" fill="none" stroke="#dbe5f1" stroke-width="1.4" stroke-dasharray="6 5"/>
+    <text x="58" y="745" class="section">ASSURANCE</text>
+    <rect data-graph-role="reserved" data-reserved-kind="container-header" x="48" y="726" width="220" height="30" fill="none" stroke="none"/>
+  </g>
+  <path id="edge-behavior-design" data-graph-role="edge" data-edge-id="behavior-design" data-source="behavior" data-target="test-design" data-flow="purple" data-bends="0" data-bridges="" d="M 220,200 L 280,200" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-purple)"/>
+  <path id="edge-design-decision" data-graph-role="edge" data-edge-id="design-decision" data-source="test-design" data-target="testability" data-flow="purple" data-bends="0" data-bridges="" d="M 490,200 L 560,200" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-purple)"/>
+  <path id="edge-decision-risk" data-graph-role="edge" data-edge-id="decision-risk" data-source="testability" data-target="risk" data-flow="orange" data-bends="2" data-bridges="" d="M 680,260 L 680,295 L 620,295 L 620,350" fill="none" stroke="#ea580c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <path id="edge-decision-hardening" data-graph-role="edge" data-edge-id="decision-hardening" data-source="testability" data-target="hardening" data-flow="blue" data-bends="2" data-bridges="" d="M 610,260 L 610,350 L 175,350 L 175,370" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-blue)"/>
+  <path id="edge-decision-blocked" data-graph-role="edge" data-edge-id="decision-blocked" data-source="testability" data-target="blocked" data-flow="red" data-bends="1" data-bridges="" d="M 800,200 L 1060,200 L 1060,370" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-red)"/>
+  <path id="edge-risk-tdd" data-graph-role="edge" data-edge-id="risk-tdd" data-source="risk" data-target="tdd" data-flow="orange" data-bends="1" data-bridges="" d="M 500,410 L 455,410 L 455,550" fill="none" stroke="#ea580c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <path id="edge-risk-strict" data-graph-role="edge" data-edge-id="risk-strict" data-source="risk" data-target="strict-tdd" data-flow="red" data-bends="1" data-bridges="" d="M 740,410 L 820,410 L 820,550" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-red)"/>
+  <path id="edge-hardening-review" data-graph-role="edge" data-edge-id="hardening-review" data-source="hardening" data-target="hardening-review" data-flow="green" data-bends="0" data-bridges="" d="M 280,470 L 280,760" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-green)"/>
+  <path id="edge-tdd-review" data-graph-role="edge" data-edge-id="tdd-review" data-source="tdd" data-target="tdd-review" data-flow="green" data-bends="0" data-bridges="" d="M 455,660 L 455,760" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-green)"/>
+  <path id="edge-strict-review" data-graph-role="edge" data-edge-id="strict-review" data-source="strict-tdd" data-target="strict-review" data-flow="green" data-bends="0" data-bridges="" d="M 820,660 L 820,760" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-green)"/>
+  <path id="edge-blocked-replan" data-graph-role="edge" data-edge-id="blocked-replan" data-source="blocked" data-target="replan" data-flow="red" data-bends="0" data-bridges="" d="M 1060,460 L 1060,550" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-red)"/>
+  <g id="node-behavior" data-graph-role="node" data-node-id="behavior" data-semantic-role="rect" data-graph-bounds="60,165,220,235">
+    <rect x="60" y="165" width="160" height="70" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.8"/>
+    <text x="140.0" y="183" text-anchor="middle" class="node-type">TRIGGER</text>
+    <text x="140.0" y="200.0" text-anchor="middle" class="node-title" font-size="14">Behavior Change</text>
+    <text x="140.0" y="222.0" text-anchor="middle" class="node-sub">new observable outcome</text>
+  </g>
+  <g id="node-test-design" data-graph-role="node" data-node-id="test-design" data-semantic-role="rect" data-graph-bounds="280,155,490,245">
+    <rect x="280" y="155" width="210" height="90" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+    <text x="385.0" y="173" text-anchor="middle" class="node-type">MANDATORY GATE</text>
+    <text x="385.0" y="200.0" text-anchor="middle" class="node-title" font-size="16">Test Design</text>
+    <text x="385.0" y="222.0" text-anchor="middle" class="node-sub">scope · acceptance · public seam</text>
+  </g>
+  <g id="node-testability" data-graph-role="node" data-node-id="testability" data-semantic-role="decision" data-graph-bounds="560,140,800,260">
+    <polygon points="680.0,140 800,200.0 680.0,260 560,200.0" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
+    <text x="680.0" y="196.0" text-anchor="middle" class="node-title" font-size="14">Testability Decision</text>
+    <text x="680.0" y="217.0" text-anchor="middle" class="node-sub">receipt-backed</text>
+  </g>
+  <g id="node-hardening" data-graph-role="node" data-node-id="hardening" data-semantic-role="rect" data-graph-bounds="60,370,290,470">
+    <rect x="60" y="370" width="230" height="100" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+    <text x="175.0" y="388" text-anchor="middle" class="node-type">ZERO-EXIT BASELINE</text>
+    <text x="175.0" y="420.0" text-anchor="middle" class="node-title" font-size="15">Hardening</text>
+    <text x="175.0" y="442.0" text-anchor="middle" class="node-sub">baseline · harden · verify invariants</text>
+  </g>
+  <g id="node-risk" data-graph-role="node" data-node-id="risk" data-semantic-role="decision" data-graph-bounds="500,350,740,470">
+    <polygon points="620.0,350 740,410.0 620.0,470 500,410.0" fill="#fff7ed" stroke="#ea580c" stroke-width="1.8"/>
+    <text x="620.0" y="406.0" text-anchor="middle" class="node-title" font-size="14">Elevated Risk?</text>
+    <text x="620.0" y="427.0" text-anchor="middle" class="node-sub">external · system · irreversible</text>
+  </g>
+  <g id="node-blocked" data-graph-role="node" data-node-id="blocked" data-semantic-role="rect" data-graph-bounds="980,370,1140,460">
+    <rect x="980" y="370" width="160" height="90" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/>
+    <text x="1060.0" y="388" text-anchor="middle" class="node-type">NO HONEST TEST</text>
+    <text x="1060.0" y="415.0" text-anchor="middle" class="node-title" font-size="16">Blocked</text>
+    <text x="1060.0" y="437.0" text-anchor="middle" class="node-sub">acceptance not observable</text>
+  </g>
+  <g id="node-tdd" data-graph-role="node" data-node-id="tdd" data-semantic-role="double_rect" data-graph-bounds="350,550,560,660">
+    <rect x="350" y="550" width="210" height="110" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+    <rect x="356" y="556" width="198" height="98" rx="7" fill="none" stroke="#16a34a" stroke-width="1.1" opacity="0.62"/>
+    <text x="455.0" y="568" text-anchor="middle" class="node-type">ORDINARY RISK</text>
+    <text x="455.0" y="605.0" text-anchor="middle" class="node-title" font-size="16">TDD</text>
+    <text x="455.0" y="627.0" text-anchor="middle" class="node-sub">RED · GREEN · REFACTOR</text>
+  </g>
+  <g id="node-strict-tdd" data-graph-role="node" data-node-id="strict-tdd" data-semantic-role="double_rect" data-graph-bounds="700,550,940,660">
+    <rect x="700" y="550" width="240" height="110" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="2"/>
+    <rect x="706" y="556" width="228" height="98" rx="7" fill="none" stroke="#dc2626" stroke-width="1.1" opacity="0.62"/>
+    <text x="820.0" y="568" text-anchor="middle" class="node-type">ELEVATED RISK</text>
+    <text x="820.0" y="605.0" text-anchor="middle" class="node-title" font-size="17">Strict TDD</text>
+    <text x="820.0" y="627.0" text-anchor="middle" class="node-sub">RED · GREEN · REFACTOR · probe</text>
+  </g>
+  <g id="node-replan" data-graph-role="node" data-node-id="replan" data-semantic-role="rect" data-graph-bounds="980,550,1140,640">
+    <rect x="980" y="550" width="160" height="90" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/>
+    <text x="1060.0" y="568" text-anchor="middle" class="node-type">TERMINAL</text>
+    <text x="1060.0" y="595.0" text-anchor="middle" class="node-title" font-size="14">Replan Gate</text>
+    <text x="1060.0" y="617.0" text-anchor="middle" class="node-sub">current workflow stops</text>
+  </g>
+  <g id="node-hardening-review" data-graph-role="node" data-node-id="hardening-review" data-semantic-role="rect" data-graph-bounds="60,760,290,830">
+    <rect x="60" y="760" width="230" height="70" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.8"/>
+    <text x="175.0" y="778" text-anchor="middle" class="node-type">DIFF READY</text>
+    <text x="175.0" y="795.0" text-anchor="middle" class="node-title" font-size="16">Review · Completed</text>
+    <text x="175.0" y="817.0" text-anchor="middle" class="node-sub">invariants · standards/spec</text>
+  </g>
+  <g id="node-tdd-review" data-graph-role="node" data-node-id="tdd-review" data-semantic-role="rect" data-graph-bounds="350,760,560,830">
+    <rect x="350" y="760" width="210" height="70" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.8"/>
+    <text x="455.0" y="778" text-anchor="middle" class="node-type">DIFF READY</text>
+    <text x="455.0" y="795.0" text-anchor="middle" class="node-title" font-size="16">Review · Completed</text>
+    <text x="455.0" y="817.0" text-anchor="middle" class="node-sub">test diff · standards/spec</text>
+  </g>
+  <g id="node-strict-review" data-graph-role="node" data-node-id="strict-review" data-semantic-role="rect" data-graph-bounds="700,760,940,830">
+    <rect x="700" y="760" width="240" height="70" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.8"/>
+    <text x="820.0" y="778" text-anchor="middle" class="node-type">DIFF READY</text>
+    <text x="820.0" y="795.0" text-anchor="middle" class="node-title" font-size="16">Review · Completed</text>
+    <text x="820.0" y="817.0" text-anchor="middle" class="node-sub">specialist optional · standards/spec</text>
+  </g>
+  <g id="label-behavior-design" data-graph-role="label" data-owner="behavior-design" data-graph-bounds="224.0,167,276.0,189">
+    <rect x="224.0" y="167" width="52" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="250" y="182" text-anchor="middle" class="edge-label">must</text>
+  </g>
+  <g id="label-decision-risk" data-graph-role="label" data-owner="decision-risk" data-graph-bounds="692.0,291,804.0,313">
+    <rect x="692.0" y="291" width="112" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="748" y="306" text-anchor="middle" class="edge-label">behavior-delta</text>
+  </g>
+  <g id="label-decision-hardening" data-graph-role="label" data-owner="decision-hardening" data-graph-bounds="347.0,260,493.0,282">
+    <rect x="347.0" y="260" width="146" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="420" y="275" text-anchor="middle" class="edge-label">behavior preserving</text>
+  </g>
+  <g id="label-decision-blocked" data-graph-role="label" data-owner="decision-blocked" data-graph-bounds="895.0,167,965.0,189">
+    <rect x="895.0" y="167" width="70" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="930" y="182" text-anchor="middle" class="edge-label">blocked</text>
+  </g>
+  <g id="label-risk-tdd" data-graph-role="label" data-owner="risk-tdd" data-graph-bounds="418.0,495,492.0,517">
+    <rect x="418.0" y="495" width="74" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="455" y="510" text-anchor="middle" class="edge-label">ordinary</text>
+  </g>
+  <g id="label-risk-strict" data-graph-role="label" data-owner="risk-strict" data-graph-bounds="782.0,495,858.0,517">
+    <rect x="782.0" y="495" width="76" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="820" y="510" text-anchor="middle" class="edge-label">elevated</text>
+  </g>
+  <g id="label-hardening-review" data-graph-role="label" data-owner="hardening-review" data-graph-bounds="184.0,600,316.0,622">
+    <rect x="184.0" y="600" width="132" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="250" y="615" text-anchor="middle" class="edge-label">zero-exit baseline</text>
+  </g>
+  <g id="label-tdd-review" data-graph-role="label" data-owner="tdd-review" data-graph-bounds="468.0,696,552.0,718">
+    <rect x="468.0" y="696" width="84" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="510" y="711" text-anchor="middle" class="edge-label">diff ready</text>
+  </g>
+  <g id="label-strict-review" data-graph-role="label" data-owner="strict-review" data-graph-bounds="833.0,696,917.0,718">
+    <rect x="833.0" y="696" width="84" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="875" y="711" text-anchor="middle" class="edge-label">diff ready</text>
+  </g>
+  <g id="label-blocked-replan" data-graph-role="label" data-owner="blocked-replan" data-graph-bounds="1081.0,490,1129.0,512">
+    <rect x="1081.0" y="490" width="48" height="22" rx="6" fill="#ffffff" opacity="0.96"/>
+    <text x="1105" y="505" text-anchor="middle" class="edge-label">stop</text>
+  </g>
+  <g data-graph-role="legend" data-graph-bounds="40,862,1160,900">
+    <line data-graph-role="decoration" x1="50" y1="880" x2="80" y2="880" stroke="#7c3aed" stroke-width="2.2" marker-end="url(#arrow-purple)"/>
+    <text data-graph-role="decoration" x="90" y="884" class="legend">mandatory gate</text>
+    <line data-graph-role="decoration" x1="272" y1="880" x2="302" y2="880" stroke="#ea580c" stroke-width="2.2" marker-end="url(#arrow-orange)"/>
+    <text data-graph-role="decoration" x="312" y="884" class="legend">decision</text>
+    <line data-graph-role="decoration" x1="416" y1="880" x2="446" y2="880" stroke="#2563eb" stroke-width="2.2" marker-end="url(#arrow-blue)"/>
+    <text data-graph-role="decoration" x="456" y="884" class="legend">hardening</text>
+    <line data-graph-role="decoration" x1="573" y1="880" x2="603" y2="880" stroke="#dc2626" stroke-width="2.2" marker-end="url(#arrow-red)"/>
+    <text data-graph-role="decoration" x="613" y="884" class="legend">high risk / blocked</text>
+    <line data-graph-role="decoration" x1="860" y1="880" x2="890" y2="880" stroke="#16a34a" stroke-width="2.2" marker-end="url(#arrow-green)"/>
+    <text data-graph-role="decoration" x="900" y="884" class="legend">verified delivery</text>
+  </g>
+  <g data-graph-role="reserved" data-reserved-kind="footer" data-graph-bounds="40,900,1160,930">
+    <text x="1150" y="917" text-anchor="end" class="footer">Style 1 · Flat Icon · Rex Harness TDD workflow</text>
+  </g>
+</svg>

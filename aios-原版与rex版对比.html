@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AIOS 血缘篇：原版 agiresearch/AIOS（学术项目）与 rexleimo/aios（本地工具版）的深度对比——血缘判定、逐维度差异、记忆系统对比、借鉴图谱。">
+  <title>AIOS 血缘篇：原版 agiresearch/AIOS vs rex 版——到底"改"了什么</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #dbe5f1;
+      --paper: #ffffff;
+      --soft: #f8fafc;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --purple: #7c3aed;
+      --purple-soft: #faf5ff;
+      --green: #16a34a;
+      --green-soft: #f0fdf4;
+      --orange: #ea580c;
+      --orange-soft: #fff7ed;
+      --red: #dc2626;
+      --red-soft: #fef2f2;
+      --amber-soft: #fefce8;
+      --amber-line: #fde68a;
+      --radius: 18px;
+      --shadow: 0 18px 60px rgba(15, 23, 42, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef2f9 0%, #f6f8fc 320px, #f6f8fc 100%);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      font-size: 16px;
+      line-height: 1.85;
+    }
+    .page { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+    header.hero {
+      background: linear-gradient(135deg, #1a1033 0%, #6d28d9 55%, #a855f7 100%);
+      color: #fff; border-radius: 24px; padding: 44px 40px 38px; box-shadow: var(--shadow);
+    }
+    header.hero h1 { margin: 0 0 6px; font-size: 29px; line-height: 1.4; letter-spacing: .5px; }
+    header.hero .sub { color: rgba(255,255,255,.85); font-size: 15px; margin: 0 0 22px; }
+    .hero-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+    .hero-tags span { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); border-radius: 999px; padding: 3px 14px; font-size: 13px; }
+    .meta-card { margin-top: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+    .meta-card table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .meta-card th, .meta-card td { padding: 10px 18px; border-bottom: 1px solid var(--soft); text-align: left; vertical-align: top; }
+    .meta-card th { width: 130px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+    .meta-card tr:last-child th, .meta-card tr:last-child td { border-bottom: none; }
+    nav.toc { margin-top: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 28px; }
+    nav.toc h2 { margin: 0 0 12px; font-size: 17px; }
+    nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 40px; }
+    nav.toc li { margin: 4px 0; break-inside: avoid; }
+    nav.toc a { color: var(--blue); text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    nav.toc .toc-note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+    section { margin-top: 44px; }
+    .part-banner { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+    .part-badge { flex: none; width: 52px; height: 52px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 20px; box-shadow: var(--shadow); }
+    .part-badge.p1 { background: linear-gradient(135deg, #16a34a, #4ade80); }
+    .part-badge.p2 { background: linear-gradient(135deg, #2563eb, #60a5fa); }
+    .part-badge.p3 { background: linear-gradient(135deg, #ea580c, #fb923c); }
+    .part-badge.p4 { background: linear-gradient(135deg, #7c3aed, #a78bfa); }
+    .part-badge.p5 { background: linear-gradient(135deg, #0f766e, #2dd4bf); }
+    .part-badge.p6 { background: linear-gradient(135deg, #475569, #94a3b8); }
+    .part-banner h2 { margin: 0; font-size: 24px; line-height: 1.35; }
+    .part-banner .part-desc { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+    h3 { margin: 34px 0 12px; font-size: 19px; padding-left: 12px; border-left: 4px solid var(--blue); line-height: 1.5; }
+    h4 { margin: 24px 0 8px; font-size: 16px; }
+    p { margin: 10px 0; }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 28px; margin: 16px 0; }
+    .callout { border-radius: 14px; padding: 14px 20px; margin: 16px 0; font-size: 15px; border: 1px solid; }
+    .callout .co-title { font-weight: 700; display: block; margin-bottom: 4px; }
+    .callout.tip { background: var(--green-soft); border-color: #bbf7d0; }
+    .callout.warn { background: var(--amber-soft); border-color: var(--amber-line); }
+    .callout.danger { background: var(--red-soft); border-color: #fecaca; }
+    .callout.info { background: var(--blue-soft); border-color: #bfdbfe; }
+    .callout.key { background: var(--purple-soft); border-color: #e9d5ff; }
+    code { font-family: "SF Mono", ui-monospace, Menlo, Consolas, "PingFang SC", monospace; font-size: .88em; background: #eef2f7; border: 1px solid #e2e8f0; border-radius: 6px; padding: 1px 6px; word-break: break-all; }
+    pre { background: #0f172a; color: #e2e8f0; border-radius: 14px; padding: 18px 22px; overflow-x: auto; font-size: 13.5px; line-height: 1.7; margin: 14px 0; }
+    pre code { background: none; border: none; color: inherit; padding: 0; font-size: inherit; }
+    pre .c { color: #94a3b8; } pre .g { color: #86efac; } pre .y { color: #fde047; } pre .o { color: #fdba74; } pre .b { color: #93c5fd; }
+    table.data { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; margin: 14px 0; box-shadow: var(--shadow); }
+    table.data th { background: #f1f5f9; text-align: left; padding: 10px 14px; border-bottom: 2px solid var(--line); white-space: nowrap; }
+    table.data td { padding: 10px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+    table.data tr:last-child td { border-bottom: none; }
+    table.data td.center, table.data th.center { text-align: center; }
+    .flow { display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
+    .flow .node { background: var(--paper); border: 2px solid var(--blue); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; line-height: 1.5; text-align: center; flex: 1 1 120px; display: flex; flex-direction: column; justify-content: center; }
+    .flow .node small { color: var(--muted); font-size: 12px; }
+    .flow .arr { align-self: center; color: var(--muted); font-size: 18px; font-weight: 700; flex: 0 0 auto; padding: 0 2px; }
+    .flow .node.blue { border-color: var(--blue); }
+    .flow .node.orange { border-color: var(--orange); }
+    .flow .node.green { border-color: var(--green); background: var(--green-soft); }
+    .flow .node.red { border-color: var(--red); background: var(--red-soft); }
+    .flow .node.purple { border-color: var(--purple); background: var(--purple-soft); }
+    .flow .node.gray { border-color: #94a3b8; background: var(--soft); }
+    .vflow { display: flex; flex-direction: column; align-items: stretch; margin: 18px 0; }
+    .vflow .node { text-align: center; }
+    .vflow .down { text-align: center; color: var(--muted); font-size: 16px; line-height: 1.2; padding: 2px 0; }
+    .duo { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0; }
+    .duo > div { flex: 1 1 340px; border-radius: var(--radius); border: 2px solid; padding: 18px 22px; background: var(--paper); box-shadow: var(--shadow); }
+    .duo .box-a { border-color: var(--blue); }
+    .duo .box-b { border-color: var(--orange); }
+    .duo h4 { margin-top: 0; font-size: 17px; }
+    .duo ul { margin: 8px 0 0; padding-left: 20px; }
+    .duo li { margin: 4px 0; font-size: 14.5px; }
+    .verdict-grid { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+    .verdict-grid .ev { flex: 1 1 220px; background: var(--paper); border: 1px solid #fecaca; border-top: 4px solid var(--red); border-radius: 12px; padding: 14px 18px; font-size: 14px; box-shadow: var(--shadow); }
+    .verdict-grid .ev b { display: block; margin-bottom: 6px; font-size: 14.5px; }
+    .footer { margin-top: 60px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: 13.5px; }
+    @media (max-width: 720px) { header.hero { padding: 30px 22px; } nav.toc ol { columns: 1; } }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <h1>AIOS 血缘篇：原版 agiresearch/AIOS vs rex 版</h1>
+    <p class="sub">这是《AIOS 与 rex-harness 深度讲解》的续篇（前文结论全部保留、不再重复）。<br>
+    本篇回答一个问题：rexleimo/aios 相对 rutgers 实验室的原版 AIOS，到底是不是"二开"？改了什么？<br>
+    答案比"二开"更有意思——先说结论：同名同命题，但代码上零血缘；真正的"血缘"在它的竞品研究文档里。</p>
+    <div class="hero-tags">
+      <span>原版 agiresearch/AIOS · Python · ★6.3k · COLM 2025 论文</span>
+      <span>rex 版 rexleimo/aios v5.9.0 · Node.js · MIT</span>
+      <span>本文基于两仓库源码 + rex 版内部竞品文档</span>
+    </div>
+  </header>
+
+  <div class="meta-card">
+    <table>
+      <tr><th>分析对象</th><td><a href="https://github.com/agiresearch/AIOS">github.com/agiresearch/AIOS</a>（学术原版，HEAD <code>292d98f</code> 2026-07-20）<br><a href="https://github.com/rexleimo/aios">github.com/rexleimo/aios</a>（前一篇的主角，HEAD <code>9284171</code> 2026-09-04）</td></tr>
+      <tr><th>分析方式</th><td>原版仓库完整克隆 + 源码走读；GitHub API 核实 fork 关系与最早提交；全文检索 rex 版 12 万行代码与内部文档中的血缘线索</td></tr>
+      <tr><th>阅读前置</th><td>建议先读前一篇《AIOS 与 rex-harness 深度讲解》——本篇直接引用其结论，不重复展开</td></tr>
+      <tr><th>日期</th><td>2026-09-05</td></tr>
+    </table>
+  </div>
+
+  <nav class="toc">
+    <h2>目录</h2>
+    <ol>
+      <li><a href="#part1">血缘判定：它到底是不是"二开"</a></li>
+      <li><a href="#part2">原版 AIOS 是什么：学术界的 Agent 操作系统</a></li>
+      <li><a href="#part3">逐维度对比：两套 AI OS 的全景差异</a></li>
+      <li><a href="#part4">记忆系统对撞（重点）</a></li>
+      <li><a href="#part5">rex 版记忆设计的真实灵感来源</a></li>
+      <li><a href="#part6">总评：同一命题的两条路线</a></li>
+      <li><a href="#part7">概念速查表</a></li>
+    </ol>
+    <p class="toc-note">提示：本篇所有"rex 版"均指 rexleimo/aios（即前一篇分析的、内嵌 rex-harness 的那个仓库）。</p>
+  </nav>
+
+  <!-- ============================================================ -->
+  <section id="part1">
+    <div class="part-banner">
+      <div class="part-badge p1">1</div>
+      <div>
+        <h2>血缘判定：它到底是不是"二开"</h2>
+        <p class="part-desc">"二开"通常意味着在原代码基础上改。我们用四条独立证据检验这个假设。</p>
+      </div>
+    </div>
+
+    <div class="verdict-grid">
+      <div class="ev"><b>证据一：GitHub API 显示非 fork</b>GitHub 官方接口返回 <code>fork: false</code>、无 parent/source 仓库。rex 版 2026-03-01 独立建仓，与原版（2024-01 建仓）在 GitHub 的仓库谱系上没有任何派生关系。</div>
+      <div class="ev"><b>证据二：技术栈零重叠</b>原版是 Python（FastAPI 内核 + Cerebrum SDK），rex 版是 Node.js 24 纯 ESM + TypeScript。两边连一个可以对应的源码文件、一个同名函数都找不到。</div>
+      <div class="ev"><b>证据三：rex 版从未提及原版</b>对 rex 版全库（含 15 万行代码与全部文档）检索 <code>agiresearch / rutgers / cerebrum / 论文 arXiv:2403.16971</code>——<strong>零命中</strong>。README 没有致谢，CHANGELOG 没有溯源。</div>
+      <div class="ev"><b>证据四：出生时的形态完全无关</b>rex 版的第一个提交（2026-03-01）是"小红书运营助手核心技能和反检测功能"——它最初是一组个人技能脚本，后来才长成本地 Agent 工具箱。原版则是实验室论文工程。</div>
+    </div>
+
+    <div class="callout key">
+      <span class="co-title">结论：不是代码层面的"二开"，而是"同名同命题的独立重建"</span>
+      两者的共同点只有一层：<strong>同一个名字（AIOS）和同一句命题——"AI Agent 需要一个操作系统"。</strong> rex 版借用了这个概念旗帜，但内核、代码、架构全部是自己另起的。不过有趣的是，rex 版内部文档显示它把原版 AIOS 生态里的核心组件（mem0、Zep——正是原版的两大记忆 Provider）当作<strong>竞品在持续跟踪研究</strong>（详见第五章）。所以更准确的画像是：它没有 fork 原版的代码，但站在了原版参与开创的"Agent OS"赛道上，并把原版的生态伙伴当成了对标对象。
+    </div>
+
+    <div class="callout info">
+      <span class="co-title">一个 license 上的小细节</span>
+      原版仓库根目录的 LICENSE 文件是<strong>空的</strong>（1 字节，无任何许可证文本，GitHub 页面因此不显示 license 类型），只有 Rust 子目录声明了 Apache-2.0；rex 版则是标准 MIT（Copyright 2026 Rex）。也就是说即使真有人想基于原版做代码二开，原版目前也没有给出法律许可——好在两边本来就无代码继承。
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part2">
+    <div class="part-banner">
+      <div class="part-badge p2">2</div>
+      <div>
+        <h2>原版 AIOS 是什么：学术界的 Agent 操作系统</h2>
+        <p class="part-desc">rutgers agiresearch 实验室的论文工程，6.3k stars，COLM 2025。</p>
+      </div>
+    </div>
+
+    <p>原版 AIOS 的自我定位（README 原话）：把 LLM 嵌入操作系统，为 LLM Agent 的开发部署解决<strong>调度、上下文切换、内存管理、存储管理、工具管理</strong>等问题。它分两部分：<strong>AIOS Kernel</strong>（本仓库，资源管理内核）+ <strong>Cerebrum SDK</strong>（独立仓库，Agent 与内核交互的客户端）。整篇论文谱系很完整：AIOS 主论文（COLM 2025）、LSFS 语义文件系统（ICLR 2025）、A-MEM 记忆（arXiv:2502.12110）、Cerebrum SDK（NAACL 2025）。</p>
+
+    <h3>2.1 它的运行方式：一台"真·操作系统"样子的服务器</h3>
+    <div class="vflow">
+      <div class="node gray">Agent（经 Cerebrum SDK / HTTP）</div><div class="down">↓ POST /query</div>
+      <div class="node blue">FastAPI 内核（launch.py，uvicorn 常驻 8000 端口）</div><div class="down">↓ 包装成系统调用</div>
+      <div class="node purple">SyscallExecutor → 四条全局队列（LLM / Memory / Storage / Tool）</div><div class="down">↓ 阻塞式 syscall，线程 join 等结果</div>
+      <div class="node orange">调度器：FIFO（按 1 秒窗口攒批）或 RR（时间片 + 上下文切换）</div><div class="down">↓</div>
+      <div class="node green">资源管理器：LLMAdapter（多后端/智能路由）· MemoryManager · StorageManager(LSFS) · ToolManager(MCP/沙箱)</div>
+    </div>
+    <p>几个有辨识度的设计：</p>
+    <ul>
+      <li><strong>系统调用模型：</strong>Agent 的每次资源请求都被包装成 <code>LLMSyscall / MemorySyscall / StorageSyscall / ToolSyscall</code>，压入全局队列由调度线程消费——Agent 线程阻塞等待，完全复刻"进程发起 syscall"的语义。Agent 由 AgentFactory 加载（本地包或从 Agent Hub 下载），进程表用 <code>proc/*.json</code> 文件模拟。</li>
+      <li><strong>两种调度器：</strong>FIFO 按 <code>batch_interval</code>（默认 1 秒）攒一批 LLM 请求，按模型分组、双层线程池并行；RR 给每个请求 1 秒时间片，时间片耗尽时由 <strong>Context Manager 中断生成、保存 KV-cache（本地 HF 模型可保存 <code>past_key_values</code> 精确恢复）</strong>，下轮续跑——这是"LLM 时代的进程上下文切换"的直接实现。</li>
+      <li><strong>SmartRouting 智能路由：</strong>用向量库存历史 query、LiteLLM 实时取 token 价格，做"性价比感知"的模型选型。</li>
+      <li><strong>LSFS 语义文件系统：</strong>在真实文件之上叠 ChromaDB 向量索引（llama_index 摄取）+ Redis 版本链（watchdog 监听文件变更，最多 20 个版本）支持 <code>sto_rollback</code> 语义回滚。</li>
+      <li><strong>工具沙箱：</strong>FastMCP 的 <code>linux-mcp</code> 子进程 + OSWorld 的 DesktopEnv 虚拟机沙箱（docker/aws/azure/gcp 等 provider）做 computer-use。</li>
+      <li><strong>部署模式：</strong>本机内核（Mode 1）或远程内核（Mode 2），Roadmap 还有"账号化个人内核同步、内核虚拟化"（Mode 2.5~4），是奔着"Agent 时代的云操作系统"去的。</li>
+    </ul>
+
+    <h3>2.2 它当前的开发重心：跨 Agent 共享记忆</h3>
+    <p>原版最近的提交几乎全部集中在 memory 子系统（2026 年 6-7 月："isolate mem0 collections by user"、"enforce user isolation during context injection" 等大量隔离修复）。<code>docs/SHARED_MEMORY_SYSTEM.md</code>（471 行）定义了完整的<strong>多 Agent 围绕同一人类用户协作写记忆</strong>的规范：<code>memory_type</code>（profile/task_context/conversation）× <code>sharing_policy</code>（shared/private）两种元数据，<strong>user_id 是主隔离边界</strong>，三层防御（物理 per-user collection → 向量库 WHERE 硬过滤 → 注入器 fail-closed 过滤），外加 <code>MemoryWriteBarrier</code> 强制"先写后读"顺序。记忆单元是 A-MEM 论文的 <code>MemoryNote</code>（content/keywords/links/evolution_history…），注入方式是 <strong>ContextInjector 在每次 LLM 调用前把检索到的记忆拼进 system message</strong>——典型注入式。Provider 可插拔：<code>in-house</code>（ChromaDB/Qdrant）、<code>mem0</code>（Mem0+Ollama embedding）、<code>zep</code>（Zep Cloud 图谱 API）。</p>
+
+    <div class="callout warn">
+      <span class="co-title">给原版画个像</span>
+      这是一个<strong>研究内核</strong>：奔着论文和操作系统语义去的，资源调度、上下文切换、语义文件系统、多 Agent 共享记忆是它的四张王牌；代价是工程形态重——Python 常驻服务、Redis/ChromaDB 等一堆外部依赖、Agent 要通过 SDK 走 HTTP 才能用上它。仓库里还留着 <code>[MEM0_DEBUG]</code> 调试日志和写入 /tmp 的调试代码，能看出功能仍在密集打磨。
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part3">
+    <div class="part-banner">
+      <div class="part-badge p3">3</div>
+      <div>
+        <h2>逐维度对比：两套 AI OS 的全景差异</h2>
+        <p class="part-desc">同名不同物——一张表看尽。</p>
+      </div>
+    </div>
+
+    <table class="data">
+      <tr><th>维度</th><th>原版 agiresearch/AIOS</th><th>rex 版 rexleimo/aios</th></tr>
+      <tr><td><strong>一句话定位</strong></td><td>Agent 资源管理<strong>内核</strong>（研究导向）</td><td>编码 Agent 的本地<strong>生产工具箱</strong>（工程导向）</td></tr>
+      <tr><td><strong>出身</strong></td><td>2024-01 建仓，实验室论文工程，COLM 2025，★6.3k</td><td>2026-03-01 独立建仓（最早是个人技能脚本），无 fork 关系</td></tr>
+      <tr><td><strong>技术栈</strong></td><td>Python 3.10/3.11（另有 250 行 Rust 实验骨架 aios-rs）</td><td>Node.js 24 纯 ESM JS + TypeScript（mcp-server）</td></tr>
+      <tr><td><strong>运行形态</strong></td><td><strong>常驻内核服务</strong>：FastAPI/uvicorn 起服务，Agent 经 SDK 走 HTTP</td><td><strong>无常驻服务</strong>：纯 CLI + 文件状态，垫在现有编码客户端下</td></tr>
+      <tr><td><strong>资源抽象</strong></td><td>syscall 四队列（LLM/Memory/Storage/Tool）+ FIFO/RR 调度</td><td>Workflow Policy 五级路由（noop/direct/guarded/planned/blocked）+ rex 证据驱动的工序选择</td></tr>
+      <tr><td><strong>"进程"概念</strong></td><td>Agent = 内核线程，proc/*.json 模拟进程表，Agent Hub 分发</td><td>编码客户端/子代理 = 外部进程；多 Agent 靠 team 并行 + 文件所有权</td></tr>
+      <tr><td><strong>记忆</strong></td><td>向量记忆（Chroma/Qdrant/Mem0/Zep）+ <strong>注入式</strong> ContextInjector + 跨 Agent 共享</td><td>ContextDB L0/L1/L2 + memo JSONL + <strong>拉取式</strong>检索 + 使用反馈闭环，无向量</td></tr>
+      <tr><td><strong>存储</strong></td><td>LSFS 语义文件系统（向量索引 + Redis 版本回滚）</td><td>原生文件直用 + 源注册表指针（明确拒绝复制内容）</td></tr>
+      <tr><td><strong>上下文管理</strong></td><td>时间片中断 + KV-cache 保存恢复（生成级）</td><td>checkpoint/continuity/压缩/offload（会话级 + token 级）</td></tr>
+      <tr><td><strong>工具</strong></td><td>FastMCP linux-mcp + OSWorld 桌面虚拟机沙箱</td><td>browser-use CDP 浏览器控制 + aios-memory MCP 服务器</td></tr>
+      <tr><td><strong>多用户/隔离</strong></td><td>user_id 主隔离边界，共享记忆访问矩阵（当前开发重心）</td><td>单机单人；memo 用 project_shared / agent_private 做轻量隔离</td></tr>
+      <tr><td><strong>数据位置</strong></td><td>内核侧目录 + Redis/ChromaDB 等外部服务</td><td>100% 项目内 <code>.aios/</code> 普通文件（JSONL/MD/SQLite 缓存）</td></tr>
+      <tr><td><strong>工作流纪律</strong></td><td>❌ 没有（Agent 自由发挥，内核只管资源）</td><td>✅ rex-harness：Fact→工单→证据，防造假五门禁（前一篇第三章）</td></tr>
+      <tr><td><strong>安全隐私</strong></td><td>记忆访问矩阵（面向多用户）</td><td>privacy guard 脱敏门禁 + token 纪律（面向单机外发数据）</td></tr>
+      <tr><td><strong>License</strong></td><td>根 LICENSE 为空（未授权），Rust 子目录 Apache-2.0</td><td>MIT</td></tr>
+    </table>
+
+    <div class="callout info">
+      <span class="co-title">一眼看懂的分野</span>
+      原版回答的问题是：<strong>"如果有很多 Agent 抢占稀缺的计算资源（LLM 吞吐、显存、上下文），操作系统应该怎么调度它们？"</strong> rex 版回答的问题是：<strong>"如果我要把一个 AI 编码助手当成真员工用，它需要的档案室（记忆）、流程制度（工单/证据）、隔离区（worktree）、保密制度（隐私门）在哪里？"</strong> 一个把 OS 类比做在<strong>资源调度</strong>上，一个把 OS 类比做在<strong>制度与文件系统</strong>上。
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part4">
+    <div class="part-banner">
+      <div class="part-badge p4">4</div>
+      <div>
+        <h2>记忆系统对撞（重点）</h2>
+        <p class="part-desc">两边都自认解决"Agent 失忆"，但方向几乎完全相反。</p>
+      </div>
+    </div>
+
+    <h3>4.1 五个正面对撞点</h3>
+    <table class="data">
+      <tr><th>对撞点</th><th>原版</th><th>rex 版</th></tr>
+      <tr>
+        <td><strong>注入 vs 拉取</strong></td>
+        <td><strong>注入式</strong>：ContextInjector 在每次 LLM 调用前自动检索、把相关记忆拼进 system message（受 relevance 阈值、token budget 多级过滤）</td>
+        <td><strong>拉取式</strong>：明确禁止注入会话历史（AGENTS.md 原话），Agent 按需 search/recall，钩子注入也限死 6 条/2000 字符预算</td>
+      </tr>
+      <tr>
+        <td><strong>向量 vs 词法</strong></td>
+        <td><strong>全线 embedding</strong>：ChromaDB/Qdrant 向量库、sentence-transformers 本地模型、Mem0 的 nomic-embed、Zep 图谱检索</td>
+        <td><strong>零向量</strong>：ICU 中文分词 + CJK bigram + 关键词打分；源码注释明说"语义判断是 LLM 的工作"，预留 sqlite-vec 但未实现</td>
+      </tr>
+      <tr>
+        <td><strong>记忆单元</strong></td>
+        <td><code>MemoryNote</code>（A-MEM 论文：keywords/links/evolution_history，记忆会"进化"）</td>
+        <td>memo 事件（schemaVersion/eventId/supersedes/validAt/refs）+ 会话三层流水（L0/L1/L2）</td>
+      </tr>
+      <tr>
+        <td><strong>共享 vs 单人</strong></td>
+        <td>核心命题之一：多 Agent 围绕同一 user 协作，per-user 物理隔离 + 共享矩阵 + 写屏障（当前密集开发）</td>
+        <td>单机单人优先；只有 project_shared / agent_private 两档 scope，agent_private 30 天 TTL——用最轻的方式处理了隔离</td>
+      </tr>
+      <tr>
+        <td><strong>记忆质量闭环</strong></td>
+        <td>靠检索阈值与记忆进化（A-MEM 的 links/evolution）</td>
+        <td>独有的<strong>声明式反馈</strong>：AI 必须声明哪条记忆真的被用了（<code>&lt;!--memory: useful=...--&gt;</code>），被证实的才加权——用不到的记忆不会被抬高</td>
+      </tr>
+    </table>
+
+    <h3>4.2 有趣的收敛进化</h3>
+    <p>尽管方向相反，两套系统在两个点上<strong>独立演化出了同样的答案</strong>，这说明这些设计可能是该问题的"正确解"：</p>
+    <div class="duo">
+      <div class="box-a">
+        <h4>收敛点一：隔离边界</h4>
+        <ul>
+          <li>原版：user_id 是主隔离边界，private 记忆跨用户不可见，三层防御 fail-closed</li>
+          <li>rex 版：scope（共享/私有）+ agent 身份校验，private 记忆跨客户端不可见</li>
+          <li><strong>启示：</strong>"记忆必须有归属和可见性边界"是两边各自得出的同一结论</li>
+        </ul>
+      </div>
+      <div class="box-b">
+        <h4>收敛点二：事实失效而非删除</h4>
+        <ul>
+          <li>原版 provider 生态：Zep 图谱的 <code>valid_at / invalid_at</code> 四时间戳机制</li>
+          <li>rex 版：memo 的 <code>supersedes</code> 链——旧记忆被新结论替代时<strong>标记失效而非物理删除</strong>，且永久保留追溯链</li>
+          <li><strong>启示：</strong>"记忆是时序证据，不是可覆盖的变量"</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part5">
+    <div class="part-banner">
+      <div class="part-badge p5">5</div>
+      <div>
+        <h2>rex 版记忆设计的真实灵感来源</h2>
+        <p class="part-desc">"二开对象"找错了人？rex 版自己的文档给出了真正的参考系。</p>
+      </div>
+    </div>
+
+    <p>前一章我们确认 rex 版从未提及原版 AIOS。但它内部有一套完整的<strong>竞品研究体系</strong>：<code>docs/reports/competitor-watchlist.json</code>（schema v3 权威清单）+ 三份深度分析文档，还把竞品仓库克隆到 <code>temp/competitor-repos/</code> 做源码级分析，然后<strong>列出"可借鉴思路"、排期实现、在 roadmap 里打勾</strong>。把 2026-05-22 那份《竞品库：Agent Memory 系统》的借鉴清单，和 rex 版今天已实现的特性放在一起，对应关系几乎是逐条兑现：</p>
+
+    <table class="data">
+      <tr><th>来源竞品</th><th>当时写下的"可借鉴思路"（2026-05-22）</th><th>今天 rex 版的实现状态</th></tr>
+      <tr>
+        <td><strong>TencentDB-Agent-Memory</strong><br>（SQLite + sqlite-vec 本地方案）</td>
+        <td>① 工具日志 offload：大输出写外部文件，上下文只留摘要 + node_id，需要时 grep 回来<br>② Mermaid 任务状态图替代冗长 checkpoint</td>
+        <td>✅ 已实现：<code>.aios/offload/</code> 外置区 + <code>task-canvas.mmd</code> 画布 + <code>refs grep / refs read</code> 按需精读（aios-offload-recall 技能）；文档承认这是"AIOS 当前最大差距"后补齐的</td>
+      </tr>
+      <tr>
+        <td><strong>TencentDB-Agent-Memory</strong></td>
+        <td>③ L0→L3 语义金字塔：分层压缩、召回即摘要、细节按需下钻</td>
+        <td>✅ 已实现：ContextDB 的 L0 摘要 / L1 检查点 / L2 原始事件三层（roadmap 显示 2026-05-10 落地 "ContextDB L0/L1/L2 tiered loading"）</td>
+      </tr>
+      <tr>
+        <td><strong>mem0</strong></td>
+        <td>④ ADD-only 累积写入：只追加不修改，CPU 去重替代 LLM 判断</td>
+        <td>✅ 已实现：memo 原生 append-only JSONL，事件带签名去重；检索零 LLM 调用</td>
+      </tr>
+      <tr>
+        <td><strong>Zep</strong></td>
+        <td>⑤ 事实失效而非删除：增加 valid_at / invalid_at，支持时序推理</td>
+        <td>✅ 已实现：memo 的 <code>supersedes</code> 替代链 + <code>validAt</code> 字段 + 检索时时间有效性过滤</td>
+      </tr>
+      <tr>
+        <td><strong>Letta（MemGPT）</strong></td>
+        <td>⑥ Agent 自主记忆管理工具：暴露 memory_search / memory_replace 等 MCP 工具</td>
+        <td>✅ 已实现：v5.9.0 的 aios-memory MCP 服务器（memory_recall / memory_write / memory_checkpoint）——连"在 MCP 层增加"这个实现路径都和文档建议一字不差</td>
+      </tr>
+      <tr>
+        <td><strong>Letta（MemGPT）</strong></td>
+        <td>⑦ Memory Block 具名块 + 字符上限防膨胀</td>
+        <td>◐ 部分实现：memo pin 置顶 + recall 字符预算（applyRecallBudget），未见具名 block</td>
+      </tr>
+    </table>
+
+    <div class="callout key">
+      <span class="co-title">这一章修正了"二开"的真正含义</span>
+      rex 版没有二开原版 AIOS 的<strong>代码</strong>，但它做了一件工程上更严格的事：<strong>把整个"Agent 记忆"赛道（TencentDB、mem0、Zep、Letta）当参考系，逐家提取可验证的核心主张，再以"本地优先、零向量依赖、文件可读"为约束条件重新实现了一遍</strong>——并在 roadmap 文档里留下完整的"主张 → 借鉴 → 实现"审计链。顺带一提：mem0 和 Zep 恰好是原版 AIOS 的两大记忆 Provider，所以 rex 版通过竞品研究，实际上<strong>间接对标了原版 AIOS 的生态组件</strong>——这大概是两个"AIOS"之间唯一一条真实的暗线。
+    </div>
+
+    <div class="callout info">
+      <span class="co-title">也有"不借"的部分，而且是有意为之</span>
+      竞品四家全部押注向量检索（SQLite+sqlite-vec、Qdrant、Neo4j、pgvector），rex 版至今坚持零 embedding。这不是漏了——它的对比表里明确写着各家"检索方式：BM25+向量+RRF vs 文件读取"，然后选择了用"查询降级梯子 + LLM 兜底语义判断"来补词法检索的短板，并把 sqlite-vec 列为未来意图。一份 2026-05 的文档结论可以概括它的态度："方向确认而非转向"——竞品越堆向量，它越确信自己该先把 harness 可靠性做扎实。
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part6">
+    <div class="part-banner">
+      <div class="part-badge p6">6</div>
+      <div>
+        <h2>总评：同一命题的两条路线</h2>
+        <p class="part-desc">"AI Agent 操作系统"这个 2023 年被提出的愿景，长出了两株很不一样的植物。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">原版路线：OS 的"内核态"</h4>
+      <p>原版把 OS 类比推向了<strong>最字面的方向</strong>：syscall、进程表、调度器、时间片、上下文切换、虚拟文件系统——它想成为 Agent 时代的 Linux 内核，让 Agent 的每一次 LLM 调用、记忆读写都经过内核的资源仲裁。这条路线的代价是"重"：常驻服务、外部依赖、SDK 客户端、多机部署 Roadmap；收益是<strong>研究价值</strong>——批处理调度、KV-cache 级上下文切换、共享记忆隔离矩阵，都是可以直接写论文的问题。</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">rex 版路线：OS 的"用户态"</h4>
+      <p>rex 版把 OS 类比落在了<strong>最实用的方向</strong>：文件系统（.aios/ 目录）、权限纪律（rex 工单/证据门禁）、多用户隔离（scope）、软件包管理（skill 投影/init/doctor）。它没有内核、没有 syscall，反而刻意做"薄"——无常驻服务、零外部依赖、状态全是人类可读文件。它的收益是<strong>今天就能用在生产</strong>；代价是没有原版那种调度层面的研究深度（LLM 攒批、路由优化交给了 model-router 和外部客户端）。</p>
+    </div>
+
+    <table class="data">
+      <tr><th>如果你想要……</th><th>选谁</th><th>理由</th></tr>
+      <tr><td>研究 Agent 调度、上下文切换、共享记忆的学术前沿</td><td class="center"><strong>原版</strong></td><td>论文谱系完整，syscall/调度器/共享记忆是可复现实验平台</td></tr>
+      <tr><td>给 Claude Code / Codex 等编码客户端补记忆和纪律</td><td class="center"><strong>rex 版</strong></td><td>装完即用、全本地、有防造假门禁和竞品验证过的记忆设计</td></tr>
+      <tr><td>学习"Agent 记忆系统该怎么设计"</td><td class="center"><strong>两个都读</strong></td><td>原版告诉你向量路线的天花板设计，rex 版告诉你无向量路线的工程兜底，且后者留有完整的"借鉴→实现"审计链可学</td></tr>
+    </table>
+
+    <div class="callout tip">
+      <span class="co-title">最后回答你的原始问题："改了什么"</span>
+      严格说，rex 版不是"改"出来的，而是<strong>带着同一个名字、从零重写的另一个答案</strong>。它保留了原版命题的"魂"（Agent 需要资源管理层），换掉了"形"（Python 内核 → Node 本地工具箱），并在原版完全没有的方向上做了加法（rex-harness 证据内核、隐私门、多客户端投影），在原版重仓的方向上做了减法（向量检索、多用户共享记忆、服务端部署）。如果非要用一句话定义两者的关系：<strong>原版是这篇论文的"作者"，rex 版是这篇命题最认真的"读者"之一——读完没有抄，而是交了一份方向相反、严谨程度不输的作业。</strong>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="part7">
+    <div class="part-banner">
+      <div class="part-badge p6">7</div>
+      <div>
+        <h2>概念速查表（本篇新增术语）</h2>
+        <p class="part-desc">原版 AIOS 的术语，以及两版对比中的关键名词。</p>
+      </div>
+    </div>
+
+    <table class="data">
+      <tr><th>术语</th><th>解释</th><th>所属</th></tr>
+      <tr><td><strong>AIOS Kernel</strong></td><td>原版的资源管理内核：调度器 + 内存/存储/工具管理器，FastAPI 服务形态</td><td>原版</td></tr>
+      <tr><td><strong>Cerebrum</strong></td><td>原版的官方 SDK（独立仓库），Agent 通过它以 HTTP 调用内核</td><td>原版</td></tr>
+      <tr><td><strong>Syscall（系统调用）</strong></td><td>原版把 Agent 的每次资源请求包装成 LLMSyscall/MemorySyscall 等，入全局队列阻塞执行</td><td>原版</td></tr>
+      <tr><td><strong>FIFO / RR 调度器</strong></td><td>两种 LLM 请求调度策略：1 秒窗口攒批 vs 时间片轮转（耗尽即中断保存）</td><td>原版</td></tr>
+      <tr><td><strong>Context Manager</strong></td><td>原版的生成级上下文切换器：时间片耗尽保存 KV-cache（past_key_values），下轮精确恢复</td><td>原版</td></tr>
+      <tr><td><strong>MemoryNote</strong></td><td>原版的记忆单元（A-MEM 论文结构）：content/keywords/links/evolution_history</td><td>原版</td></tr>
+      <tr><td><strong>ContextInjector</strong></td><td>原版的记忆注入器：每次 LLM 调用前把检索到的记忆拼进 system message</td><td>原版</td></tr>
+      <tr><td><strong>MemoryWriteBarrier</strong></td><td>原版的写屏障：强制 per-user 的先写后读顺序，读操作等待写操作落地</td><td>原版</td></tr>
+      <tr><td><strong>LSFS</strong></td><td>原版的语义文件系统（ICLR 2025）：真实文件 + ChromaDB 向量索引 + Redis 版本回滚</td><td>原版</td></tr>
+      <tr><td><strong>Agent Hub</strong></td><td>原版的 Agent 分发中心（my.aios.foundation），AgentFactory 按 author/name 下载加载</td><td>原版</td></tr>
+      <tr><td><strong>aios-rs</strong></td><td>原版内嵌的 Rust 重写实验骨架（250 行 trait 定义，0.0.1-alpha，无功能等价）</td><td>原版</td></tr>
+      <tr><td><strong>注入式 vs 拉取式</strong></td><td>记忆进入 LLM 上下文的两种哲学：自动拼进 prompt vs Agent 按需检索</td><td>对比</td></tr>
+      <tr><td><strong>竞品 watchlist</strong></td><td>rex 版的竞品跟踪体系：watchlist.json（schema v3）+ 克隆到 temp/competitor-repos/ 做源码分析</td><td>rex 版</td></tr>
+      <tr><td><strong>借鉴审计链</strong></td><td>rex 版文档里"竞品主张 → 可借鉴思路 → 实现 → roadmap 打勾"的完整留痕，本篇第五章的主证据</td><td>rex 版</td></tr>
+    </table>
+
+    <div class="footer">
+      <p><strong>来源：</strong>原版分析基于 agiresearch/AIOS 完整克隆（HEAD <code>292d98f</code>）；血缘判定基于 GitHub API（fork 字段、最早提交 2026-03-01）与 rex 版全库检索（零命中 agiresearch/rutgers/cerebrum）；第五章借鉴映射全部出自 rex 版自有文档 <code>docs/reports/competitor-memory-systems.md</code>（2026-05-22）、<code>docs/plans/2026-04-25-competitor-feature-roadmap.md</code> 及 CHANGELOG v5.9.0。</p>
+      <p><strong>关联阅读：</strong>前一篇 <a href="aios-rex-harness-深度讲解.html">《AIOS 与 rex-harness 深度讲解》</a>（架构分层 / rex 内核 / 记忆深挖 / 关联性评价）。</p>
+      <p><em>AIOS 血缘篇 · 2026-09-05</em></p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

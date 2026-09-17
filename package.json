@@ -1,0 +1,45 @@
+{
+  "name": "jt-harness",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.21.0"
+  },
+  "packageManager": "pnpm@10.12.4",
+  "scripts": {
+    "memo:extract": "node packages/memo/src/agents/run.ts",
+    "memo:eval": "node packages/memo/src/agents/evaluation/run.ts",
+    "test": "node scripts/test.mjs",
+    "test:live": "DSH_MEMORY_LIVE=1 node --test packages/memo/src/agents/*.test.ts",
+    "typecheck": "node scripts/typecheck.mjs",
+    "build": "node scripts/build.mjs",
+    "jth": "node bin/jth.mjs",
+    "prepack": "pnpm build",
+    "test:postgres": "pnpm build && node scripts/test-postgres.mjs"
+  },
+  "dependencies": {
+    "@jt-harness/cli": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "link:../deepseek-harness/node_modules/@types/node",
+    "@types/pg": "8.23.1",
+    "typescript": "link:../deepseek-harness/node_modules/typescript",
+    "@jt-harness/memo": "workspace:*",
+    "@jt-harness/codex-hooks": "workspace:*",
+    "pg": "8.23.0",
+    "zod": "4.4.3",
+    "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-sdk-client": "link:../deepseek-harness/packages/sdk/client"
+  },
+  "bin": {
+    "jth": "bin/jth.mjs"
+  },
+  "files": [
+    "bin/",
+    "packages/",
+    "README.md",
+    ".env.example",
+    "examples/"
+  ],
+  "version": "0.1.0"
+}

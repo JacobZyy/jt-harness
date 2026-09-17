@@ -1,0 +1,26 @@
+import { Pool } from 'pg'
+import type { Config } from './config.ts'
+export function openDatabase(config: Config) {
+  if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
+  return new Pool({ connectionString: config.databaseUrl, max: 2, connectionTimeoutMillis: 3000, statement_timeout: 15000, application_name: 'jth-memo' })
+}
+export type { Pool } from 'pg'
+export type { Job } from './storage/jobs.ts'
+export async function withIntakeLock<T>(pool: Pool, operation: () => Promise<T>) {
+  const client = await pool.connect()
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtextextended('jt_memo:codex-capture',0))")
+    return await operation()
+  } finally { client.release(true) }
+}
+export { loadConfig, executionProfile, safeError } from './config.ts'
+export type { Config } from './config.ts'
+export * from './public-contracts.ts'
+export { prepareDatabase, transaction } from './storage/database.ts'
+export { MemoStorage } from './storage/storage.ts'
+export { enqueue, jobStatus, retryJob } from './storage/jobs.ts'
+export { embedTexts } from './storage/embedding.ts'
+export { listManagedEntries, manageEntry, storageStats } from './storage/management.ts'
+export { storageDoctor } from './storage/doctor.ts'
+export { recordMemories } from './record.ts'
+export { runIndexWorker, processIndexJob } from './index-worker.ts'

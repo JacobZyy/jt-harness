@@ -1,0 +1,24 @@
+{
+  "name": "@jt-harness/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "jth": "bin/jth.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@jt-harness/memo": "workspace:*",
+    "@jt-harness/codex-hooks": "workspace:*"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts"
+  }
+}

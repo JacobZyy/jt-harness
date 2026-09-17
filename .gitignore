@@ -1,0 +1,15 @@
+node_modules/
+artifacts/memory-agent/
+artifacts/memo-storage/
+artifacts/retired-memo-storage/
+packages/*/lib/
+.env
+.env.*
+!.env.example
+dist/
+artifacts/jth/
+.codex/hooks.json
+
+# Runtime transcripts, verification payloads and local backups
+artifacts/
+.DS_Store

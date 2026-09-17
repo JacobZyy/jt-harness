@@ -1,0 +1,37 @@
+{
+  "name": "@jt-harness/memo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/public-contracts.d.ts",
+      "import": "./dist/public-contracts.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    },
+    "./legacy": {
+      "types": "./dist/legacy.d.ts",
+      "import": "./dist/legacy.js"
+    }
+  },
+  "dependencies": {
+    "pg": "8.23.0",
+    "zod": "4.4.3"
+  },
+  "optionalDependencies": {
+    "@deepseek-ai/dsh-llm": "link:../../../deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-sdk-client": "link:../../../deepseek-harness/packages/sdk/client"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts src/agents/*.test.ts src/agents/evaluation/*.test.ts src/storage/*.test.ts"
+  }
+}

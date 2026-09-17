@@ -1,0 +1,29 @@
+# This is a per-launch overlay. It does not change the user's Web profile.
+# The SDK minimal profile already excludes project instructions and skills.
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: mcp-resources
+  disabled: true
+- id: sdk-jsonrpc-server
+  inject: [sdkAppStartup, loader, sessionPersistence]
+- id: sessions
+  config:
+    # Share the existing Web session store, which uses DSH's default encoding.
+    root: !!js dshHomePath('sessions')
+    compression: zstd
+
+# Resolve the same provider routes and credential references configured in DSH.
+# No credential values are copied into this project or the model prompt.
+- insert:
+    - id: settings
+      name: '@deepseek-ai/dsh-settings-file'
+      config:
+        watch: false
+    - id: credentials
+      name: '@deepseek-ai/dsh-credentials-local'
+      config:
+        watch: false
+    - id: llm-pi-ai
+      name: '@deepseek-ai/dsh-llm-pi-ai'
