@@ -186,3 +186,16 @@ test('install/uninstall keep unrelated hooks; uninstall stops discovering new co
     assert.equal(installed.events.length, 6)
   } finally { await f.cleanup() }
 })
+
+test('FunctionCallOutput remains tool evidence and does not block later conversation messages', async () => {
+  const f = await fixture()
+  try {
+    await appendFile(f.root, item(2, 'root', 'function-output', 'FunctionCallOutput', { name: 'lookup', namespace: 'tools', output: 'Result: 17' })
+      + text(3, 'root', 'next-user', 'UserMessage', '继续处理。'))
+    await f.capture('Stop')
+    assert.equal((await drainCaptureFiles(f.config, f.deliver)).failed, 0)
+    const messages = [...f.sent.values()][0].messages
+    assert.deepEqual(messages.map(message => message.role), ['tool', 'user'])
+    assert.equal(JSON.parse(messages[0].text).output, 'Result: 17')
+  } finally { await f.cleanup() }
+})

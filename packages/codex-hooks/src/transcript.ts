@@ -74,6 +74,7 @@ function itemMessage(item: Record<string, unknown>, child: boolean): { role: Mes
     case 'UserMessage': return { role: child ? 'assistant' : 'user', text: contentText(item.content) }
     case 'AgentMessage': return { role: 'assistant', text: contentText(item.content) }
     case 'CommandExecution': return { role: 'tool', text: toolText({ tool: 'Bash', command: item.command, status: item.status, exit_code: item.exit_code, output: item.aggregated_output ?? item.formatted_output ?? item.stdout, stderr: item.stderr }) }
+    case 'FunctionCallOutput': return { role: 'tool', text: toolText({ tool: item.name, namespace: item.namespace, output: item.output }) }
     case 'FileChange': return { role: 'tool', text: toolText({ tool: 'apply_patch', status: item.status, changes: item.changes, stdout: item.stdout, stderr: item.stderr }) }
     case 'McpToolCall': {
       const result = object(item.result)
