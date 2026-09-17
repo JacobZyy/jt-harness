@@ -251,7 +251,7 @@ v3 五项存储能力及真实 CLI 验证见 [存储增强验证报告](docs/mem
 
 ## 交互切换记忆 Agent 模型
 
-运行 `jth memo model`，从 DSH 当前实际目录中选择编号；列表显示 Provider、模型 ID 和当前项。`jth memo model --list` 输出 JSON；也可用 `jth memo model --provider zz-tokenhub --model deepseek-flash` 精确选择。
+运行 `jth memo model`，使用方向键从 DSH 实时目录中单选模型；直接输入可搜索模型名称、ID 或 Provider，空格分隔多个关键词。列表分页显示并标注当前项，回车确认，Ctrl+C 取消。`jth memo model --list` 输出 JSON；也可用 `jth memo model --provider zz-tokenhub --model deepseek-flash` 精确选择。
 
 选择只保存项目 `.env` 的 Provider 和模型。记忆执行器不指定 reasoningEffort 或 maxTokens，也不修改 Provider 的能力声明；全部采用 DSH/Provider 默认行为。任务超时仍由本工具管理。配置冲突或取消选择不会覆盖文件，已有凭据和其他配置保持原样。
 

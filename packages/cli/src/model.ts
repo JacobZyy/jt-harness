@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
-import { createInterface } from 'node:readline/promises'
+import search from '@inquirer/search'
 import { stdin, stdout } from 'node:process'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
 import type { Config } from '@jt-harness/memo/config'
@@ -24,14 +24,22 @@ export async function modelMain(root: string, args: string[]) {
       else {
         if (!stdin.isTTY || !stdout.isTTY) throw new Error('交互选择需要终端；可用 --list 或 --provider <id> --model <id>')
         stdout.write(`当前：${current.agent.provider} / ${current.agent.model}\n`)
-        models.forEach((model, index) => stdout.write(`${index + 1}. ${model.provider} / ${model.model}${model.current ? ' [当前]' : ''}\n`))
-        const prompt = createInterface({ input: stdin, output: stdout })
         try {
-          const answer = (await prompt.question('选择编号（回车取消）：')).trim()
-          if (!answer) { stdout.write('已取消，配置未改变。\n'); return }
-          if (!/^[1-9]\d*$/.test(answer)) throw new Error('请输入列表中的编号')
-          selected = models[Number(answer) - 1]
-        } finally { prompt.close() }
+          selected = await search({
+            message: '选择模型（输入名称或 Provider 搜索）',
+            pageSize: 8,
+            default: models.find(model => model.current),
+            source: input => {
+              const terms = (input ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)
+              return models.filter(model => terms.every(term => [model.provider, model.model, model.name].join(' ').toLowerCase().includes(term)))
+                .map(model => ({ value: model, name: model.provider + ' / ' + model.model + (model.current ? ' [当前]' : '') }))
+            },
+            theme: { style: { keysHelpTip: () => '↑↓ 选择 · 输入搜索 · 回车确认 · Ctrl+C 取消' } },
+          }, { input: stdin, output: stdout })
+        } catch (error) {
+          if (error instanceof Error && error.name === 'ExitPromptError') { stdout.write('已取消，配置未改变。\n'); return }
+          throw error
+        }
       }
       if (!selected) throw new Error('所选模型不在 DSH 当前列表中')
       for (const [key, value] of [['JTH_DSH_PROVIDER', selected.provider], ['JTH_DSH_MODEL', selected.model]]) {
