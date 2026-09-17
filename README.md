@@ -89,7 +89,7 @@ node bin/jth.mjs memo init
 | `EMBEDDING_DIMENSIONS` | 默认 1024 |
 | `EMBEDDING_TIMEOUT_MS` | 单次调用超时，默认 60000 ms |
 | `JTH_DSH_PROVIDER` / `JTH_DSH_MODEL` | 默认读取 `packages/memo/src/agents/runtime.json` |
-| `JTH_DSH_REASONING_EFFORT` / `JTH_DSH_MAX_TOKENS` | 可选模型参数 |
+| `JTH_DSH_REASONING_EFFORT` / `JTH_DSH_MAX_TOKENS` | 默认关闭思考（off）；输出上限默认继承 DSH Provider/模型，不再固定 8192 |
 | `JTH_DSH_TIMEOUT_MS` | 当前运行配置为 600000 ms，可按模型延迟调整 |
 | `JTH_DSH_BIN` / `JTH_DSH_HOME` | 可选 DSH JS 入口及 DSH 配置目录 |
 | `JTH_DATA_DIR` | 默认 `~/.jth`，存放 worker 日志和 Agent 工作目录 |
@@ -247,3 +247,5 @@ pnpm test:postgres
 v3 五项存储能力及真实 CLI 验证见 [存储增强验证报告](docs/memory-storage-v3-verification.md)。`node scripts/verify-storage-v3.ts --live` 会调用真实 DSH/Embedding，在独立测试项目中验证原子提炼、时间窗口、候选审核、归档恢复与体检。
 
 本次默认流程恢复与真实 DSH 验收见 [恢复记录](docs/dsh-restore-verification.md)。
+
+关闭思考与取消项目输出上限的受控验证见 [配置同步报告](docs/dsh-thinking-off-verification.md)。

@@ -86,7 +86,7 @@ export const optionsSchema = z.strictObject({
   provider: id,
   model: id,
   reasoningEffort: text.optional(),
-  maxTokens: z.number().int().positive().default(8_192),
+  maxTokens: z.number().int().positive().optional(),
   timeoutMs: z.number().int().positive().max(2_147_483_647).default(180_000),
   dshBin: text.optional(),
   dshHome: text.optional(),
