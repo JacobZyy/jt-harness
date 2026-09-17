@@ -23,8 +23,6 @@ export async function loadConfig(root: string, envFile?: string, environment: No
     ...runtime,
     provider: values.JTH_DSH_PROVIDER ?? runtime.provider,
     model: values.JTH_DSH_MODEL ?? runtime.model,
-    reasoningEffort: values.JTH_DSH_REASONING_EFFORT ?? runtime.reasoningEffort,
-    maxTokens: values.JTH_DSH_MAX_TOKENS === undefined ? runtime.maxTokens : Number(values.JTH_DSH_MAX_TOKENS),
     timeoutMs: values.JTH_DSH_TIMEOUT_MS === undefined ? runtime.timeoutMs : Number(values.JTH_DSH_TIMEOUT_MS),
     dshBin: values.JTH_DSH_BIN ? resolve(dirname(file), values.JTH_DSH_BIN) : runtime.dshBin,
     dshHome: values.JTH_DSH_HOME ? resolve(dirname(file), values.JTH_DSH_HOME) : runtime.dshHome,

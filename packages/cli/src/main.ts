@@ -17,6 +17,7 @@ import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 
 const help = `jth memo <command>
 
+  model                        交互切换当前 Agent 模型；--list 查询实时列表
   init                         初始化 PostgreSQL + pgvector 表
   prepare --session <id>       为当前 Agent 返回可引用来源
   record <file.json|->         保存会话内候选，后台仅生成向量

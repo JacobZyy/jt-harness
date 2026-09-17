@@ -19,6 +19,10 @@
     "./legacy": {
       "types": "./dist/legacy.d.ts",
       "import": "./dist/legacy.js"
+    },
+    "./models": {
+      "types": "./dist/models.d.ts",
+      "import": "./dist/models.js"
     }
   },
   "dependencies": {
@@ -27,11 +31,15 @@
   },
   "optionalDependencies": {
     "@deepseek-ai/dsh-llm": "link:../../../deepseek-harness/packages/llm/llm",
-    "@deepseek-ai/dsh-sdk-client": "link:../../../deepseek-harness/packages/sdk/client"
+    "@deepseek-ai/dsh-sdk-client": "link:../../../deepseek-harness/packages/sdk/client",
+    "@deepseek-ai/dsh-sdk-protocol": "link:../../../deepseek-harness/packages/sdk/protocol"
   },
   "scripts": {
     "build": "node ../../scripts/build-package.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/*.test.ts src/agents/*.test.ts src/agents/evaluation/*.test.ts src/storage/*.test.ts"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../../deepseek-harness/vendor/cordis"
   }
 }

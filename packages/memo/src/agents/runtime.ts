@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
 import type { RunResult } from '@deepseek-ai/dsh-sdk-client'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { z } from 'zod'
 import { optionsSchema } from '../contracts.ts'
 import type { MemoryAgentOptions } from '../contracts.ts'
@@ -37,8 +36,6 @@ export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions
     processCwd: workspace,
     provider: options.provider,
     model: options.model,
-    reasoningEffort: options.reasoningEffort === undefined ? undefined : ReasoningEffortId(options.reasoningEffort),
-    maxTokens: options.maxTokens,
     dshBin: options.dshBin,
     dshHome: options.dshHome,
     env: {
@@ -65,8 +62,7 @@ export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions
     assertAgentRun(run)
     return {
       response: run.finalResponse,
-      run: { session_id: run.sessionId, provider: options.provider, model: options.model,
-        ...(options.reasoningEffort === undefined ? {} : { reasoningEffort: options.reasoningEffort }) },
+      run: { session_id: run.sessionId, provider: options.provider, model: options.model },
     }
   } catch (error) {
     throw new Error(`DSH session=${sessionId}: ${error instanceof Error ? error.message : '运行失败'}`, { cause: error })

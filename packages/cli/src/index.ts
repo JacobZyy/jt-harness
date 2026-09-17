@@ -1,5 +1,9 @@
 export async function run(root: string, args = process.argv.slice(2)) {
   process.umask(0o077)
+  if (args[0] === 'memo' && args[1] === 'model') {
+    const { modelMain } = await import('./model.ts')
+    return modelMain(root, args.slice(2))
+  }
   if (args[0] === 'memo' && args[1] === 'codex') {
     const { codexMain } = await import('./codex.ts')
     return codexMain(root, args.slice(2))

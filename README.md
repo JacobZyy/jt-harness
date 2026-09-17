@@ -89,7 +89,6 @@ node bin/jth.mjs memo init
 | `EMBEDDING_DIMENSIONS` | 默认 1024 |
 | `EMBEDDING_TIMEOUT_MS` | 单次调用超时，默认 60000 ms |
 | `JTH_DSH_PROVIDER` / `JTH_DSH_MODEL` | 默认读取 `packages/memo/src/agents/runtime.json` |
-| `JTH_DSH_REASONING_EFFORT` / `JTH_DSH_MAX_TOKENS` | 默认关闭思考（off）；输出上限默认继承 DSH Provider/模型，不再固定 8192 |
 | `JTH_DSH_TIMEOUT_MS` | 当前运行配置为 600000 ms，可按模型延迟调整 |
 | `JTH_DSH_BIN` / `JTH_DSH_HOME` | 可选 DSH JS 入口及 DSH 配置目录 |
 | `JTH_DATA_DIR` | 默认 `~/.jth`，存放 worker 日志和 Agent 工作目录 |
@@ -248,4 +247,14 @@ v3 五项存储能力及真实 CLI 验证见 [存储增强验证报告](docs/mem
 
 本次默认流程恢复与真实 DSH 验收见 [恢复记录](docs/dsh-restore-verification.md)。
 
-关闭思考与取消项目输出上限的受控验证见 [配置同步报告](docs/dsh-thinking-off-verification.md)。
+此前强制关闭思考的历史实验见 [配置同步报告](docs/dsh-thinking-off-verification.md)，已撤销该配置。
+
+## 交互切换记忆 Agent 模型
+
+运行 `jth memo model`，从 DSH 当前实际目录中选择编号；列表显示 Provider、模型 ID 和当前项。`jth memo model --list` 输出 JSON；也可用 `jth memo model --provider zz-tokenhub --model deepseek-flash` 精确选择。
+
+选择只保存项目 `.env` 的 Provider 和模型。记忆执行器不指定 reasoningEffort 或 maxTokens，也不修改 Provider 的能力声明；全部采用 DSH/Provider 默认行为。任务超时仍由本工具管理。配置冲突或取消选择不会覆盖文件，已有凭据和其他配置保持原样。
+
+模型发现复用独立 DSH SDK 进程中的 llm.listProviders/listModels；只读目录插件补充 SDK 缺少的目录端点，不调用模型、不依赖浏览器或 Web 服务。只在选择时查询目录，正常提取没有额外目录查询进程。
+
+旧队列的 Provider/model 快照不改写、不批量重跑；历史 effort/maxTokens 字段仅用于读取旧记录，不再被执行器转发。

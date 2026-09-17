@@ -85,6 +85,7 @@ export const agentExtractionSchema = extractionSchema.extend({
 export const optionsSchema = z.strictObject({
   provider: id,
   model: id,
+  // Decode historical queue snapshots only; the runtime never forwards these controls.
   reasoningEffort: text.optional(),
   maxTokens: z.number().int().positive().optional(),
   timeoutMs: z.number().int().positive().max(2_147_483_647).default(180_000),

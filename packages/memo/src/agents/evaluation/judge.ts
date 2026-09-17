@@ -53,7 +53,6 @@ export async function judgeExtraction(scenario: EvalCase, output: Extraction, ru
     processCwd: workspace,
     provider: runtime.provider,
     model: runtime.model,
-    maxTokens: 8192,
     env: { ...process.env, DSH_SYSTEM_PROMPT: `${judgeInstructions}\n${JSON.stringify(z.toJSONSchema(verdictSchema))}` },
   })
   let timer: ReturnType<typeof setTimeout> | undefined

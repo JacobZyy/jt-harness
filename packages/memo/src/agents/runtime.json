@@ -1,6 +1,5 @@
 {
   "provider": "deepseek-official",
   "model": "deepseek-v4-flash",
-  "timeoutMs": 600000,
-  "reasoningEffort": "off"
+  "timeoutMs": 600000
 }
