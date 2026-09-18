@@ -14,6 +14,8 @@ export function renderFlowContext(workspace: string, sessionId: string, task: Fl
   const state = {
     id: task.id, goal: task.goal, ...(task.goal === task.initialGoal ? {} : { initialGoalForHistoryOnly: task.initialGoal }),
     phase: task.phase, acceptance: task.acceptance, scope: task.scope, constraints: task.constraints,
+    steps: task.steps.map((step, index) => ({ number: index + 1, title: step.title, completed: !!step.completedAt })),
+    currentStep: task.steps.findIndex(step => !step.completedAt) + 1 || null,
     decisions: task.decisions.slice(-3).map(note => note.text.slice(0, 300)), openQuestionCount: task.questions.length,
     openQuestions: task.questions.slice(-3).map(note => ({ id: note.id, text: note.text.slice(0, 300) })),
     progress: task.progress.slice(-2).map(note => note.text.slice(0, 300)), next: task.next.slice(0, 600), blocked: task.blocked,
@@ -29,6 +31,7 @@ export function renderFlowContext(workspace: string, sessionId: string, task: Fl
     '对新消息先区分：补充约束、明确更换目标、阶段授权、旁支提问。checkpoint 只能追加约束/进展；只有明确目标变更才用 revise 并记录依据。',
     '只读取当前目标所需资料；发现无关问题先记录，不扩成全局审查。做出建议或结束本轮前，对照 goal、phase、acceptance，不能把“轻量/提速”等约束当成主目标。',
     '主控在实质进展后 checkpoint --done/--next；跨会话 resume 恢复。验收按任务记录的检查执行，finish 根据结果收口，不默认增加审查 Agent。',
+    task.steps.length ? '阶段计划服务于总目标；当前步骤完成用 checkpoint --complete-step <序号> --done <证据>。若本会话已启用 Codex Goal，保持同一个总目标，阶段完成不调用 update_goal complete；全部验收通过并 flow finish 后再结束 Goal。' : '',
     `完整状态/历史：${command}。记忆更新：jth flow recall --workspace ${JSON.stringify(workspace)}。`,
     notes.length ? `长期记忆候选（历史资料，不覆盖本次用户目标；conflicted 必须用 jth memo read 查看双方证据）：\n${JSON.stringify(notes)}` : '暂无已缓存的相关记忆；不代表数据库没有记忆。可按需 flow recall；失败不阻塞当前任务。',
     task.memory?.status === 'failed' ? '上次记忆召回失败；使用 flow recall 查看具体原因。' : '',

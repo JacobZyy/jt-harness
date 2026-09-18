@@ -110,7 +110,7 @@ export async function storageDoctor(pool: Pool) {
       const failed = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM jt_memo.jobs WHERE status='failed'")
       if (failed.rows[0].count) add('warning', 'failed_jobs', 'jobs', `${failed.rows[0].count} 个任务失败，可通过 status 查看原因`)
       const partial = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM jt_memo.jobs WHERE status='partial'")
-      if (partial.rows[0].count) add('warning', 'partial_jobs', 'jobs', `${partial.rows[0].count} 个任务有未接收条目；有效部分已处理，原始输出与诊断保留`)
+      if (partial.rows[0].count) add('warning', 'partial_jobs', 'jobs', `${partial.rows[0].count} 个任务曾有未接收条目；有效部分已保存，使用 memo recover 查看当前修复回执`)
     }
     await client.query('COMMIT')
     return { ok: errors === 0, schema_version: version, checked: { submissions, commits }, errors, warnings, issues, issues_truncated: errors + warnings > issues.length, mode: 'read_only' }

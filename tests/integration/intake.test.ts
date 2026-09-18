@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { Pool } from 'pg'
 import { z } from 'zod'
-import { prepareDatabase, loadConfig, executionProfile, enqueue, jobStatus, MemoStorage, readAgentOutputs, retryJob } from '@jt-harness/memo'
+import { prepareDatabase, loadConfig, executionProfile, enqueue, jobStatus, MemoStorage, readAgentOutputs, retryJob, recoverIntake, readIntakeRecovery } from '@jt-harness/memo'
 import type { Submission } from '@jt-harness/memo/contracts'
 import { processJob, runLegacyWorker } from '@jt-harness/memo/legacy'
 import type { extractMemories } from '@jt-harness/memo/legacy'
@@ -59,11 +59,14 @@ test('partial intake publishes independent memories and preserves rejected and u
         ALTER TABLE jt_memo.jobs DROP CONSTRAINT jobs_status_check;
         ALTER TABLE jt_memo.jobs ADD CONSTRAINT jobs_status_check CHECK(status IN ('queued','running','complete','failed'));
         UPDATE jt_memo.schema_version SET version=4;`)
-      await assert.rejects(prepareDatabase(pool, false), /v5/)
+      await assert.rejects(prepareDatabase(pool, false), /v6/)
       await prepareDatabase(pool, true)
       assert.deepEqual(await snapshot(), before)
       assert.deepEqual((await storage.getSubmission(submission.submission_id)).intake_issues, [])
       assert.equal((await readAgentOutputs(pool, submission.submission_id)).length, 0)
+      await pool.query('DROP TABLE jt_memo.intake_recoveries; UPDATE jt_memo.schema_version SET version=5')
+      await prepareDatabase(pool, true)
+      assert.deepEqual(await snapshot(), before, 'v5 recovery migration must not rewrite published data')
     })
 
     await t.test('a malformed item does not discard good items; index retry keeps the exact first extraction', async () => {
@@ -94,6 +97,31 @@ test('partial intake publishes independent memories and preserves rejected and u
       assert.equal(status.issue_count, 1)
       assert.equal(status.output_count, 1)
       await assert.rejects(retryJob(pool, submission.submission_id), /partial/)
+      const snapshot = async () => (await pool.query(`SELECT s.content_hash,c.vector_hash,c.intake_issues FROM jt_memo.submissions s
+        JOIN jt_memo.index_commits c ON c.submission_id=s.id WHERE s.id=$1`, [submission.submission_id])).rows
+      const before = await snapshot()
+      const correction = [{ path: 'memories[1]', action: 'replace', reason: '定位回原始消息 m', value: { ...bad, source_message_ids: ['m'] } }]
+      const recovered = await recoverIntake(pool, submission.submission_id, correction)
+      const childId = recovered.issues[0].recovery.followup_id
+      assert.equal(recovered.unresolved_count, 1, 'queued recovery must not appear complete')
+      const child = (await pool.query('SELECT id,payload,execution FROM jt_memo.jobs WHERE id=$1', [childId])).rows[0]
+      assert.equal((await storage.getSubmission(childId)).received_at, saved.received_at, 'recovery must retain original receive time')
+      await assert.rejects(recoverIntake(pool, submission.submission_id, [{ ...correction[0], reason: 'overwrite' }]), /不能覆盖/)
+      await recoverIntake(pool, submission.submission_id, correction)
+      const client2 = await pool.connect()
+      try {
+        api.mock.mockImplementationOnce(async () => Response.json({}, { status: 503 }))
+        await assert.rejects(processJob(client2, child, config, undefined, async () => { throw new Error('must not extract again') }), /HTTP 503/)
+      } finally { client2.release() }
+      await pool.query("UPDATE jt_memo.jobs SET status='failed',error='HTTP 503 fixture' WHERE id=$1", [childId])
+      assert.equal((await readIntakeRecovery(pool, submission.submission_id)).issues[0].recovery.followup_status, 'failed')
+      await retryJob(pool, childId)
+      assert.equal((await jobStatus(pool, childId)).failure_history.at(-1).error, 'HTTP 503 fixture')
+      assert.equal((await runLegacyWorker(pool, root, undefined, async () => ({ relations: [], run: outputRun() }))).completed, 1)
+      assert.equal((await readIntakeRecovery(pool, submission.submission_id)).unresolved_count, 0)
+      assert.equal((await storage.getSubmission(childId)).entries.length, 1)
+      assert.equal((await readAgentOutputs(pool, childId)).length, 0, 'explicit repair must not rerun extraction')
+      assert.deepEqual(await snapshot(), before, 'accepted source, vector hash and original issue must remain unchanged')
     })
 
     await t.test('bad relations do not change old facts or block independent new memories', async () => {
@@ -126,6 +154,38 @@ test('partial intake publishes independent memories and preserves rejected and u
       assert(found.entries.some(entry => entry.content === 'B') && found.entries.some(entry => entry.content === 'Z'))
       assert(found.entries.some(entry => entry.content === 'E'))
       assert.equal((await readAgentOutputs(pool, incoming.submission_id)).length, 2)
+      const correction = [{ path: 'relations[0]', action: 'replace', reason: '保留关系判断，修正为来源中的逐字引文',
+        value: { ...saved.index_receipts[0].intake_issues[0].value as object, evidence_quote: 'PG 使用 B 替代 A' } }]
+      await assert.rejects(recoverIntake(pool, incoming.submission_id, [{ ...correction[0], value: { ...correction[0].value, current_entry_id: old.id } }]), /不属于原批次/)
+      await assert.rejects(recoverIntake(pool, incoming.submission_id, [...correction,
+        { path: 'relations[100]', action: 'dismiss', reason: '不存在的条目' }]), /不存在/)
+      assert.equal((await storage.getEntry(old.id)).state, 'active', 'invalid request must roll back earlier relation publication')
+      assert.equal((await pool.query('SELECT * FROM jt_memo.intake_recoveries WHERE submission_id=$1', [incoming.submission_id])).rowCount, 0)
+      const beforeCalls = api.mock.callCount()
+      await Promise.all([recoverIntake(pool, incoming.submission_id, correction), recoverIntake(pool, incoming.submission_id, correction)])
+      assert.equal((await readIntakeRecovery(pool, incoming.submission_id)).unresolved_count, 0)
+      assert.equal((await storage.getEntry(old.id)).state, 'superseded')
+      assert.equal(api.mock.callCount(), beforeCalls, 'relation repair must reuse already indexed facts without embedding calls')
+      assert.equal((await pool.query('SELECT * FROM jt_memo.intake_recoveries WHERE submission_id=$1', [incoming.submission_id])).rowCount, 1)
+      assert.deepEqual((await storage.getSubmission(incoming.submission_id)).index_receipts, saved.index_receipts, 'original receipt is immutable')
+      const cli = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', 'recover', incoming.submission_id, '--env-file', envFile])
+      assert.equal(JSON.parse(cli.stdout).unresolved_count, 0)
+    })
+
+    await t.test('dismiss retains rejected content and reason; invalid replacement cannot silently discard a collection', async () => {
+      const submission = source('dismiss-intake')
+      await enqueue(pool, submission, execution)
+      const client = await pool.connect()
+      try { await processJob(client, { id: submission.submission_id, payload: submission, execution }, config, undefined,
+        model(JSON.stringify({ schema_version: 1, memories: { content: 'not an array' }, proposals: [], revisions: [] }))) }
+      finally { client.release() }
+      await pool.query("UPDATE jt_memo.jobs SET status='partial' WHERE id=$1", [submission.submission_id])
+      await assert.rejects(recoverIntake(pool, submission.submission_id, [{ path: 'memories', action: 'replace', reason: 'empty', value: [] }]), /空修正/)
+      const result = await recoverIntake(pool, submission.submission_id, [{ path: 'memories', action: 'dismiss', reason: '来源没有这个事实；保留原始错误输出' }])
+      assert.equal(result.unresolved_count, 0)
+      assert.deepEqual(result.issues[0].value, { content: 'not an array' })
+      assert.equal(result.issues[0].recovery.action, 'dismiss')
+      assert.equal((await jobStatus(pool, submission.submission_id)).status, 'partial', 'recovery does not rewrite history as a clean model run')
     })
 
     await t.test('unparseable JSON and its repair attempt are both retained and readable through the CLI', async () => {

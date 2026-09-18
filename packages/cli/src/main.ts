@@ -15,7 +15,7 @@ import { listManagedEntries, manageEntry, storageStats } from '@jt-harness/memo'
 import { storageDoctor } from '@jt-harness/memo'
 import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
-import { schemaVersion, readAgentOutputs } from '@jt-harness/memo'
+import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jt-harness/memo'
 
 const help = `jth flow <command>  轻量任务目标、恢复与验收；运行 jth flow --help
 jth db status|start|stop  本机 PostgreSQL 生命周期管理
@@ -32,6 +32,7 @@ jth memo <command>
   outputs <submission-id>      查看原始模型返回，包括无法解析的结果
   work [--index]               默认采集会话并运行 DSH；--index 仅恢复手动候选
   retry <submission-id>        重试失败任务，复用已保存提炼
+  recover <id> [file.json|-]   查看未接收条目；按路径提交 replace/dismiss 修正和原因
   search <query> <scope>       返回候选摘要，默认排除助手建议
   read <entry-id>              读取正文与来源证据
   read --submission <id>       读取批次、修订证据和提交回执
@@ -73,7 +74,7 @@ const commandOptions: Record<string, string[]> = {
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
   read: ['submission', 'as-of'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
-  outputs: [],
+  outputs: [], recover: [],
 }
 
 async function readSubmission(path: string) {
@@ -106,6 +107,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
     const invalidOptions = Object.keys(values).filter(name => !['env-file', 'help', ...commandOptions[command]].includes(name))
     if (invalidOptions.length) throw new Error(`${command} 不支持：${invalidOptions.join(', ')}`)
     const count = command === 'status' ? operands.length <= 1
+      : command === 'recover' ? operands.length >= 1 && operands.length <= 2
       : ['send', 'retry', 'search', 'outputs'].includes(command) ? operands.length === 1
       : command === 'read' ? operands.length + Number(Boolean(values.submission)) === 1
       : command === 'review' ? (operands[0] === 'list' ? operands.length === 1 : ['approve', 'reject'].includes(operands[0]) && operands.length === 2)
@@ -139,6 +141,19 @@ export async function main(root: string, args = process.argv.slice(2)) {
     let result: unknown
     switch (command) {
       case 'init': result = { status: 'ready', schema_version: schemaVersion }; break
+      case 'recover': {
+        const recovery = operands[1]
+          ? await recoverIntake(pool, operands[0], await readSubmission(operands[1]))
+          : await readIntakeRecovery(pool, operands[0])
+        result = recovery
+        if (operands[1] && recovery.issues.some(issue => ['queued', 'running'].includes(issue.recovery?.followup_status))) {
+          try { result = { ...recovery, worker: await startWorker(root, config) } } catch (error) {
+            result = { ...recovery, worker: { started: false, error: safeError(error, config), recovery: 'jth memo work' } }
+            process.exitCode = 1
+          }
+        }
+        break
+      }
       case 'outputs': {
         const status = await jobStatus(pool, operands[0])
         result = { submission_id: operands[0], status: status.status, error: status.error, intake_issues: status.intake_issues,

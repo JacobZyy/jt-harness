@@ -28,7 +28,7 @@ export async function enqueue(pool: Pool | PoolClient, input: unknown, execution
 
 export async function jobStatus(database: Pool | PoolClient, id?: string) {
   const jobs = await database.query(`
-    SELECT j.id AS submission_id, j.kind, j.status, j.attempts, j.error, j.created_at, j.updated_at,
+    SELECT j.id AS submission_id, j.kind, j.status, j.attempts, j.error, j.failure_history, j.created_at, j.updated_at,
       j.execution->'agent' AS agent, j.execution->'space' AS embedding_space,
       s.stored_at, s.extraction_run AS extraction_run,
       CASE WHEN s.id IS NULL THEN NULL ELSE jsonb_array_length(s.extraction->'revisions') END AS revision_evidence_count,
@@ -39,6 +39,9 @@ export async function jobStatus(database: Pool | PoolClient, id?: string) {
       (SELECT COALESCE(jsonb_agg(jsonb_build_object('path',item->>'path','error',item->>'error')),'[]'::jsonb)
         FROM jsonb_array_elements(COALESCE(c.intake_issues,s.intake_issues,'[]'::jsonb)) item) AS intake_issues,
       (SELECT count(*)::int FROM jt_memo.agent_outputs o WHERE o.submission_id=j.id) AS output_count,
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object('path',r.path,'action',r.action,'reason',r.reason,
+        'followup_id',r.followup_id,'followup_status',child.status,'publication_notes',r.publication_notes)),'[]'::jsonb)
+        FROM jt_memo.intake_recoveries r LEFT JOIN jt_memo.jobs child ON child.id=r.followup_id WHERE r.submission_id=j.id) AS recoveries,
       (SELECT count(*)::int FROM jt_memo.entry_states e WHERE e.submission_id=j.id AND e.claim_status='candidate') AS candidate_count
     FROM jt_memo.jobs j LEFT JOIN jt_memo.submissions s ON s.id = j.id
     LEFT JOIN jt_memo.index_commits c ON c.submission_id = j.id AND c.space_id = j.execution->'space'->>'id'
@@ -52,7 +55,12 @@ export async function jobStatus(database: Pool | PoolClient, id?: string) {
   const counts = await database.query<{ status: string, count: number }>('SELECT status, count(*)::int AS count FROM jt_memo.jobs GROUP BY status ORDER BY status')
   const kinds = await database.query<{ kind: string, status: string, count: number }>('SELECT kind,status,count(*)::int AS count FROM jt_memo.jobs GROUP BY kind,status')
   const failures = await database.query<{ error: string, count: number }>("SELECT error,count(*)::int AS count FROM jt_memo.jobs WHERE status='failed' GROUP BY error ORDER BY count(*) DESC")
+  const recoveries = await database.query(`SELECT count(*)::int AS handled,
+    count(*) FILTER(WHERE r.followup_id IS NOT NULL AND child.status<>'complete')::int AS followups_pending,
+    count(*) FILTER(WHERE jsonb_array_length(r.publication_notes)>0)::int AS review_required
+    FROM jt_memo.intake_recoveries r LEFT JOIN jt_memo.jobs child ON child.id=r.followup_id`)
   return { counts: Object.fromEntries(counts.rows.map(row => [row.status, row.count])),
+    recoveries: recoveries.rows[0],
     execution: { dsh: 'sdk-subprocess', web_required: false }, failures: failures.rows,
     index_counts: Object.fromEntries(kinds.rows.filter(row => row.kind === 'index').map(row => [row.status, row.count])),
     legacy_counts: Object.fromEntries(kinds.rows.filter(row => row.kind === 'legacy').map(row => [row.status, row.count])), recent: jobs.rows }
@@ -62,6 +70,7 @@ export async function retryJob(pool: Pool, id: string, timeoutMs?: number) {
   const budget = timeoutMs === undefined ? null : optionsSchema.shape.timeoutMs.parse(timeoutMs)
   const result = await pool.query(`
     UPDATE jt_memo.jobs SET status = 'queued', error = NULL, updated_at = CURRENT_TIMESTAMP,
+      failure_history = failure_history || jsonb_build_array(jsonb_build_object('attempt',attempts,'error',error,'at',updated_at)),
       execution = CASE WHEN $2::int IS NULL THEN execution
         ELSE jsonb_set(execution, '{agent,timeoutMs}', to_jsonb($2::int)) END
     WHERE id = $1 AND status = 'failed' AND ($2::int IS NULL OR kind='legacy') RETURNING id

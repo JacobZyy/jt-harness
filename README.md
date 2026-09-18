@@ -10,7 +10,7 @@
 
 默认恢复 DSH：Hook 保存事件，后台 `memo work` 收集增量会话，交给 DSH 提炼及关系比较，再生成向量并发布。Hook 不等待模型。SessionStart 不再注入会话内提取说明；已有会话中的旧说明需恢复会话后刷新。
 
-数据库使用 schema v5，并保留所有已有记录。表中的 `kind=legacy` 是 DSH 队列的历史字段名，不代表当前停用。`memo work --legacy` 与默认 DSH 路径兼容；`memo work --index` 仅恢复先前手动 record 的索引任务。失败任务仍需显式 retry，不自动重跑旧失败记录。
+数据库使用 schema v6，并保留所有已有记录。表中的 `kind=legacy` 是 DSH 队列的历史字段名，不代表当前停用。`memo work --legacy` 与默认 DSH 路径兼容；`memo work --index` 仅恢复先前手动 record 的索引任务。失败任务仍需显式 retry，不自动重跑旧失败记录。
 
 会话内 `prepare / evidence / record` 保留为手动工具，不再由 Hook 指示 Agent 自动调用。`record` 自己启动 index worker，不会额外进入 DSH。
 
@@ -33,6 +33,8 @@ Codex 中这些命令由 `jth-flow` Skill 在长任务需要时调用，日常�
 新会话使用 `jth flow status --all` 选择原任务，`jth flow resume <id>` 恢复；旧会话仍占有主控时显式加 `--takeover`。子 Agent 只能读取主任务状态。终端不带 Codex 会话 ID 时，用 `--task <id>` 指定操作对象，或 `--session <id>` 明确绑定。
 
 用户明确切换到独立目标时，用 `jth flow pause --reason '切换依据'` 解除当前绑定，再 start 新任务。暂停保留旧任务，不假装完成；恢复时仍用 resume。
+
+长任务可以在 `start` 或 `checkpoint` 使用重复的 `--step '阶段交付'` 保存有序计划。完成当前步骤使用 `checkpoint --complete-step 1 --done '实际结果与证据'`。Hook 注入计划和当前步骤，恢复后继续第一个未完成步骤；全部步骤完成后仍需总体验收。用户明确要求启用 Codex Goal 且宿主提供原生 Goal 工具时，主 Agent 保持一个总 Goal，由 Flow 保存阶段与证据；`flow finish` 后才完成原生 Goal。CLI 不依赖私有 App API，也不另起自动续跑循环。
 
 开始、恢复和输入时的记忆召回由短生命周期后台子进程完成。Flow Hook 对 PostgreSQL 做短时读取，不等待数据库冷启动、模型或 Embedding。数据库离线时先保存本地事件，后台准备数据库并重放；不能把缺少注入当成没有任务。结果按已配置项目、业务和用户范围检索，缓存 5 分钟，最多注入 5 条简短摘要；用 `jth flow recall` 立即刷新，用 `jth memo read <id>` 获取证据和冲突双方。长期写入继续沿用原有六阶段捕获与 DSH 队列。
 
@@ -69,7 +71,21 @@ jth memo read --submission <id>          # 已接收结果及未接收条目的�
 jth memo outputs <submission-id>         # 原始模型返回，含 JSON 修复前后的每次尝试
 ```
 
-从 v5 起，DSH 已返回的响应在业务解析前写入 `jt_memo.agent_outputs`；因 token 上限停止时，SDK 已返回的片段也会保留并标明执行错误。因此后来发生条目校验或 Embedding 错误，不会丢失第一次返回。旧版本没有留存的模型输出不能凭空恢复；原会话仍可重跑。`partial` 不允许整批 retry 覆盖已发布结果；先读取诊断，修正的条目通过新提交追加。基础设施失败仍可以 retry，复用已保存的提炼检查点。
+从 v5 起，DSH 已返回的响应在业务解析前写入 `jt_memo.agent_outputs`；因 token 上限停止时，SDK 已返回的片段也会保留并标明执行错误。因此后来发生条目校验或 Embedding 错误，不会丢失第一次返回。旧版本没有留存的模型输出不能凭空恢复；原会话仍可重跑。基础设施失败使用 `retry`，复用已保存的提炼检查点。v6 在 retry 时将原失败原因保存在 `jobs.failure_history`。
+
+`partial` 使用按条恢复，保留原有正文、向量、模型输出和回执。先查看原材料与诊断，主 Agent 或调用者据此提供修正文件，不会自动请求模型重写整批：
+
+```sh
+jth memo recover <id>                 # 返回 issue 的 path/error/value 及现有恢复记录
+jth memo read --submission <id>       # 核对引用原文和已接收内容
+jth memo recover <id> corrections.json
+```
+
+文件是数组；每项是 `{ "path": "memories[2]", "action": "replace", "reason": "修正依据", "value": { ...完整修正条目 } }`，或 `{ "path": "relations[0]", "action": "dismiss", "reason": "原关系已过时，当前证据不支持应用" }`。整个集合格式错误时，原 path 为集合名，value 使用修正后的数组。`dismiss` 只记录不采纳的原因，不删除原错误内容。
+
+修正的提炼条目产生独立后续批次，保留原接收时间，复用原执行配置并跳过再次提炼，只为新增正文生成向量、比较关系。关系修正复用既有正文与向量，在原发布事务规则下追加；引用已失效事实时拒绝应用，避免旧关系回退当前状态。同一路径的相同请求幂等，不同请求不能覆盖恢复回执。后续批次失败仍用其 ID `retry`。
+
+`recover` 返回 `unresolved_count`；后续批次尚未完成或关系仍需审核时不会报已解决。原任务继续显示历史 `partial`，`status` 的 `recoveries` 和 `jt_memo.intake_recoveries` 记录处理结果，不将有错误的历史运行改写为一次干净成功。
 
 本机开发库位于 `~/.jth/postgres`。`jth` 使用 `~/.jth/run` 私有 Unix socket；图形客户端使用仅监听本机的 `127.0.0.1:5432`。在 `.env` 明确配置 `JTH_PG_DATA_DIR` 和 `JTH_PG_BIN_DIR` 后，数据库访问会复用运行实例或按需启动它；电脑重启后的第一次访问也适用。没有增加开机常驻服务，PG 启动后不随单次 CLI 退出而关闭。
 

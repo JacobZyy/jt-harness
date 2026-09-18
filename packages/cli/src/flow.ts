@@ -13,10 +13,11 @@ import { startBackground } from './background.ts'
 
 const help = `jth flow install --project <id> [--business <id>] [--env-file <path>]
 jth flow migrate  将原 SQLite 任务完整迁入 PostgreSQL，保留备份
-jth flow start <目标> --accept <完成条件> [--phase discussion|execution] [--scope <相对路径>] [--check <命令>]
+jth flow start <目标> --accept <完成条件> [--step <阶段交付>] [--phase discussion|execution] [--scope <相对路径>] [--check <命令>]
 jth flow status [--all] [--history] | context
 jth flow checkpoint [--done <进展>] [--next <下一步>] [--constraint <约束>] [--decision <结论>] [--question <问题>] [--resolve <问题ID>]
                     [--phase discussion|execution --reason <授权依据>] [--blocked <原因或空字符串>] [--check <命令>] [--context <相对路径>]
+                    [--step <追加阶段>] [--complete-step <当前步骤序号> --done <结果与证据>]
 jth flow revise <新目标> --reason <用户变更依据>
 jth flow resume <任务ID> [--takeover]
 jth flow pause --reason <暂停或切换依据>
@@ -25,7 +26,7 @@ jth flow verify [--timeout-ms <每项超时>]
 jth flow finish --summary <达成结果> [--evidence <相对文件>]
 jth flow uninstall
 通用：--workspace <项目目录>。任务命令可用 --task <ID>；Codex 内默认绑定 CODEX_THREAD_ID，终端用 --session <ID> 或明确任务 ID。
-accept、scope、check、context、constraint、done、decision、question、resolve 可重复。hook 是内部入口。
+accept、scope、check、context、constraint、done、decision、question、resolve、step 可重复。hook 是内部入口。
 `
 
 export async function flowMain(root: string, args: string[]) {
@@ -38,13 +39,14 @@ export async function flowMain(root: string, args: string[]) {
       phase: { type: 'string' }, constraint: { type: 'string', multiple: true }, done: { type: 'string', multiple: true },
       decision: { type: 'string', multiple: true }, question: { type: 'string', multiple: true }, resolve: { type: 'string', multiple: true },
       next: { type: 'string' }, reason: { type: 'string' }, blocked: { type: 'string' }, summary: { type: 'string' }, evidence: { type: 'string' },
+      step: { type: 'string', multiple: true }, 'complete-step': { type: 'string' },
       all: { type: 'boolean' }, history: { type: 'boolean' }, takeover: { type: 'boolean' }, 'timeout-ms': { type: 'string' }, request: { type: 'string' }, help: { type: 'boolean', short: 'h' },
     } })
     const [command, operand] = positionals
     if (values.help || !command) { process.stdout.write(help); return }
     const allowed: Record<string, string[]> = {
-      install: ['project', 'business', 'env-file'], uninstall: [], start: ['accept', 'scope', 'check', 'context', 'phase', 'constraint'],
-      status: ['all', 'history'], context: [], checkpoint: ['constraint', 'done', 'decision', 'question', 'resolve', 'next', 'phase', 'reason', 'blocked', 'check', 'context'],
+      install: ['project', 'business', 'env-file'], uninstall: [], start: ['accept', 'scope', 'check', 'context', 'phase', 'constraint', 'step'],
+      status: ['all', 'history'], context: [], checkpoint: ['constraint', 'done', 'decision', 'question', 'resolve', 'next', 'phase', 'reason', 'blocked', 'check', 'context', 'step', 'complete-step'],
       revise: ['reason'], resume: ['takeover'], pause: ['reason'], verify: ['timeout-ms'], finish: ['summary', 'evidence'], recall: ['request'], hook: [], sync: [], migrate: [],
     }
     if (!Object.hasOwn(allowed, command)) throw new Error('未知 flow 命令；使用 jth flow --help')
@@ -124,7 +126,7 @@ export async function flowMain(root: string, args: string[]) {
     if (command === 'start') {
       if (values.phase && values.phase !== 'discussion' && values.phase !== 'execution') throw new Error('初始阶段只能为 discussion 或 execution')
       const task = await store.start({ goal: operand, acceptance: values.accept ?? [], scope: values.scope, checks: values.check,
-        contextFiles: values.context, constraints: values.constraint, phase: values.phase as 'discussion' | 'execution' | undefined,
+        contextFiles: values.context, constraints: values.constraint, steps: values.step, phase: values.phase as 'discussion' | 'execution' | undefined,
       }, await workspaceSnapshot(workspace), sessionId)
       output({ ...taskView(task), recall: await scheduleRecall(root, store, task.id) })
       return
@@ -157,6 +159,7 @@ export async function flowMain(root: string, args: string[]) {
     if (command === 'checkpoint') {
       if (values.phase && values.phase !== 'discussion' && values.phase !== 'execution') throw new Error('手动阶段只能为 discussion 或 execution')
       output(taskView(await store.checkpoint(taskId, { constraint: values.constraint, done: values.done, decision: values.decision, question: values.question, resolve: values.resolve,
+        step: values.step, completeStep: values['complete-step'] === undefined ? undefined : Number(values['complete-step']),
         next: values.next, phase: values.phase as 'discussion' | 'execution' | undefined, reason: values.reason, blocked: values.blocked, check: values.check, context: values.context,
       }, sessionId)))
       await scheduleRecall(root, store, taskId)

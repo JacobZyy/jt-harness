@@ -20,6 +20,21 @@ jth flow status
 
 `start` 默认 discussion。用户已授权实施时直接指定 `--phase execution`，不重复询问。任务较大时用多个 `--accept` 写清交付条件，`--scope` 标明相关文件或目录，`--context` 记录已定位的资料路径。路径和命令可重复传入。
 
+## 阶段计划与 Codex Goal
+
+长任务可用重复的 `--step` 记录有交付结果的有序阶段。`phase` 表示讨论、执行、验收等生命周期，`steps` 表示本任务的具体阶段；两者不要混用。只有当前未完成步骤可以收口，结果与证据用 `--done` 保存。补充计划用 `checkpoint --step` 追加，不覆盖已完成记录。
+
+```sh
+jth flow start '修复记忆异常恢复' --phase execution --accept '有效数据不丢失、不重复' --step '定位异常与保留基线' --step '实现局部恢复并验证' --step '回补真实任务并交付证据'
+jth flow checkpoint --complete-step 1 --done '已保存队列基线，确认两类异常的失败阶段' --next '实现局部恢复'
+```
+
+用户明确要求使用 Codex Goal，且当前宿主提供 `get_goal`、`create_goal`、`update_goal` 时，由主 Agent 配合这些原生工具：先读取当前 Goal；没有活动 Goal 才创建与 Flow 一致的总目标。未要求预算时不自行设定。每个步骤仍属于这个总目标，不为每一步重复创建 Goal，也不因阶段完成提前标记整个 Goal 完成。已有其他活动 Goal 时先明确任务关系，不能擅自覆盖。
+
+中断或上下文恢复后，读取 `get_goal` 和 `jth flow context`，接续第一个未完成步骤。进展、约束、阶段证据以 Flow 为持久来源，Goal 负责宿主的持续执行；CLI 不调用私有 App API、不另建自动续跑循环，也不复制 Goal 的预算与运行状态。若工具不可用，按 Flow 计划继续，明确没有启用原生 Goal。
+
+所有步骤、总目标验收和 `flow finish` 完成后，才调用 `update_goal` 标记总目标完成。暂时等待或一次失败不等于 Goal blocked；遵守当前宿主工具对阻塞的定义。
+
 ## 处理新消息
 
 先判断这条消息对原目标的影响，再继续工作：

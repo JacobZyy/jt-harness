@@ -3,7 +3,8 @@ import type { PoolClient } from 'pg'
 import { MemoStorageError } from './contract.ts'
 import { storageManagementSchema } from './schema-v3.ts'
 import { intakeSchema } from './schema-v5.ts'
-export const schemaVersion = 5
+import { recoverySchema } from './schema-v6.ts'
+export const schemaVersion = 6
 
 /** All transaction statements use one checked-out connection. */
 const transactionDepth = new WeakMap<PoolClient, number>()
@@ -163,7 +164,7 @@ export async function prepareDatabase(pool: Pool, initializeSchema: boolean): Pr
         await client.query(schema)
         await client.query('INSERT INTO jt_memo.schema_version VALUES (true, 1)')
         version = 1
-      } else if (![1, 2, 3, 4, 5].includes(version)) {
+      } else if (![1, 2, 3, 4, 5, 6].includes(version)) {
         throw new MemoStorageError('SCHEMA_NOT_READY', '记忆库版本未知；拒绝升级或降级')
       }
       if (version === 1) {
@@ -180,7 +181,8 @@ export async function prepareDatabase(pool: Pool, initializeSchema: boolean): Pr
         await client.query("UPDATE jt_memo.jobs SET status='queued' WHERE kind='legacy' AND status='running'")
         version = 4
       }
-      if (version === 4) await client.query(intakeSchema)
+      if (version === 4) { await client.query(intakeSchema); version = 5 }
+      if (version === 5) await client.query(recoverySchema)
       await client.query('UPDATE jt_memo.schema_version SET version = $1 WHERE singleton = true', [schemaVersion])
     })
   }

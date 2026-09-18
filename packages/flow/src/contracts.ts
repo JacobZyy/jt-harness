@@ -15,16 +15,19 @@ export const createTaskSchema = z.strictObject({
   acceptance: z.array(text).min(1).max(16), scope: z.array(relativePathSchema).min(1).max(20).default(['.']),
   contextFiles: z.array(relativePathSchema).max(16).default([]), checks: z.array(text).max(16).default([]),
   constraints: z.array(text).max(24).default([]),
+  steps: z.array(text).max(12).default([]),
 })
 export const checkpointSchema = z.strictObject({
   constraint: z.array(text).default([]), decision: z.array(text).default([]), question: z.array(text).default([]),
   done: z.array(text).default([]), resolve: z.array(z.uuid()).default([]),
   next: z.string().trim().max(2000).optional(), phase: z.enum(['discussion', 'execution']).optional(), reason: text.optional(),
   blocked: z.string().trim().max(2000).optional(), check: z.array(text).default([]), context: z.array(relativePathSchema).default([]),
+  step: z.array(text).default([]), completeStep: z.number().int().min(1).optional(),
 })
 const noteSchema = z.strictObject({ id: z.uuid(), text, at: text })
 const resultSchema = z.strictObject({ command: text, exitCode: z.number().int().nullable(), signal: z.string().nullable(), timedOut: z.boolean(), elapsedMs: z.number().nonnegative(), log: text })
 export const taskSchema = createTaskSchema.extend({
+  steps: z.array(z.strictObject({ title: text, completedAt: text.nullable(), evidence: z.array(text) })).max(12).default([]),
   id: z.uuid(), initialGoal: text, phase: phaseSchema, contractVersion: z.number().int().positive(), createdAt: text, updatedAt: text,
   decisions: z.array(noteSchema).max(64), questions: z.array(noteSchema).max(64), progress: z.array(noteSchema).max(256),
   next: z.string().max(2000), blocked: z.string().max(2000).nullable(), summary: z.string().max(4000).nullable(),
@@ -34,7 +37,7 @@ export const taskSchema = createTaskSchema.extend({
     entries: z.array(z.strictObject({ id: z.uuid(), content: text, state: text, claimStatus: text, sourceSession: text })).max(5),
   }).nullable(),
 }).superRefine((task, context) => {
-  const required = JSON.stringify({ goal: task.goal, acceptance: task.acceptance, scope: task.scope, constraints: task.constraints })
+  const required = JSON.stringify({ goal: task.goal, acceptance: task.acceptance, scope: task.scope, constraints: task.constraints, steps: task.steps.map(step => step.title) })
   if (Buffer.byteLength(required) > 8000) context.addIssue({ code: 'custom', message: '目标与边界超过 8000 字节；请把独立目标拆成任务，不能截断关键约束' })
 })
 export type FlowTask = z.infer<typeof taskSchema>

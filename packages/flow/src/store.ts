@@ -109,6 +109,7 @@ export class FlowStore {
       if (current && current.phase !== 'completed') throw new Error('当前会话已有未完成任务；新增约束用 checkpoint，明确切换任务用 resume')
       const at = new Date().toISOString()
       const task = await this.write(taskSchema.parse({ ...draft, id: randomUUID(), initialGoal: draft.goal, contractVersion: 1, createdAt: at, updatedAt: at,
+        steps: draft.steps.map(title => ({ title, completedAt: null, evidence: [] })),
         decisions: [], questions: [], progress: [], next: '', blocked: null, summary: null, baseline, verification: null, memory: null }), 'created', { goal: draft.goal, acceptance: draft.acceptance })
       if (sessionId) await this.bind(task.id, sessionId, true)
       return task
@@ -162,9 +163,16 @@ export class FlowStore {
       if (change.phase && change.phase !== task.phase && !change.reason) throw new Error('改变阶段必须说明用户授权或恢复依据（--reason）')
       if (change.resolve.some(id => !task.questions.some(note => note.id === id))) throw new Error('待解决问题 ID 不存在')
       const at = new Date().toISOString(), notes = (items: string[]) => items.map(text => ({ id: randomUUID(), text, at }))
+      const steps = [...task.steps, ...change.step.map(title => ({ title, completedAt: null, evidence: [] }))]
+      if (change.completeStep !== undefined) {
+        const current = steps.findIndex(step => !step.completedAt)
+        if (current < 0 || change.completeStep !== current + 1) throw new Error('只能完成当前未完成步骤；用 status 查看阶段计划')
+        if (!change.done.length) throw new Error('完成步骤需要 --done 记录实际结果与证据')
+        steps[current] = { ...steps[current], completedAt: at, evidence: change.done }
+      }
       const constraints = [...new Set([...task.constraints, ...change.constraint])], checks = [...new Set([...task.checks, ...change.check])]
-      const contractChanged = constraints.length !== task.constraints.length || checks.length !== task.checks.length || (change.phase !== undefined && change.phase !== task.phase)
-      return this.write({ ...task, constraints, checks,
+      const contractChanged = steps.length !== task.steps.length || constraints.length !== task.constraints.length || checks.length !== task.checks.length || (change.phase !== undefined && change.phase !== task.phase)
+      return this.write({ ...task, constraints, checks, steps,
         contextFiles: [...new Set([...task.contextFiles, ...change.context])], decisions: [...task.decisions, ...notes(change.decision)].slice(-64),
         questions: [...task.questions.filter(note => !change.resolve.includes(note.id)), ...notes(change.question)], progress: [...task.progress, ...notes(change.done)].slice(-64),
         next: change.next ?? task.next, blocked: change.blocked === undefined ? task.blocked : change.blocked || null,
@@ -197,6 +205,7 @@ export class FlowStore {
       const task = await this.task(taskId)
       if (task.blocked) throw new Error('任务仍有阻塞项，请先 checkpoint --blocked "" 记录解除')
       if (task.phase === 'completed') return task
+      if (task.steps.some(step => !step.completedAt)) throw new Error('阶段计划仍有未完成步骤；阶段完成不等于总目标达成')
       if (task.questions.length) throw new Error('任务仍有未决问题；请记录结论并用 checkpoint --resolve <id> 关闭')
       if (task.checks.length) {
         if (!task.verification?.passed || task.verification.contractVersion !== task.contractVersion) throw new Error('任务尚未通过当前验收命令；运行 jth flow verify')

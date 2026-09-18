@@ -38,7 +38,7 @@ test('in-session records publish using only Embedding, with durable retries and 
   const work = () => runIndexWorker(pool, async () => config)
   try {
     await prepareDatabase(pool, true)
-    assert.equal((await pool.query('SELECT version FROM jt_memo.schema_version')).rows[0].version, 5)
+    assert.equal((await pool.query('SELECT version FROM jt_memo.schema_version')).rows[0].version, 6)
     const initial = evidence('initial', '该项目请求超时为 17 秒。')
     const first = draft(initial, '请求超时为 17 秒。')
     let firstId = ''

@@ -22,6 +22,39 @@ async function fixture() {
   return { store, workspace, cleanup: async () => { await store.close(); await rm(workspace, { recursive: true, force: true }) } }
 }
 
+test('ordered stages keep the overall goal through interruption, restart and final acceptance', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+  const f = await fixture()
+  try {
+    const task = await f.store.start({ goal: '恢复异常，不丢失已保存数据', phase: 'execution', acceptance: ['真实回补并验证数据完整'],
+      steps: ['保留基线', '实现与验证'], checks: [`${process.execPath} -e "process.exit(0)"`] }, await workspaceSnapshot(f.workspace), 'owner')
+    await assert.rejects(f.store.checkpoint(task.id, { completeStep: 2, done: ['跳步'] }, 'owner'), /只能完成当前/)
+    await assert.rejects(f.store.checkpoint(task.id, { completeStep: 1 }, 'owner'), /证据/)
+    await f.store.checkpoint(task.id, { completeStep: 1, done: ['原始材料与向量哈希已保存'], constraint: ['不做独立交付'] }, 'owner')
+    await f.store.pause(task.id, '验证中断恢复', 'owner')
+    const reopened = new FlowStore(f.workspace, new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL }))
+    try {
+      const restored = await reopened.resume(task.id, 'resumed')
+      assert.equal(restored.goal, task.goal)
+      assert.equal(restored.initialGoal, task.goal)
+      assert(restored.steps[0].completedAt)
+      assert.equal(restored.steps[1].completedAt, null)
+      assert.equal(restored.constraints[0], '不做独立交付')
+      const context = renderFlowContext(f.workspace, 'resumed', restored, await reopened.binding('resumed'))
+      assert(context.includes('"currentStep":2') && context.includes(task.goal))
+      await assert.rejects(reopened.finish(task.id, '提前结束', {}, 'resumed'), /未完成步骤/)
+      await reopened.observe('child', 'SubagentStart', 'resumed')
+      await assert.rejects(reopened.checkpoint(task.id, { completeStep: 2, done: ['子任务不能结束主阶段'] }, 'child'), /不是任务主控/)
+      await reopened.checkpoint(task.id, { completeStep: 2, done: ['验证完成'] }, 'resumed')
+      await verifyTask(reopened, task.id, 'resumed')
+      await reopened.checkpoint(task.id, { step: ['真实回补'] }, 'resumed')
+      await reopened.checkpoint(task.id, { completeStep: 3, done: ['真实回补回执已核对'] }, 'resumed')
+      await assert.rejects(reopened.finish(task.id, '旧验收', await workspaceSnapshot(f.workspace), 'resumed'), /尚未通过/)
+      await verifyTask(reopened, task.id, 'resumed')
+      assert.equal((await reopened.finish(task.id, '原目标全部完成', await workspaceSnapshot(f.workspace), 'resumed')).phase, 'completed')
+    } finally { await reopened.close() }
+  } finally { await f.cleanup() }
+})
+
 test('the conversation drift case: a lightweight constraint preserves the goal and discussion phase across restart', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const f = await fixture()
   try {

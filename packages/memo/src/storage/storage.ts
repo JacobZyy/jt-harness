@@ -64,7 +64,9 @@ export class MemoStorage {
     return transaction(this.pool, async (client) => {
       const inserted = await client.query(`
         INSERT INTO jt_memo.submissions (id, content_hash, source, extraction, extraction_run, received_at, intake_issues)
-        VALUES ($1, $2, $3, $4, $5, COALESCE((SELECT created_at FROM jt_memo.jobs WHERE id=$1),CURRENT_TIMESTAMP),$6)
+        VALUES ($1, $2, $3, $4, $5, COALESCE(
+          (SELECT s.received_at FROM jt_memo.intake_recoveries r JOIN jt_memo.submissions s ON s.id=r.submission_id WHERE r.followup_id=$1),
+          (SELECT created_at FROM jt_memo.jobs WHERE id=$1),CURRENT_TIMESTAMP),$6)
         ON CONFLICT (id) DO NOTHING RETURNING id
       `, [submission.submission_id, contentHash, submission, extraction, run, JSON.stringify(intake_issues)])
       if (inserted.rowCount === 0) {

@@ -38,6 +38,10 @@ flowchart TD
 
 `checkpoint` 追加约束和进展，不能修改目标。`revise` 要求明确说明用户变更的依据，并让旧验收结果失效。讨论转实施也需要记录依据，但不要求用户重复授权。程序检查依据是否存在，无法独立判定依据的语义是否真实。
 
+长任务的 `steps` 保存有序阶段，每步包含标题、完成时间和结果证据。使用 `start --step` 建计划，`checkpoint --step` 追加，`checkpoint --complete-step <序号> --done <证据>` 完成当前步骤。追加阶段让旧验收失效，未完成计划不能 finish。阶段是总目标的实施路径，不替代 goal 或 acceptance；`phase` 仍表示讨论、执行、验收和完成。没有阶段规划需求的任务保持空计划。
+
+Codex Goal 配合放在主 Agent 的 Skill 中：用户明确要求、宿主工具可用时，读取或创建一个总 Goal，Flow 保存阶段与检查点。恢复时核对原生 Goal 和持久任务，完成一个步骤不会关闭 Goal，只有全部验收并 `flow finish` 后才标记原生 Goal 完成。本机暴露的 `create_goal/get_goal/update_goal` 是宿主工具，不是 `jth` 可直接调用的 CLI 接口；没有引入私有 API、第二套预算状态或自建续跑调度器。不提供这些工具的宿主仍可使用 Flow。
+
 会话绑定独立保存。新会话不会自动接续最近一个不相关任务；主控接管用显式 `resume --takeover`，原主控转为观察者。SubagentStart 关联父任务，子会话不能修改主目标。阶段只由主控命令改变，停止生成、被中断或关闭会话不等于完成任务。
 
 Hook 在 SessionStart（包括 compact）、UserPromptSubmit 和 SubagentStart 注入当前目标、阶段、验收条件、约束、少量近况和缓存记忆。其余生命周期只记录 `lastEvent` 与时间。重要边界保持原文；进展和历史记忆只给摘要，需要详情再读状态或条目。目标与边界的核心记录限制为 8000 字节，超长时要求明确拆任务，不静默截断核心约束。
