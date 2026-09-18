@@ -121,10 +121,10 @@ test('partial intake publishes independent memories and preserves rejected and u
       await pool.query("UPDATE jt_memo.jobs SET status='partial' WHERE id=$1", [incoming.submission_id])
       assert.equal((await storage.getEntry(old.id)).state, 'active')
       const saved = await storage.getSubmission(incoming.submission_id)
-      assert.equal(saved.entries.find(entry => entry.content === 'E')!.claim_status, 'candidate')
+      assert.equal(saved.entries.find(entry => entry.content === 'E')!.claim_status, 'verified')
       const found = await storage.search({ space_id: execution.space.id, vector: [1, 0], scope: { kind: 'project', project_ids: incoming.scope.project_ids } })
       assert(found.entries.some(entry => entry.content === 'B') && found.entries.some(entry => entry.content === 'Z'))
-      assert(!found.entries.some(entry => entry.content === 'E'))
+      assert(found.entries.some(entry => entry.content === 'E'))
       assert.equal((await readAgentOutputs(pool, incoming.submission_id)).length, 2)
     })
 

@@ -135,16 +135,6 @@ export class MemoStorage {
           } else allowed.push(relation)
         }
       } else allowed.push(...parsed.relations)
-      // Invalid relationships cannot change old facts. Hold only a known new endpoint
-      // with no validated relationship; independent memories can still publish.
-      const affected = new Set(parsed.intake_issues.flatMap(issue => {
-        if (!issue.value || typeof issue.value !== 'object' || !('current_entry_id' in issue.value)) return []
-        const id = issue.value.current_entry_id
-        return typeof id === 'string' && entries.rows.some(entry => entry.id === id)
-          && !parsed.relations.some(relation => relation.current_entry_id === id) ? [id] : []
-      }))
-      for (const id of affected) await client.query("INSERT INTO jt_memo.entry_actions(id,entry_id,action,origin,reason) VALUES ($1,$2,'hold','runtime',$3)",
-        [randomUUID(), id, '关系输出未通过引用或结构校验；条目保留，诊断见批次 intake_issues'])
       const receipt = await client.query<IndexRow>(`
         INSERT INTO jt_memo.index_commits (id, submission_id, space_id, vector_hash, entry_count, relation_decisions, reconciliation_run, intake_issues)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
