@@ -15,7 +15,8 @@
   "dependencies": {
     "@inquirer/search": "^4.3.3",
     "@jt-harness/codex-hooks": "workspace:*",
-    "@jt-harness/memo": "workspace:*"
+    "@jt-harness/memo": "workspace:*",
+    "@jt-harness/flow": "workspace:*"
   },
   "scripts": {
     "build": "node ../../scripts/build-package.mjs",

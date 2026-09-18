@@ -15,7 +15,8 @@ import { storageDoctor } from '@jt-harness/memo'
 import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 
-const help = `jth memo <command>
+const help = `jth flow <command>  轻量任务目标、恢复与验收；运行 jth flow --help
+jth memo <command>
 
   model                        交互切换当前 Agent 模型；--list 查询实时列表
   init                         初始化 PostgreSQL + pgvector 表

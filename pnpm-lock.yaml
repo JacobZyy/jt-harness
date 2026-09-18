@@ -21,6 +21,9 @@ importers:
       '@jt-harness/codex-hooks':
         specifier: workspace:*
         version: link:packages/codex-hooks
+      '@jt-harness/flow':
+        specifier: workspace:*
+        version: link:packages/flow
       '@jt-harness/memo':
         specifier: workspace:*
         version: link:packages/memo
@@ -48,15 +51,27 @@ importers:
       '@jt-harness/codex-hooks':
         specifier: workspace:*
         version: link:../codex-hooks
+      '@jt-harness/flow':
+        specifier: workspace:*
+        version: link:../flow
       '@jt-harness/memo':
         specifier: workspace:*
         version: link:../memo
 
   packages/codex-hooks:
     dependencies:
+      '@jt-harness/flow':
+        specifier: workspace:*
+        version: link:../flow
       '@jt-harness/memo':
         specifier: workspace:*
         version: link:../memo
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/flow:
+    dependencies:
       zod:
         specifier: 4.4.3
         version: 4.4.3

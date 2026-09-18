@@ -8,8 +8,9 @@ packages/*/lib/
 !.env.example
 dist/
 artifacts/jth/
-.codex/hooks.json
-
 # Runtime transcripts, verification payloads and local backups
 artifacts/
 .DS_Store
+/.jth/
+/.agents/skills/jth-flow
+/.codex/hooks.json

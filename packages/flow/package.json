@@ -1,0 +1,9 @@
+{
+  "name": "@jt-harness/flow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "dependencies": { "zod": "4.4.3" },
+  "scripts": { "build": "node ../../scripts/build-package.mjs", "typecheck": "tsc --noEmit", "test": "node --test src/*.test.ts" }
+}

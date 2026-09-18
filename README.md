@@ -1,18 +1,44 @@
 # jt-harness · jth
 
-`jth` 是本地 TypeScript CLI。它接收 Codex 会话材料，通过 DSH SDK 运行已验收的提炼 Agent，再调用 Embedding API，将候选记忆和来源保存在 PostgreSQL + pgvector。
+`jth` 是本地 TypeScript CLI，提供长任务流程控制与长期记忆。`jth flow` 用 Skill、Codex Hook 和持久任务状态保持目标、阶段与恢复点；`jth memo` 通过 DSH SDK 提炼会话，再调用 Embedding API，将候选记忆和来源保存在 PostgreSQL + pgvector。
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。DSH SDK 启动自己的本地子进程，通过 stdio 通信，不调用 3080 Web 接口。
 
 ## 模块与运行模式
 
-生产代码分为 `packages/memo`（DSH Agent、存储、队列）、`packages/codex-hooks`（六阶段 Hook、增量来源采集）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
+生产代码分为 `packages/flow`（任务状态、上下文、验收和 Skill）、`packages/memo`（DSH Agent、存储、队列）、`packages/codex-hooks`（Hook 适配与增量来源采集）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
 
 默认恢复 DSH：Hook 保存事件，后台 `memo work` 收集增量会话，交给 DSH 提炼及关系比较，再生成向量并发布。Hook 不等待模型。SessionStart 不再注入会话内提取说明；已有会话中的旧说明需恢复会话后刷新。
 
 数据库保留 schema v4 和所有已有记录。表中的 `kind=legacy` 是 DSH 队列的历史字段名，不代表当前停用。`memo work --legacy` 与默认 DSH 路径兼容；`memo work --index` 仅恢复先前手动 record 的索引任务。失败任务仍需显式 retry，不自动重跑旧失败记录。
 
 会话内 `prepare / evidence / record` 保留为手动工具，不再由 Hook 指示 Agent 自动调用。`record` 自己启动 index worker，不会额外进入 DSH。
+
+## 轻量流程控制
+
+在需要使用的 Git 项目里运行，`--project` 与该项目已有 Memo 安装保持一致：
+
+```sh
+jth flow install --project jt-harness
+# 在 Codex /hooks 审阅并信任本工具新增的定义，再恢复会话。
+jth flow start '交付本次明确目标' --phase execution --accept '可检查的完成条件' --check 'pnpm test'
+jth flow checkpoint --done '已确认关键调用路径' --next '完成实现与验证'
+jth flow status
+jth flow verify
+jth flow finish --summary '达成目标的结果'
+```
+
+Codex 中这些命令由 `jth-flow` Skill 在长任务需要时调用，日常简短问答不要求建任务。新增约束用 `checkpoint --constraint`；只有用户明确改变目标才用 `revise ... --reason ...`。`start` 默认处于 discussion；用户已授权实施时指定 execution。SessionStart（含 compact）、UserPromptSubmit 和 SubagentStart 注入目标与少量上下文；Stop、Interrupt、SessionEnd、SubagentStop 只记录活动，不自动判定完成。
+
+新会话使用 `jth flow status --all` 选择原任务，`jth flow resume <id>` 恢复；旧会话仍占有主控时显式加 `--takeover`。子 Agent 只能读取主任务状态。终端不带 Codex 会话 ID 时，用 `--task <id>` 指定操作对象，或 `--session <id>` 明确绑定。
+
+用户明确切换到独立目标时，用 `jth flow pause --reason '切换依据'` 解除当前绑定，再 start 新任务。暂停保留旧任务，不假装完成；恢复时仍用 resume。
+
+开始、恢复和输入时的记忆召回由短生命周期后台子进程完成。Hook 只读本地状态并投递刷新，不等待 Embedding 或 PostgreSQL。结果按已配置项目、业务和用户范围检索，缓存 5 分钟，最多注入 5 条简短摘要；用 `jth flow recall` 立即刷新，用 `jth memo read <id>` 获取证据和冲突双方。长期写入继续沿用原有六阶段捕获与 DSH 队列，没有第二套提取 Agent。
+
+任务状态是 `.jth/flow.sqlite`，验收日志是 `.jth/checks/`，召回日志是 `.jth/recall.log`，均不入 Git。任务状态不依赖 PostgreSQL 在线；召回失败可在 `flow status` 看到错误。`jth flow uninstall` 只移除流程 Hook 和 Skill 链接，保留任务及 Memo 捕获。
+
+验收命令是当前任务明确记录的本地 shell 命令，具有调用者权限。只配置原本就允许执行的项目检查。完成需要当前目标版本的通过结果、未变化的文件快照、已解决的待讨论问题；文档型实施任务可提供 `--evidence <项目内文件>`。流程提示不能代替沙箱，也不能证明语义上绝不偏题。完整设计、约束和验证记录见 [流程原型说明](docs/flow-control.md)。
 
 ## 当前本机使用
 

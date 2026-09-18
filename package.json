@@ -29,7 +29,8 @@
     "pg": "8.23.0",
     "zod": "4.4.3",
     "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
-    "@deepseek-ai/dsh-sdk-client": "link:../deepseek-harness/packages/sdk/client"
+    "@deepseek-ai/dsh-sdk-client": "link:../deepseek-harness/packages/sdk/client",
+    "@jt-harness/flow": "workspace:*"
   },
   "bin": {
     "jth": "bin/jth.mjs"
