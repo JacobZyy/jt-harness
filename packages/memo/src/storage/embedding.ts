@@ -22,6 +22,11 @@ export async function embedTexts(texts: string[], config: Config['embedding'], s
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: space.model, input: [text], dimensions: space.dimensions, encoding_format: 'float' }),
       signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
+    }).catch((error: unknown) => {
+      signal?.throwIfAborted()
+      const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : ''
+      const detail = [error instanceof Error ? error.message : '网络错误', cause].filter(Boolean).join(': ')
+      throw new Error(`Embedding 请求失败：${detail}；任务保留，可恢复连接后 retry`, { cause: error })
     })
     if (!response.ok) {
       await response.body?.cancel()

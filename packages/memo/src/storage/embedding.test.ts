@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { embedTexts } from './embedding.ts'
 import { vectorSchema } from './contract.ts'
+import { safeError } from '../config.ts'
 
 const config = {
   baseUrl: 'https://example.invalid/v1', apiKey: 'test-only', timeoutMs: 200,
@@ -40,4 +41,18 @@ test('Embedding binds one text per call and refuses ambiguous or invalid provide
   })
   assert.throws(() => vectorSchema.parse([Number.NaN, 1]))
   assert.throws(() => vectorSchema.parse([1e-100, 0]))
+})
+
+test('transport failures identify the Embedding stage and retain the cause; caller cancellation stays cancellation', async t => {
+  const network = new TypeError('fetch failed', { cause: new Error('connect timeout; Bearer test-only') })
+  t.mock.method(globalThis, 'fetch', async () => { throw network })
+  await assert.rejects(embedTexts(['fact'], config), error => {
+    assert(error instanceof Error)
+    assert.equal(error.cause, network)
+    assert.match(error.message, /Embedding 请求失败.*connect timeout/)
+    assert(!safeError(error).includes('test-only'))
+    return true
+  })
+  const reason = new Error('operator interrupted')
+  await assert.rejects(embedTexts(['fact'], config, AbortSignal.abort(reason)), error => error === reason)
 })
