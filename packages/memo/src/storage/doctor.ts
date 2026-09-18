@@ -5,6 +5,7 @@ import { sha256, vectorSchema } from './contract.ts'
 import type { MemoryEntry } from './contract.ts'
 import { entryMetadata } from './metadata.ts'
 import { sameScope } from './relations.ts'
+import { schemaVersion } from './database.ts'
 
 interface Issue { level: 'error' | 'warning', check: string, record: string, detail: string }
 
@@ -24,8 +25,8 @@ export async function storageDoctor(pool: Pool) {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const ready = await client.query<{ relation: string | null }>("SELECT to_regclass('jt_memo.schema_version')::text AS relation")
     const version = ready.rows[0].relation ? (await client.query<{ version: number }>('SELECT version FROM jt_memo.schema_version')).rows[0]?.version : null
-    if (version !== 4) {
-      add('error', 'schema', 'jt_memo', '需要 v4；先运行 jth memo init，体检本身不会改库')
+    if (version !== schemaVersion) {
+      add('error', 'schema', 'jt_memo', `需要 v${schemaVersion}；先运行 jth memo init，体检本身不会改库`)
     } else {
       let cursor = ''
       for (;;) {
@@ -81,7 +82,7 @@ export async function storageDoctor(pool: Pool) {
         cursor = rows.rows.at(-1)!.id
       }
       const incomplete = await client.query<{ id: string }>(`SELECT j.id FROM jt_memo.jobs j
-        WHERE j.status='complete' AND NOT EXISTS(SELECT 1 FROM jt_memo.index_commits c WHERE c.submission_id=j.id AND c.space_id=j.execution->'space'->>'id')`)
+        WHERE j.status IN ('complete','partial') AND NOT EXISTS(SELECT 1 FROM jt_memo.index_commits c WHERE c.submission_id=j.id AND c.space_id=j.execution->'space'->>'id')`)
       for (const row of incomplete.rows) add('error', 'complete_without_receipt', row.id, '任务标记完成但缺少对应空间的提交回执')
       const dimensions = await client.query<{ entry_id: string }>(`SELECT v.entry_id FROM jt_memo.embeddings v JOIN jt_memo.embedding_spaces s ON s.id=v.space_id
         WHERE public.vector_dims(v.embedding)<>v.dimensions OR v.dimensions<>s.dimensions OR v.dimensions<>(s.definition->>'dimensions')::integer`)
@@ -108,6 +109,8 @@ export async function storageDoctor(pool: Pool) {
       if (future.rows[0].count) add('warning', 'future_source_time', 'entries', `${future.rows[0].count} 条来源事件时间晚于当前时间；请核对采集端时钟和时区`)
       const failed = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM jt_memo.jobs WHERE status='failed'")
       if (failed.rows[0].count) add('warning', 'failed_jobs', 'jobs', `${failed.rows[0].count} 个任务失败，可通过 status 查看原因`)
+      const partial = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM jt_memo.jobs WHERE status='partial'")
+      if (partial.rows[0].count) add('warning', 'partial_jobs', 'jobs', `${partial.rows[0].count} 个任务有未接收条目；有效部分已处理，原始输出与诊断保留`)
     }
     await client.query('COMMIT')
     return { ok: errors === 0, schema_version: version, checked: { submissions, commits }, errors, warnings, issues, issues_truncated: errors + warnings > issues.length, mode: 'read_only' }

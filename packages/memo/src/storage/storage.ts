@@ -11,6 +11,7 @@ import type { Relation, StateEntry } from './relations.ts'
 import { entryMetadata, entrySnapshot } from './metadata.ts'
 import { readActions } from './management.ts'
 import { entryVersion, versionExpression } from '../version.ts'
+import type { IntakeIssue } from '../intake.ts'
 
 interface SubmissionRow {
   id: string
@@ -20,6 +21,7 @@ interface SubmissionRow {
   extraction_run: StoreInput['run']
   stored_at: Date
   received_at: Date
+  intake_issues: IntakeIssue[]
 }
 
 interface IndexRow {
@@ -32,16 +34,18 @@ interface IndexRow {
   relation_decisions: Relation[]
   reconciliation_run: StoreInput['run'] | null
   publication_notes: PublicationNote[]
+  intake_issues: IntakeIssue[]
 }
 
 function indexReceipt(row: IndexRow): IndexReceipt {
   return {
-    status: row.publication_notes.length > 0 ? 'review_required'
+    status: row.intake_issues.length > 0 ? 'partial' : row.publication_notes.length > 0 ? 'review_required'
       : row.entry_count === 0 && row.relation_decisions.length === 0 ? 'noop' : 'indexed', id: row.id,
     submission_id: row.submission_id, space_id: row.space_id,
     entry_count: row.entry_count, indexed_at: row.indexed_at.toISOString(),
     relation_count: row.relation_decisions.length - row.publication_notes.length,
     publication_notes: row.publication_notes,
+    intake_issues: row.intake_issues,
   }
 }
 
@@ -55,14 +59,14 @@ export class MemoStorage {
 
   /** Persist immutable source and candidates; stored does not mean vector-indexed. */
   async store(input: StoreInput): Promise<StoreReceipt> {
-    const { submission, extraction, run } = storeInputSchema.parse(input)
+    const { submission, extraction, run, intake_issues } = storeInputSchema.parse(input)
     const contentHash = sha256(JSON.stringify({ submission, extraction }))
     return transaction(this.pool, async (client) => {
       const inserted = await client.query(`
-        INSERT INTO jt_memo.submissions (id, content_hash, source, extraction, extraction_run, received_at)
-        VALUES ($1, $2, $3, $4, $5, COALESCE((SELECT created_at FROM jt_memo.jobs WHERE id=$1),CURRENT_TIMESTAMP))
+        INSERT INTO jt_memo.submissions (id, content_hash, source, extraction, extraction_run, received_at, intake_issues)
+        VALUES ($1, $2, $3, $4, $5, COALESCE((SELECT created_at FROM jt_memo.jobs WHERE id=$1),CURRENT_TIMESTAMP),$6)
         ON CONFLICT (id) DO NOTHING RETURNING id
-      `, [submission.submission_id, contentHash, submission, extraction, run])
+      `, [submission.submission_id, contentHash, submission, extraction, run, JSON.stringify(intake_issues)])
       if (inserted.rowCount === 0) {
         const existing = await this.submission(client, submission.submission_id)
         if (existing.content_hash !== contentHash) {
@@ -110,7 +114,8 @@ export class MemoStorage {
       `, [parsed.space.id, parsed.space.dimensions, parsed.space])
       const space = await client.query<{ matches: boolean }>('SELECT definition = $2::jsonb AS matches FROM jt_memo.embedding_spaces WHERE id = $1', [parsed.space.id, parsed.space])
       if (!space.rows[0].matches) throw new MemoStorageError('SPACE_CONFLICT', '该向量空间 ID 已绑定不同的模型、维度或输入版本')
-      const existing = await client.query<IndexRow & { matches: boolean }>('SELECT *, relation_decisions = $3::jsonb AS matches FROM jt_memo.index_commits WHERE submission_id = $1 AND space_id = $2', [parsed.submission_id, parsed.space.id, JSON.stringify(parsed.relations)])
+      const issues = [...submission.intake_issues, ...parsed.intake_issues]
+      const existing = await client.query<IndexRow & { matches: boolean }>('SELECT *, relation_decisions = $3::jsonb AND intake_issues=$4::jsonb AS matches FROM jt_memo.index_commits WHERE submission_id = $1 AND space_id = $2', [parsed.submission_id, parsed.space.id, JSON.stringify(parsed.relations), JSON.stringify(issues)])
       if (existing.rows.length > 0) {
         if (existing.rows[0].vector_hash !== vectorHash || !existing.rows[0].matches) throw new MemoStorageError('INDEX_CONFLICT', '该批次在此向量空间已提交不同向量或修订；拒绝覆盖')
         return indexReceipt(existing.rows[0])
@@ -130,10 +135,20 @@ export class MemoStorage {
           } else allowed.push(relation)
         }
       } else allowed.push(...parsed.relations)
+      // Invalid relationships cannot change old facts. Hold only a known new endpoint
+      // with no validated relationship; independent memories can still publish.
+      const affected = new Set(parsed.intake_issues.flatMap(issue => {
+        if (!issue.value || typeof issue.value !== 'object' || !('current_entry_id' in issue.value)) return []
+        const id = issue.value.current_entry_id
+        return typeof id === 'string' && entries.rows.some(entry => entry.id === id)
+          && !parsed.relations.some(relation => relation.current_entry_id === id) ? [id] : []
+      }))
+      for (const id of affected) await client.query("INSERT INTO jt_memo.entry_actions(id,entry_id,action,origin,reason) VALUES ($1,$2,'hold','runtime',$3)",
+        [randomUUID(), id, '关系输出未通过引用或结构校验；条目保留，诊断见批次 intake_issues'])
       const receipt = await client.query<IndexRow>(`
-        INSERT INTO jt_memo.index_commits (id, submission_id, space_id, vector_hash, entry_count, relation_decisions, reconciliation_run)
-        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
-      `, [randomUUID(), parsed.submission_id, parsed.space.id, vectorHash, entries.rows.length, JSON.stringify(parsed.relations), parsed.reconciliation_run ?? null])
+        INSERT INTO jt_memo.index_commits (id, submission_id, space_id, vector_hash, entry_count, relation_decisions, reconciliation_run, intake_issues)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+      `, [randomUUID(), parsed.submission_id, parsed.space.id, vectorHash, entries.rows.length, JSON.stringify(parsed.relations), parsed.reconciliation_run ?? null, JSON.stringify(issues)])
       for (const item of embeddings) {
         await client.query(`
           INSERT INTO jt_memo.embeddings (entry_id, submission_id, space_id, dimensions, embedding)
@@ -156,6 +171,7 @@ export class MemoStorage {
       const commits = await client.query<IndexRow>('SELECT * FROM jt_memo.index_commits WHERE submission_id = $1 AND indexed_at<=COALESCE($2::timestamptz,CURRENT_TIMESTAMP) ORDER BY indexed_at, id', [submissionId, asOf ?? null])
       return {
         submission: row.source, extraction: row.extraction, run: row.extraction_run,
+        intake_issues: row.intake_issues,
         stored_at: row.stored_at.toISOString(), entries: entries.rows,
         received_at: row.received_at.toISOString(), as_of: asOf ?? null,
         index_receipts: commits.rows.map(indexReceipt),

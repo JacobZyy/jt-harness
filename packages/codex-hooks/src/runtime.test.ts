@@ -84,8 +84,9 @@ test('child delegation stays assistant-authored and never imports inherited pare
     assert.equal(prepared.source.parent_session_id, 'parent')
     assert.equal(prepared.messages.length, 1)
     assert.equal(prepared.messages[0].role, 'assistant')
-    await assert.rejects(stageRecord(f.config, { evidence_id: prepared.evidence_id, extraction: { schema_version: 1,
-      memories: [{ content: '假冒用户确认', basis: 'user_statement', scope: 'project', source_message_ids: [prepared.messages[0].message_id] }], proposals: [], revisions: [] } }), /对应角色/)
+    await stageRecord(f.config, { evidence_id: prepared.evidence_id, extraction: { schema_version: 1,
+      memories: [{ content: '模型作出的分类', basis: 'user_statement', scope: 'project', source_message_ids: [prepared.messages[0].message_id] }], proposals: [], revisions: [] } })
+    assert.equal(prepared.messages[0].role, 'assistant')
   } finally { await f.cleanup() }
 })
 

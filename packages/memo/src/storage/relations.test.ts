@@ -31,7 +31,7 @@ test('revision boundary rejects fabricated evidence, cross-scope changes and pro
   assert.throws(() => check(relation, { ...old, project_ids: ['one', 'two'] }), /跨越/)
   assert.throws(() => check(relation, { ...old, state: 'superseded' }), /失效/)
   assert.throws(() => check(relation, old, { ...next, collection: 'proposals' }), /助手建议/)
-  assert.throws(() => check(relation, old, next, { ...submission, messages: [{ message_id: 'u', role: 'assistant', text: relation.evidence_quote }] }), /用户/)
+  assert.doesNotThrow(() => check(relation, old, next, { ...submission, messages: [{ message_id: 'u', role: 'assistant', text: relation.evidence_quote }] }))
   assert.throws(() => check({ ...relation, current_entry_id: null, kind: 'conflict', revision_index: 0 }), /冲突证据/)
   assert.throws(() => validateRelations([relation, relation], [old], [next], submission, extraction), /重复/)
   assert.throws(() => relationSchema.parse({ ...relation, current_entry_id: null }), /新记忆/)

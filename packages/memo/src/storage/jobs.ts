@@ -35,6 +35,10 @@ export async function jobStatus(database: Pool | PoolClient, id?: string) {
       c.id AS index_receipt_id, c.entry_count, c.indexed_at,
       jsonb_array_length(c.relation_decisions)-jsonb_array_length(c.publication_notes) AS relation_count,
       c.reconciliation_run,c.publication_notes,
+      COALESCE(jsonb_array_length(c.intake_issues),jsonb_array_length(s.intake_issues),0)::int AS issue_count,
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object('path',item->>'path','error',item->>'error')),'[]'::jsonb)
+        FROM jsonb_array_elements(COALESCE(c.intake_issues,s.intake_issues,'[]'::jsonb)) item) AS intake_issues,
+      (SELECT count(*)::int FROM jt_memo.agent_outputs o WHERE o.submission_id=j.id) AS output_count,
       (SELECT count(*)::int FROM jt_memo.entry_states e WHERE e.submission_id=j.id AND e.claim_status='candidate') AS candidate_count
     FROM jt_memo.jobs j LEFT JOIN jt_memo.submissions s ON s.id = j.id
     LEFT JOIN jt_memo.index_commits c ON c.submission_id = j.id AND c.space_id = j.execution->'space'->>'id'
@@ -62,6 +66,6 @@ export async function retryJob(pool: Pool, id: string, timeoutMs?: number) {
         ELSE jsonb_set(execution, '{agent,timeoutMs}', to_jsonb($2::int)) END
     WHERE id = $1 AND status = 'failed' AND ($2::int IS NULL OR kind='legacy') RETURNING id
   `, [id, budget])
-  if (!result.rowCount) throw new Error('只能 retry 已失败的任务；--timeout-ms 仅用于 legacy；queued/running 用 memo work 恢复，complete 无需重试')
+  if (!result.rowCount) throw new Error('只能 retry 已失败的任务；queued/running 用 memo work 恢复；partial 已保存处理结果，先用 memo outputs/read 检查未接收项，避免整批重复提炼')
   return { submission_id: id, status: 'queued', ...(budget === null ? {} : { timeoutMs: budget }) }
 }

@@ -2,6 +2,8 @@ import { Pool } from 'pg'
 import type { PoolClient } from 'pg'
 import { MemoStorageError } from './contract.ts'
 import { storageManagementSchema } from './schema-v3.ts'
+import { intakeSchema } from './schema-v5.ts'
+export const schemaVersion = 5
 
 /** All transaction statements use one checked-out connection. */
 const transactionDepth = new WeakMap<PoolClient, number>()
@@ -161,7 +163,7 @@ export async function prepareDatabase(pool: Pool, initializeSchema: boolean): Pr
         await client.query(schema)
         await client.query('INSERT INTO jt_memo.schema_version VALUES (true, 1)')
         version = 1
-      } else if (![1, 2, 3, 4].includes(version)) {
+      } else if (![1, 2, 3, 4, 5].includes(version)) {
         throw new MemoStorageError('SCHEMA_NOT_READY', '记忆库版本未知；拒绝升级或降级')
       }
       if (version === 1) {
@@ -176,11 +178,13 @@ export async function prepareDatabase(pool: Pool, initializeSchema: boolean): Pr
         await client.query("ALTER TABLE jt_memo.jobs ADD COLUMN kind text NOT NULL DEFAULT 'legacy' CHECK (kind IN ('legacy','index'))")
         await client.query("ALTER TABLE jt_memo.jobs ADD COLUMN record_plan jsonb")
         await client.query("UPDATE jt_memo.jobs SET status='queued' WHERE kind='legacy' AND status='running'")
+        version = 4
       }
-      await client.query('UPDATE jt_memo.schema_version SET version = 4 WHERE singleton = true')
+      if (version === 4) await client.query(intakeSchema)
+      await client.query('UPDATE jt_memo.schema_version SET version = $1 WHERE singleton = true', [schemaVersion])
     })
   }
   const result = await pool.query<{ version: number }>('SELECT version FROM jt_memo.schema_version WHERE singleton = true')
-  if (result.rows[0]?.version !== 4) throw new MemoStorageError('SCHEMA_NOT_READY', '记忆库需要 v4；请运行 jth memo init 完成保留数据的升级')
+  if (result.rows[0]?.version !== schemaVersion) throw new MemoStorageError('SCHEMA_NOT_READY', `记忆库需要 v${schemaVersion}；请运行 jth memo init 完成保留数据的升级`)
   await pool.query('SELECT public.vector_dims($1::public.vector)', ['[1]'])
 }

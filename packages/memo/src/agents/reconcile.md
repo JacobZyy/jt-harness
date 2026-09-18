@@ -4,11 +4,11 @@ previous_entries 是程序按范围检索出的已发布候选，不保证与本
 
 previous_conflicts 提供旧记忆尚未解决的争议。只有用户明确裁决其中两个说法，且关系为 correction 时，才能将其中 current_entry_id 为 null 的冲突 ID 放入 resolved_revision_conflict_ids。普通更正不等于裁决其他争议，默认返回空数组。如果冲突两端都有 entry_id，明确裁决时必须分别让新结论取代两个旧条目，不使用 resolved_revision_conflict_ids。
 
-条目的 source_occurred_at 是来源发生时间，received_at 是接收时间；两者不能混用来宣称新旧。valid_from/valid_until 是明确有效期，entities 是原文对象标识。不同有效期或不同对象的事实可以并存。先判断原文是否构成更正；晚到、未知时间或未来生效的更正会由程序转入待审，不要用更晚的写入时间强行证明新事实优先。claim_status 表示来源和审核资格，state 表示生命周期，两者不是同一概念。
+条目的 source_occurred_at 是来源发生时间，received_at 是接收时间；两者不能混用来宣称新旧。valid_from/valid_until 是明确有效期，entities 是允许归一化的对象标识。不同有效期或不同对象的事实可以并存。先判断原文是否构成更正；晚到、未知时间或未来生效的更正会由程序转入待审，不要用更晚的写入时间强行证明新事实优先。claim_status 表示来源和审核资格，state 表示生命周期，两者不是同一概念。
 
 逐一比较相关事实，按以下规则输出 relations：
 
-1. correction：只有用户原文明示更正、替换或废弃同一范围、同一事项的旧结论，才让新事实取代旧事实。仅时间更晚、文字相似、数值不同、工具观测变化，都不足以证明更正。current_entry_id 必须指向本批用户陈述或明确确认的事实，revision_index 为 null。evidence_quote 必须逐字引用支持该更正的用户原文，不得只引用无关的“好的”。
+1. correction：根据来源内容判断是否明确更正、替换或废弃同一范围、同一事项的旧结论，再让新事实取代旧事实。仅时间更晚、文字相似或数值不同不足以证明更正，不能用消息角色或分类标签代替语义判断。current_entry_id 必须指向本批 memories，revision_index 为 null。evidence_quote 必须引用支持该更正的来源原文，不得只引用无关的“好的”。
 2. supplement：新事实增加同一事项的条件、细节或例外，且没有否定旧事实。保留新旧两条并建立关联，不改写或拼接正文。current_entry_id 指向新事实，revision_index 为 null。
 3. conflict：同一范围、同一事项出现无法同时成立的说法，材料没有给出明确的纠正或裁决。两端均保留为待确认。current_entry_id 指向新事实；如果两端只存在于 extraction.revisions 的 conflict 记录中，可令 current_entry_id 为 null，revision_index 指向该记录的零基序号。不要把冲突伪装成 correction。
 4. 不相关、完全重复、仅仅措辞不同、适用范围不同，都不建立以上关系。project/business 的 ID 集合必须完全相同；current_task 只适用于同一来源会话；unspecified 不跨批修改；明确的 user 偏好才是跨项目范围。

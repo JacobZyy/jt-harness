@@ -91,7 +91,7 @@ test('six lifecycle events keep parent/child identity, source roles, context and
     const before = confirmation.messages.find(message => message.text === '建议超时设为 30 秒。')!
     const after = confirmation.messages.find(message => !message.context_only)!
     assert.doesNotThrow(() => parseExtraction(JSON.stringify({ schema_version: 1, memories: [{ content: '超时为 30 秒。', basis: 'user_confirmed', scope: 'project', source_message_ids: [before.message_id, after.message_id] }], proposals: [], revisions: [] }), confirmation))
-    assert.throws(() => parseExtraction(JSON.stringify({ schema_version: 1, memories: [], proposals: [{ content: before.text, basis: 'assistant_proposal', scope: 'project', source_message_ids: [before.message_id] }], revisions: [] }), confirmation), /本批新增/)
+    assert.doesNotThrow(() => parseExtraction(JSON.stringify({ schema_version: 1, memories: [], proposals: [{ content: before.text, basis: 'assistant_proposal', scope: 'project', source_message_ids: [before.message_id] }], revisions: [] }), confirmation))
     await Promise.all([f.capture('Stop'), f.capture('SessionEnd')])
     assert.equal((await drainCaptureFiles(f.config, f.deliver)).accepted, 0)
     assert.equal((await captureStatus(f.config)).pending_events, 0)

@@ -28,7 +28,7 @@ test('会话材料保留原文，拒绝重复来源、未知角色和超限输�
   assert.throws(() => submissionSchema.parse({ ...sample, messages: [] }))
 })
 
-test('结构化结果绑定真实来源；助手建议不能伪装成用户确认', () => {
+test('结构化结果绑定真实 ID 与范围；事实分类交给 Agent，不按角色组合拒收', () => {
   assert.deepEqual(parseExtraction(JSON.stringify(valid), submission), valid)
   const unknownSource = structuredClone(valid)
   unknownSource.memories[0].source_message_ids = ['invented']
@@ -36,12 +36,13 @@ test('结构化结果绑定真实来源；助手建议不能伪装成用户确�
   const falseConfirmation = structuredClone(valid)
   falseConfirmation.memories[0].basis = 'user_confirmed'
   falseConfirmation.memories[0].source_message_ids = ['m2']
-  assert.throws(() => parseExtraction(JSON.stringify(falseConfirmation), submission), /对应角色/)
+  assert.doesNotThrow(() => parseExtraction(JSON.stringify(falseConfirmation), submission))
   falseConfirmation.memories[0].source_message_ids = ['m1', 'm2']
-  assert.throws(() => parseExtraction(JSON.stringify(falseConfirmation), submission), /建议之后/)
+  assert.doesNotThrow(() => parseExtraction(JSON.stringify(falseConfirmation), submission))
   falseConfirmation.memories[0].source_message_ids = ['m2', 'm4']
   assert.doesNotThrow(() => parseExtraction(JSON.stringify(falseConfirmation), submission))
-  // Role and order checks cannot prove that m4 semantically confirms m2.
+  // Classification does not rewrite the source's actual roles or chronology.
+  assert.equal(submission.messages.find(message => message.message_id === 'm2')!.role, 'assistant')
   const noBusinessScope = { ...submission, scope: { project_ids: ['jt-harness'], business_ids: [] } }
   const wrongScope = structuredClone(valid)
   wrongScope.memories[0].scope = 'business'

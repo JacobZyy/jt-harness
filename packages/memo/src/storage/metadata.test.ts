@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { agentExtractionSchema, parseExtraction, submissionSchema } from '../contracts.ts'
 import { entryMetadata } from './metadata.ts'
 
-test('atomic metadata binds literal entities, absolute validity evidence and actual source times', () => {
+test('atomic metadata allows entity aliases and retains absolute validity evidence and source times', () => {
   const submission = submissionSchema.parse({
     schema_version: 1, submission_id: 'metadata', source: { provider: 'codex', session_id: 'metadata' },
     scope: { project_ids: ['sample'], business_ids: [] },
@@ -28,7 +28,7 @@ test('atomic metadata binds literal entities, absolute validity evidence and act
   delete partialTime.messages[0].occurred_at
   assert.equal(entryMetadata(fact, partialTime).source_occurred_at, null)
   assert.throws(() => submissionSchema.parse({ ...submission, messages: submission.messages.toReversed() }), /会话顺序/)
-  assert.throws(() => parseExtraction(JSON.stringify({ ...result, memories: [{ ...fact, entities: ['invented.ts'] }] }), submission), /实体标识/)
+  assert.doesNotThrow(() => parseExtraction(JSON.stringify({ ...result, memories: [{ ...fact, entities: ['API service'] }] }), submission))
   assert.throws(() => parseExtraction(JSON.stringify({ ...result, memories: [{ ...fact, time_evidence: { source_message_id: 'u', quote: '编造日期' } }] }), submission), /时间原文/)
   assert.throws(() => parseExtraction(JSON.stringify({ ...result, memories: [{ ...fact, claim_status: 'verified' }] }), submission))
   assert.throws(() => parseExtraction(JSON.stringify({ ...result, memories: [{ ...fact, valid_until: '2026-09-16T17:00:00+08:00' }] }), submission), /失效时间/)

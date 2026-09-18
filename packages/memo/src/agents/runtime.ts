@@ -20,9 +20,24 @@ export function assertAgentRun(run: RunResult) {
   }
 }
 
-export interface AgentContext { workspace?: string, signal?: AbortSignal }
+export interface AgentOutput { response: string, run: { session_id: string, provider: string, model: string } }
+export interface AgentContext {
+  workspace?: string
+  signal?: AbortSignal
+  onOutput?: (output: AgentOutput) => Promise<void>
+  onInvalidOutput?: (output: AgentOutput, error: string) => Promise<void>
+}
 
-/** Repair one invalid answer using the same evidence and validation; never relax publication rules. */
+/** A stopped generation may still contain useful text. Keep it before rejecting the run. */
+export async function checkAgentCompletion(run: RunResult, output: AgentOutput, context: AgentContext) {
+  try { assertAgentRun(run) } catch (error) {
+    await context.onOutput?.(output)
+    await context.onInvalidOutput?.(output, error instanceof Error ? error.message : 'DSH 未完成')
+    throw error
+  }
+}
+
+/** Retry an unreadable response once; per-item diagnostics are normal results, not whole-run failures. */
 export async function runValidatedMemoryAgent<T>(input: object, runtime: MemoryAgentOptions, prompt: URL, schema: z.ZodType,
   validate: (response: string) => T, context: AgentContext = {}, run = runMemoryAgent) {
   const options = optionsSchema.parse(runtime)
@@ -30,7 +45,9 @@ export async function runValidatedMemoryAgent<T>(input: object, runtime: MemoryA
   let material = input
   for (let attempt = 0; attempt < 2; attempt++) {
     const result = await run(material, options, prompt, schema, { ...context, signal })
+    await context.onOutput?.(result)
     try { return { value: validate(result.response), run: result.run } } catch (error) {
+      await context.onInvalidOutput?.(result, error instanceof Error ? error.message : '输出格式错误')
       if (attempt === 1) throw error
       material = { ...input, validation_feedback: { error: error instanceof Error ? error.message : '输出格式错误', previous_output: result.response } }
     }
@@ -75,11 +92,12 @@ export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions
         if (context.signal?.aborted) abort()
       }),
     ])
-    assertAgentRun(run)
-    return {
+    const output = {
       response: run.finalResponse,
       run: { session_id: run.sessionId, provider: options.provider, model: options.model },
     }
+    await checkAgentCompletion(run, output, context)
+    return output
   } catch (error) {
     throw new Error(`DSH session=${sessionId}: ${error instanceof Error ? error.message : '运行失败'}`, { cause: error })
   } finally {

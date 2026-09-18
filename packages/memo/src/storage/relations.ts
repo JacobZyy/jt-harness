@@ -75,9 +75,5 @@ export function validateRelations(relations: Relation[], previous: StateEntry[],
     if (relation.source_message_ids.some(id => !evidenceIds.includes(id))) throw new Error('修订引用必须来自对应新记忆或冲突证据')
     const cited = submission.messages.filter(message => relation.source_message_ids.includes(message.message_id))
     if (cited.length === 0 || !cited.some(message => message.text.includes(relation.evidence_quote))) throw new Error('修订证据引文不是本批来源原文')
-    if (relation.kind === 'correction' && (
-      !next || !['user_statement', 'user_confirmed'].includes(next.basis)
-      || !cited.some(message => message.role === 'user' && message.text.includes(relation.evidence_quote))
-    )) throw new Error('更正必须有用户直接陈述或确认的原文证据')
   }
 }

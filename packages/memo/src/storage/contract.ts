@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { extractionSchema, parseExtraction, submissionSchema, timestampSchema } from '../contracts.ts'
 import type { Extraction } from '../contracts.ts'
 import { relationSchema } from './relations.ts'
+import { intakeIssueSchema } from '../intake.ts'
+import type { IntakeIssue } from '../intake.ts'
 
 const text = z.string().min(1).max(500).refine(value => value.trim().length > 0)
 const ids = z.array(text).min(1).refine(values => new Set(values).size === values.length)
@@ -12,6 +14,7 @@ export const storeInputSchema = z.strictObject({
   submission: submissionSchema,
   extraction: extractionSchema,
   run: runSchema,
+  intake_issues: z.array(intakeIssueSchema).default([]),
 }).transform(input => ({ ...input, extraction: parseExtraction(JSON.stringify(input.extraction), input.submission) }))
 
 export const spaceSchema = z.strictObject({
@@ -34,6 +37,7 @@ export const indexInputSchema = z.strictObject({
   space: spaceSchema,
   relations: z.array(relationSchema).max(160).default([]),
   reconciliation_run: runSchema.optional(),
+  intake_issues: z.array(intakeIssueSchema).default([]),
   expected_versions: z.record(z.uuid(), z.string().regex(/^[0-9a-f]{64}$/)).optional(),
   embeddings: z.array(z.strictObject({
     entry_id: z.uuid(),
@@ -103,7 +107,7 @@ export interface StoreReceipt {
 }
 
 export interface IndexReceipt {
-  status: 'indexed' | 'noop' | 'review_required'
+  status: 'indexed' | 'noop' | 'review_required' | 'partial'
   id: string
   submission_id: string
   space_id: string
@@ -111,6 +115,7 @@ export interface IndexReceipt {
   relation_count: number
   indexed_at: string
   publication_notes: PublicationNote[]
+  intake_issues: IntakeIssue[]
 }
 
 export interface PublicationNote {

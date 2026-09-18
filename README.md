@@ -10,7 +10,7 @@
 
 默认恢复 DSH：Hook 保存事件，后台 `memo work` 收集增量会话，交给 DSH 提炼及关系比较，再生成向量并发布。Hook 不等待模型。SessionStart 不再注入会话内提取说明；已有会话中的旧说明需恢复会话后刷新。
 
-数据库保留 schema v4 和所有已有记录。表中的 `kind=legacy` 是 DSH 队列的历史字段名，不代表当前停用。`memo work --legacy` 与默认 DSH 路径兼容；`memo work --index` 仅恢复先前手动 record 的索引任务。失败任务仍需显式 retry，不自动重跑旧失败记录。
+数据库使用 schema v5，并保留所有已有记录。表中的 `kind=legacy` 是 DSH 队列的历史字段名，不代表当前停用。`memo work --legacy` 与默认 DSH 路径兼容；`memo work --index` 仅恢复先前手动 record 的索引任务。失败任务仍需显式 retry，不自动重跑旧失败记录。
 
 会话内 `prepare / evidence / record` 保留为手动工具，不再由 Hook 指示 Agent 自动调用。`record` 自己启动 index worker，不会额外进入 DSH。
 
@@ -55,6 +55,22 @@ jth memo read --submission jth-cli-example-1
 
 `send` 默认在 PostgreSQL 持久化材料后返回，不等待模型和 Embedding。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成；待审条目是否进入默认搜索还由 `claim_status` 决定，状态输出包含 `candidate_count` 和 `publication_notes`。示例会话限定在 `jth-cli-verification` 项目范围内。
 
+### 按条目接收与输出留存
+
+提炼不再要求实体名称逐字出现在原文、不强制每条引用新增消息、不按来源角色或确认顺序拒收模型分类。原始消息、角色和顺序保持原样。Agent 判断语义；程序仍校验 JSON、真实引用 ID、项目范围、有效期证据和关联事务。
+
+小的格式差异会规范化：实体去空和去重、重复来源 ID 去重、未提供的可选元数据保留为空。未知辅助字段留在原始模型输出中，不进入规范条目。无法接收的独立条目保存 `path/error/value`，其他有效条目继续生成向量、发布。无效关系不修改旧事实；只涉及该无效关系的新条目保留为候选，独立条目继续可检索。
+
+队列 `partial` 表示有未接收条目或未应用关系，不等于 DSH 调用失败，也不保证至少有一条成功；结合 `entry_count`、`issue_count` 查看。全部条目不合规时也会保留原始输出并明确报告，不会冒充“没有值得记忆”的正常空结果。`failed` 继续用于整体 JSON 无法读取、模型/网络调用或数据库等执行问题。
+
+```sh
+jth memo status <submission-id>          # 条目数、问题路径、原始输出数量
+jth memo read --submission <id>          # 已接收结果及未接收条目的完整数据
+jth memo outputs <submission-id>         # 原始模型返回，含 JSON 修复前后的每次尝试
+```
+
+从 v5 起，DSH 已返回的响应在业务解析前写入 `jt_memo.agent_outputs`；因 token 上限停止时，SDK 已返回的片段也会保留并标明执行错误。因此后来发生条目校验或 Embedding 错误，不会丢失第一次返回。旧版本没有留存的模型输出不能凭空恢复；原会话仍可重跑。`partial` 不允许整批 retry 覆盖已发布结果；先读取诊断，修正的条目通过新提交追加。基础设施失败仍可以 retry，复用已保存的提炼检查点。
+
 本机开发库位于 `~/.jth/postgres`。`jth` 使用 `~/.jth/run` 私有 Unix socket；图形客户端使用仅监听本机的 `127.0.0.1:5432`。在 `.env` 明确配置 `JTH_PG_DATA_DIR` 和 `JTH_PG_BIN_DIR` 后，数据库访问会复用运行实例或按需启动它；电脑重启后的第一次访问也适用。没有增加开机常驻服务，PG 启动后不随单次 CLI 退出而关闭。
 
 ```sh
@@ -65,7 +81,7 @@ jth db stop
 
 `status` 只观察，不启动；`stop` 关闭明确配置的本机实例，活动事务回滚，数据保留。停止前应先完成正在执行的任务；以后需要数据库的命令会再次启动它，`jth memo work` 恢复未完成队列。启动管理复用 `pg_ctl`，不重复安装、初始化或升级已有 PG；没有配置托管目录的外部实例只连接，不启停。移除 CLI 软链可运行 `unlink "$HOME/.local/bin/jth"`；该操作不删除配置或记忆数据库。
 
-DSH Web/桌面是否打开不影响提炼：SDK 会自行启动并关闭 `sdk-minimal` 子进程。`jth memo status --summary` 显示执行方式、队列计数与失败原因。`failed` 不等于等待 DSH 启动，也不会自动无限重试。结构或证据校验失败会携带错误反馈修复一次，仍失败则保留原材料；不放宽来源校验、不覆盖模型默认生成参数。旧失败任务用 `memo retry <id>` 恢复，已存提炼直接从后续阶段继续。
+DSH Web/桌面是否打开不影响提炼：SDK 会自行启动并关闭 `sdk-minimal` 子进程。`jth memo status --summary` 显示执行方式、队列计数与失败原因。`failed` 表示调用、整体 JSON 或存储等执行问题；`partial` 表示独立有效条目已处理，存在未接收条目或未应用关系。整体 JSON 无法解析时最多带错误反馈重试一次，单条数据问题不重新生成整批结果。模型参数继续采用 Provider 默认行为。旧 failed 任务用 `memo retry <id>` 恢复，已存提炼直接从后续阶段继续。
 
 ### DataGrip / Navicat 查看数据
 
@@ -102,7 +118,7 @@ chmod 600 .env
 node bin/jth.mjs memo init
 ```
 
-`memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将已有 v1/v2/v3 库事务性升级到 v4，保留原材料、条目、向量与回执。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装或启动 PostgreSQL；连接用户需要相应建表、扩展权限，未知版本会被拒绝。
+`memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将已有 v1/v2/v3/v4 库事务性升级到 v5，保留原材料、条目、向量与回执。v5 增加原始模型输出、按项诊断和 partial 状态，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
 
 `.env.local` 已改为 `.env`。`.gitignore` 忽略 `.env` 和 `.env.*`，只允许无凭据的 `.env.example`。仓库已初始化并托管于 GitHub 私有仓库 `JacobZyy/jt-harness`。打包文件采用白名单，同样不包含 `.env`。实际部署的凭据注入后续处理。
 
@@ -133,6 +149,8 @@ cat examples/conversation.json | jth memo send -
 jth memo send examples/conversation.json --wait
 jth memo send new-conversation.json --provider deepseek-official --model deepseek-v4-flash
 jth memo status
+jth memo status --summary
+jth memo outputs <submission-id>
 jth memo retry <failed-submission-id>
 # 为已经失败、仍保存旧预算的任务显式延长 Agent 时间预算：
 jth memo retry <failed-submission-id> --timeout-ms 600000
@@ -252,7 +270,7 @@ jth memo restore <entry-id> --reason '继续处理这条记忆'
 - 异常退出后，下一次 `send` 启动的 worker 或手动 `memo work` 会恢复遗留 `running` 任务。没有常驻守护进程，因此整机重启不会自动唤醒队列。
 - 当前 API 实测批量响应重复返回 `index: 0`，无法安全据此绑定来源。本版本逐条调用 Embedding 并校验模型、数量、序号、1024 维及 float32 有限非零值，不猜测批量响应顺序。
 - 精确余弦搜索只提供关系比较候选。独立 DSH 比较阶段判断更正、补充和冲突，程序校验来源、范围、时间与审核资格后，与向量在同一事务里提交。v3 为提炼 Agent 增加原子事实和元数据约定，保留已有来源与角色规则。
-- 更正建立替代关系，旧正文和来源保留，默认查询隐藏旧版本；补充保留双方并关联；冲突保留双方依据并标记 `conflicted`。只有用户明确更正的引文能授权替代，时间更新或相似度更高都不是替代依据。
+- 更正建立替代关系，旧正文和来源保留，默认查询隐藏旧版本；补充保留双方并关联；冲突保留双方依据并标记 `conflicted`。Agent 根据来源语义判断更正，程序保留真实 ID、同范围、有效引文和事务约束，不再用角色组合代替判断；时间更新或相似度更高都不是替代依据。
 - 仅更新冲突一方时，未决争议会跟随新版本保留。明确裁决双方时才解除冲突。若新批次只产生 conflict revision，也能把该证据关联到既有记忆；没有命中旧记忆的批内冲突仍保存在批次证据中，通过 `read --submission` 查看。
 - 比较阶段每个查询探针最多取 5 条同范围候选，去重后最多 20 条旧记忆，整体比较材料上限 384000 UTF-8 字节；超限明确失败，不截断证据。召回和模型语义判断不能保证发现所有冲突；未检出的关系不会被程序凭空建立。
 - 暂无 ANN、全库同义去重或跨空间重建索引。方案参考和后续清单见 [Rex 记忆机制参考](docs/rex-memory-reference.md)。

@@ -15,6 +15,7 @@ import { listManagedEntries, manageEntry, storageStats } from '@jt-harness/memo'
 import { storageDoctor } from '@jt-harness/memo'
 import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
+import { schemaVersion, readAgentOutputs } from '@jt-harness/memo'
 
 const help = `jth flow <command>  轻量任务目标、恢复与验收；运行 jth flow --help
 jth db status|start|stop  本机 PostgreSQL 生命周期管理
@@ -28,6 +29,7 @@ jth memo <command>
   send <file.json|->            DSH 提取、Embedding 和入库
   codex <command>             Codex 六阶段采集：install / uninstall / status / capture
   status [submission-id]       队列、提炼和入库状态；--summary 仅显示汇总与失败原因
+  outputs <submission-id>      查看原始模型返回，包括无法解析的结果
   work [--index]               默认采集会话并运行 DSH；--index 仅恢复手动候选
   retry <submission-id>        重试失败任务，复用已保存提炼
   search <query> <scope>       返回候选摘要，默认排除助手建议
@@ -71,6 +73,7 @@ const commandOptions: Record<string, string[]> = {
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
   read: ['submission', 'as-of'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
+  outputs: [],
 }
 
 async function readSubmission(path: string) {
@@ -103,7 +106,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
     const invalidOptions = Object.keys(values).filter(name => !['env-file', 'help', ...commandOptions[command]].includes(name))
     if (invalidOptions.length) throw new Error(`${command} 不支持：${invalidOptions.join(', ')}`)
     const count = command === 'status' ? operands.length <= 1
-      : ['send', 'retry', 'search'].includes(command) ? operands.length === 1
+      : ['send', 'retry', 'search', 'outputs'].includes(command) ? operands.length === 1
       : command === 'read' ? operands.length + Number(Boolean(values.submission)) === 1
       : command === 'review' ? (operands[0] === 'list' ? operands.length === 1 : ['approve', 'reject'].includes(operands[0]) && operands.length === 2)
       : command === 'archive' ? operands.length + Number(Boolean(values.session)) === 1
@@ -135,7 +138,13 @@ export async function main(root: string, args = process.argv.slice(2)) {
     const storage = new MemoStorage(pool)
     let result: unknown
     switch (command) {
-      case 'init': result = { status: 'ready', schema_version: 4 }; break
+      case 'init': result = { status: 'ready', schema_version: schemaVersion }; break
+      case 'outputs': {
+        const status = await jobStatus(pool, operands[0])
+        result = { submission_id: operands[0], status: status.status, error: status.error, intake_issues: status.intake_issues,
+          outputs: await readAgentOutputs(pool, operands[0]) }
+        break
+      }
       case 'status': {
         const status = await jobStatus(pool, operands[0])
         if (values.summary && operands.length) throw new Error('--summary 用于整个队列，不接受任务 ID')
@@ -198,7 +207,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
         if (values.wait) {
           await (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
           result = await jobStatus(pool, receipt.submission_id)
-          if ((result as { status: string }).status !== 'complete') process.exitCode = 1
+          if (!['complete', 'partial'].includes((result as { status: string }).status)) process.exitCode = 1
         } else if (receipt.status === 'queued' || receipt.status === 'running') {
           try { result = { ...receipt, worker: await startWorker(root, config, indexOnly) } } catch (error) {
             // Acceptance already committed. Report launch failure without losing

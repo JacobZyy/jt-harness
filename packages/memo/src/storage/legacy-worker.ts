@@ -10,6 +10,7 @@ import { embedTexts } from './embedding.ts'
 import type { Job } from './jobs.ts'
 import { MemoStorage } from './storage.ts'
 import { findRelatedEntries, readRelations } from './revision-storage.ts'
+import { retainAgentOutputs } from './agent-outputs.ts'
 
 /** Resume at the last committed stage; never rerun extraction after it has been stored. */
 export async function processJob(client: PoolClient, job: Job, config: Config, signal?: AbortSignal, extract = extractMemories, compare = reconcileMemories) {
@@ -24,10 +25,11 @@ export async function processJob(client: PoolClient, job: Job, config: Config, s
     throw new Error('Embedding 地址、模型或维度已改变；恢复本任务原配置再 retry，避免混用向量空间')
   }
   if (!saved) {
-    const result = await extract(job.payload, job.execution.agent, { workspace: resolve(job.execution.dataDir, 'agent-workspace'), signal })
-    const { schema_version, memories, proposals, revisions, run } = result
+    const result = await extract(job.payload, job.execution.agent, { workspace: resolve(job.execution.dataDir, 'agent-workspace'), signal,
+      ...retainAgentOutputs(client, job.id, 'extraction') })
+    const { schema_version, memories, proposals, revisions, run, issues } = result
     signal?.throwIfAborted()
-    await storage.store({ submission: job.payload, extraction: { schema_version, memories, proposals, revisions }, run })
+    await storage.store({ submission: job.payload, extraction: { schema_version, memories, proposals, revisions }, run, intake_issues: issues })
     saved = await storage.getSubmission(job.id)
   }
   const vectors = await embedTexts(saved.entries.map(entry => entry.content), config.embedding, signal)
@@ -43,7 +45,8 @@ export async function processJob(client: PoolClient, job: Job, config: Config, s
       id: relation.id, previous_entry_id: relation.previous_entry_id, current_entry_id: relation.current_entry_id,
       previous_content: relation.previous_content, current_content: relation.current_content, revision: relation.revision,
     })),
-  }, job.execution.agent, { workspace: resolve(job.execution.dataDir, 'agent-workspace'), signal }) : undefined
+  }, job.execution.agent, { workspace: resolve(job.execution.dataDir, 'agent-workspace'), signal,
+    ...retainAgentOutputs(client, job.id, 'reconciliation') }) : undefined
   signal?.throwIfAborted()
   return storage.index({
     submission_id: job.id,
@@ -51,6 +54,7 @@ export async function processJob(client: PoolClient, job: Job, config: Config, s
     embeddings: saved.entries.map((entry, index) => ({ entry_id: entry.id, content_sha256: entry.content_sha256, vector: vectors[index] })),
     relations: decision?.relations ?? [],
     reconciliation_run: decision?.run,
+    intake_issues: decision?.issues,
   })
 }
 
@@ -70,6 +74,7 @@ export async function runWorker(pool: Pool, root: string, signal?: AbortSignal, 
   client.on('error', lostConnection)
   combined.addEventListener('abort', dispose, { once: true })
   let completed = 0
+  let partial = 0
   let failed = 0
   try {
     combined.throwIfAborted()
@@ -93,9 +98,11 @@ export async function runWorker(pool: Pool, root: string, signal?: AbortSignal, 
       try {
         config = await loadConfig(root, job.execution.envFile)
         await mkdir(job.execution.dataDir, { recursive: true, mode: 0o700 })
-        await processJob(client, job, config, combined, extractMemories, compare)
-        await client.query("UPDATE jt_memo.jobs SET status = 'complete', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [job.id])
-        completed++
+        const receipt = await processJob(client, job, config, combined, extractMemories, compare)
+        const status = receipt.status === 'partial' ? 'partial' : 'complete'
+        await client.query('UPDATE jt_memo.jobs SET status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [job.id, status])
+        if (status === 'partial') partial++
+        else completed++
       } catch (error) {
         combined.throwIfAborted()
         await client.query("UPDATE jt_memo.jobs SET status = 'failed', error = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1", [job.id, safeError(error, config)])
@@ -103,7 +110,7 @@ export async function runWorker(pool: Pool, root: string, signal?: AbortSignal, 
       }
     }
     combined.throwIfAborted()
-    return { completed, failed }
+    return { completed, partial, failed }
   } finally {
     client.off('error', lostConnection)
     combined.removeEventListener('abort', dispose)

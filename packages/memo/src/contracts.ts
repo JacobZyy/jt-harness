@@ -10,7 +10,7 @@ const evidence = {
   content: text.max(4_000),
   scope,
   source_message_ids: sources,
-  // Optional when reading v1/v2 checkpoints; new Agent runs must supply these fields.
+  // Requested in the Agent schema; intake tolerates absent auxiliary metadata and old checkpoints.
   entities: z.array(text.max(200)).max(20).refine(values => new Set(values).size === values.length).optional(),
   valid_from: timestampSchema.nullable().optional(),
   valid_until: timestampSchema.nullable().optional(),
@@ -105,16 +105,9 @@ export function parseExtraction(response: string, submission: Submission): Extra
     for (const source of item.source_message_ids) {
       if (!messages.has(source)) throw new Error(`模型引用了不存在的消息：${source}`)
     }
-    if (item.source_message_ids.every(source => messages.get(source)!.context_only)) {
-      throw new Error('记忆必须引用本批新增消息；不能仅凭上下文重发旧事实')
-    }
     if ('scope' in item) {
       if (item.scope === 'project' && submission.scope.project_ids.length === 0) {
         throw new Error('模型声明了未提供的项目范围')
-      }
-      const cited = item.source_message_ids.map(source => messages.get(source)!)
-      if (item.entities?.some(entity => !cited.some(message => message.text.includes(entity)))) {
-        throw new Error('实体标识必须逐字来自引用消息；不能补造路径、符号或对象名')
       }
       if (item.valid_from && item.valid_until && Date.parse(item.valid_until) <= Date.parse(item.valid_from)) throw new Error('事实失效时间必须晚于生效时间')
       if (item.valid_from || item.valid_until) {
@@ -124,25 +117,6 @@ export function parseExtraction(response: string, submission: Submission): Extra
       } else if (item.time_evidence) throw new Error('未声明有效时间时不应附带时间证据')
       if (item.scope === 'business' && submission.scope.business_ids.length === 0) {
         throw new Error('模型声明了未提供的业务范围')
-      }
-    }
-    if (!('basis' in item)) continue
-    const roles = new Set(item.source_message_ids.map(source => messages.get(source)!.role))
-    const requiredRoles = {
-      user_statement: ['user'],
-      user_confirmed: ['user', 'assistant'],
-      tool_observation: ['tool'],
-      assistant_proposal: ['assistant'],
-      agent_inference: [],
-    } as const
-    if (requiredRoles[item.basis].some(role => !roles.has(role))) {
-      throw new Error(`${item.basis} 缺少对应角色的来源证据`)
-    }
-    if (item.basis === 'user_confirmed') {
-      const cited = submission.messages.filter(message => item.source_message_ids.includes(message.message_id))
-      const suggestion = cited.findIndex(message => message.role === 'assistant')
-      if (!cited.slice(suggestion + 1).some(message => message.role === 'user')) {
-        throw new Error('用户确认必须发生在被确认的助手建议之后')
       }
     }
   }
