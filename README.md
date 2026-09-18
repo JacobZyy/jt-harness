@@ -73,6 +73,8 @@ jth memo outputs <submission-id>         # 原始模型返回，含 JSON 修复�
 
 从 v5 起，DSH 已返回的响应在业务解析前写入 `jt_memo.agent_outputs`；因 token 上限停止时，SDK 已返回的片段也会保留并标明执行错误。因此后来发生条目校验或 Embedding 错误，不会丢失第一次返回。旧版本没有留存的模型输出不能凭空恢复；原会话仍可重跑。基础设施失败使用 `retry`，复用已保存的提炼检查点。v6 在 retry 时将原失败原因保存在 `jobs.failure_history`。
 
+`memo model` 的选择只影响新提交。需要让某个失败任务改用新 Provider/model 时，显式运行 `jth memo retry <id> --provider <id> --model <id>`；两个选项必须一起提供。原执行配置保存在 `failure_history[].agent`，来源、已保存的提炼、Embedding 空间和其他执行选项不变。普通 retry 继续沿用任务快照；不为重试设置 effort 或输出 token 上限。纯索引任务不接受模型覆盖。
+
 `partial` 使用按条恢复，保留原有正文、向量、模型输出和回执。先查看原材料与诊断，主 Agent 或调用者据此提供修正文件，不会自动请求模型重写整批：
 
 ```sh

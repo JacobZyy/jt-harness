@@ -52,6 +52,7 @@ search 可选：--limit <1..50>、--candidates（或 --proposals）、--history�
 search/read 可选：--as-of <带时区 ISO 时间>，查看当时已知且已生效的状态
 send 可选：--model <DSH model>、--provider <DSH provider>、--review（先入候选区）
 retry 可选：--timeout-ms <毫秒>，显式调整本次及后续重试的 Agent 时间预算
+retry 可选：--provider <id> --model <id>，显式切换失败任务，原执行快照保留在 failure_history
 review list/archives 可选：--limit <1..100>
 通用：--env-file <path>（默认工具目录 .env）、--help
 输出均为 JSON；错误写入 stderr，退出码 1。
@@ -70,7 +71,7 @@ const optionTypes = {
 } as const
 
 const commandOptions: Record<string, string[]> = {
-  init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: ['summary'], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy'],
+  init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: ['summary'], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy', 'provider', 'model'],
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
   read: ['submission', 'as-of'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
@@ -214,11 +215,18 @@ export async function main(root: string, args = process.argv.slice(2)) {
           const previous = await jobStatus(pool, operands[0])
           indexOnly = previous.kind === 'index'
           if (indexOnly && values.legacy) throw new Error('索引任务不使用 --legacy')
+          if (Boolean(values.provider) !== Boolean(values.model)) throw new Error('retry 切换模型须同时指定 --provider 和 --model')
+          if (indexOnly && values.provider) throw new Error('索引任务不调用 DSH，不能覆盖 Provider 或模型')
+          if (values.provider && values.model) {
+            const { withModelCatalog } = await import('@jt-harness/memo/models')
+            await withModelCatalog(config, (_catalog, check) => check(values.provider!, values.model!))
+          }
         }
         config.agent = optionsSchema.parse({ ...config.agent, model: values.model ?? config.agent.model, provider: values.provider ?? config.agent.provider })
         const receipt = command === 'send'
           ? await enqueue(pool, values.review ? { ...submissionSchema.parse(await readSubmission(operands[0])), review_required: true } : await readSubmission(operands[0]), executionProfile(config))
-          : await retryJob(pool, operands[0], values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']))
+          : await retryJob(pool, operands[0], values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']),
+            values.provider && values.model ? { provider: values.provider, model: values.model } : undefined)
         if (values.wait) {
           await (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
           result = await jobStatus(pool, receipt.submission_id)

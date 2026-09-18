@@ -178,6 +178,36 @@ test('native PostgreSQL + pgvector: durable queue, atomic publication, scope iso
       await assert.rejects(retryJob(pool, 'failed'), /只能 retry/)
     })
 
+    await t.test('explicit retry model selection preserves the original profile, source and extraction checkpoint', async () => {
+      const id = 'explicit-provider-retry'
+      await enqueue(pool, source(id), execution)
+      await storage.store({ submission: source(id), extraction, run })
+      await pool.query("UPDATE jt_memo.jobs SET status='failed',error='provider unreachable' WHERE id=$1", [id])
+      const before = (await pool.query('SELECT payload,execution FROM jt_memo.jobs WHERE id=$1', [id])).rows[0]
+      const saved = await storage.getSubmission(id)
+      const selected = { provider: 'reachable-provider', model: 'selected-model' }
+      await retryJob(pool, id, undefined, selected)
+      const after = (await pool.query('SELECT payload,execution,failure_history FROM jt_memo.jobs WHERE id=$1', [id])).rows[0]
+      assert.deepEqual(after.payload, before.payload)
+      assert.deepEqual(after.execution, { ...before.execution, agent: { ...before.execution.agent, ...selected } })
+      assert.deepEqual(after.failure_history.at(-1).agent, before.execution.agent)
+      assert.equal(after.failure_history.at(-1).error, 'provider unreachable')
+      let compared = false
+      const result = await drainWorker(pool, root, undefined, async (_input, runtime) => {
+        assert.equal(runtime.provider, selected.provider)
+        assert.equal(runtime.model, selected.model)
+        compared = true
+        return { relations: [], run: { ...run, ...selected } }
+      })
+      assert(compared)
+      assert.equal(result.completed, 1)
+      const published = await storage.getSubmission(id)
+      assert.deepEqual(published.submission, saved.submission)
+      assert.deepEqual(published.extraction, saved.extraction)
+      assert.deepEqual(published.run, saved.run)
+      assert.deepEqual(published.entries.map(entry => [entry.id, entry.content_sha256]), saved.entries.map(entry => [entry.id, entry.content_sha256]))
+    })
+
     await t.test('zero candidates create a durable noop receipt without embedding API calls', async () => {
       await enqueue(pool, source('empty'), execution)
       await storage.store({ submission: source('empty'), extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, run })
@@ -411,6 +441,7 @@ test('native PostgreSQL + pgvector: durable queue, atomic publication, scope iso
       assert((await cli('stats')).counts.entries > 0)
       assert((await cli('review', 'list')).total > 0)
       await assert.rejects(cli('search', 'query'), /必须明确指定/)
+      await assert.rejects(cli('retry', 'failed', '--provider', 'reachable-provider'), /同时指定/)
       const inputPath = resolve(directory, 'cli-source.json')
       await writeFile(inputPath, JSON.stringify(source('cli-batch')))
       await storage.store({ submission: source('cli-batch'), extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, run })

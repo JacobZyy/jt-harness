@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg'
 import { optionsSchema, submissionSchema } from '../contracts.ts'
-import type { Submission } from '../contracts.ts'
+import type { Submission, MemoryAgentOptions } from '../contracts.ts'
 import type { ExecutionProfile } from '../config.ts'
 import { MemoStorageError, sha256 } from './contract.ts'
 import { transaction } from './database.ts'
@@ -66,15 +66,17 @@ export async function jobStatus(database: Pool | PoolClient, id?: string) {
     legacy_counts: Object.fromEntries(kinds.rows.filter(row => row.kind === 'legacy').map(row => [row.status, row.count])), recent: jobs.rows }
 }
 
-export async function retryJob(pool: Pool, id: string, timeoutMs?: number) {
+export async function retryJob(pool: Pool, id: string, timeoutMs?: number, agentOverride?: Pick<MemoryAgentOptions, 'provider' | 'model'>) {
   const budget = timeoutMs === undefined ? null : optionsSchema.shape.timeoutMs.parse(timeoutMs)
+  const agent = agentOverride === undefined ? undefined : optionsSchema.pick({ provider: true, model: true }).parse(agentOverride)
+  const patch = { ...agent, ...(budget === null ? {} : { timeoutMs: budget }) }
   const result = await pool.query(`
     UPDATE jt_memo.jobs SET status = 'queued', error = NULL, updated_at = CURRENT_TIMESTAMP,
-      failure_history = failure_history || jsonb_build_array(jsonb_build_object('attempt',attempts,'error',error,'at',updated_at)),
-      execution = CASE WHEN $2::int IS NULL THEN execution
-        ELSE jsonb_set(execution, '{agent,timeoutMs}', to_jsonb($2::int)) END
-    WHERE id = $1 AND status = 'failed' AND ($2::int IS NULL OR kind='legacy') RETURNING id
-  `, [id, budget])
+      failure_history = failure_history || jsonb_build_array(jsonb_build_object('attempt',attempts,'error',error,'at',updated_at,'agent',execution->'agent')),
+      execution = CASE WHEN $2::jsonb = '{}'::jsonb THEN execution
+        ELSE jsonb_set(execution, '{agent}', (execution->'agent') || $2::jsonb) END
+    WHERE id = $1 AND status = 'failed' AND ($2::jsonb = '{}'::jsonb OR kind='legacy') RETURNING id
+  `, [id, JSON.stringify(patch)])
   if (!result.rowCount) throw new Error('只能 retry 已失败的任务；queued/running 用 memo work 恢复；partial 已保存处理结果，先用 memo outputs/read 检查未接收项，避免整批重复提炼')
-  return { submission_id: id, status: 'queued', ...(budget === null ? {} : { timeoutMs: budget }) }
+  return { submission_id: id, status: 'queued', ...(budget === null ? {} : { timeoutMs: budget }), ...(agent ? { agent } : {}) }
 }
