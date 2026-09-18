@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg'
 import { z } from 'zod'
+import { isDeepStrictEqual } from 'node:util'
 import { inspectExtraction } from '../intake.ts'
 import type { IntakeIssue } from '../intake.ts'
 import type { ExecutionProfile } from '../config.ts'
@@ -72,7 +73,7 @@ export async function recoverIntake(pool: Pool, id: string, input: unknown) {
         const { extraction, issues } = inspectExtraction(JSON.stringify({ schema_version: 1, memories: [], proposals: [], revisions: [], [collection]: values }), saved.submission)
         if (issues.length) throw new Error(issues.map(issue => `${issue.path}: ${issue.error}`).join('; '))
         if (!extraction[collection].length) throw new Error('空修正使用 dismiss 并说明依据')
-        if (extraction[collection].some(item => saved.extraction[collection].some(accepted => JSON.stringify(item) === JSON.stringify(accepted)))) {
+        if (extraction[collection].some(item => saved.extraction[collection].some(accepted => isDeepStrictEqual(item, accepted)))) {
           throw new Error('修正包含本批已接收条目；使用 dismiss 说明重复，不重新嵌入有效内容')
         }
         const followup = `recovery-${sha256(JSON.stringify([id, change.path]))}`

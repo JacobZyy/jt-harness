@@ -100,6 +100,8 @@ test('partial intake publishes independent memories and preserves rejected and u
       const snapshot = async () => (await pool.query(`SELECT s.content_hash,c.vector_hash,c.intake_issues FROM jt_memo.submissions s
         JOIN jt_memo.index_commits c ON c.submission_id=s.id WHERE s.id=$1`, [submission.submission_id])).rows
       const before = await snapshot()
+      await assert.rejects(recoverIntake(pool, submission.submission_id, [{ path: 'memories[1]', action: 'replace',
+        reason: '误把已接收条目用作修正；PG JSONB 字段顺序不应绕过去重', value: saved.extraction.memories[0] }]), /已接收条目/)
       const correction = [{ path: 'memories[1]', action: 'replace', reason: '定位回原始消息 m', value: { ...bad, source_message_ids: ['m'] } }]
       const recovered = await recoverIntake(pool, submission.submission_id, correction)
       const childId = recovered.issues[0].recovery.followup_id
