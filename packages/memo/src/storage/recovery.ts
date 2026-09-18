@@ -47,9 +47,11 @@ export async function recoverIntake(pool: Pool, id: string, input: unknown) {
       const issue = receipt.intake_issues.find(issue => issue.path === change.path)
       if (!issue) throw new Error(`未接收条目不存在：${change.path}`)
       const hash = sha256(JSON.stringify(change))
-      const existing = (await client.query('SELECT content_hash FROM jt_memo.intake_recoveries WHERE submission_id=$1 AND path=$2', [id, change.path])).rows[0]
+      const existing = (await client.query(`SELECT action=$3 AND reason=$4 AND value IS NOT DISTINCT FROM $5::jsonb AS matches
+        FROM jt_memo.intake_recoveries WHERE submission_id=$1 AND path=$2`,
+      [id, change.path, change.action, change.reason, change.action === 'replace' ? JSON.stringify(change.value) : null])).rows[0]
       if (existing) {
-        if (existing.content_hash !== hash) throw new Error(`${change.path} 已有恢复回执；不能覆盖，后续失败应 retry 对应任务`)
+        if (!existing.matches) throw new Error(`${change.path} 已有恢复回执；不能覆盖，后续失败应 retry 对应任务`)
         continue
       }
       let notes: Awaited<ReturnType<typeof publishRelations>> = []

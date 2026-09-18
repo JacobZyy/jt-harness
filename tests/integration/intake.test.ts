@@ -110,6 +110,7 @@ test('partial intake publishes independent memories and preserves rejected and u
       assert.equal((await storage.getSubmission(childId)).received_at, saved.received_at, 'recovery must retain original receive time')
       await assert.rejects(recoverIntake(pool, submission.submission_id, [{ ...correction[0], reason: 'overwrite' }]), /不能覆盖/)
       await recoverIntake(pool, submission.submission_id, correction)
+      await recoverIntake(pool, submission.submission_id, [{ ...correction[0], value: Object.fromEntries(Object.entries(correction[0].value).reverse()) }])
       const client2 = await pool.connect()
       try {
         api.mock.mockImplementationOnce(async () => Response.json({}, { status: 503 }))
