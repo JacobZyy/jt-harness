@@ -4,31 +4,32 @@ import type { FlowStore } from '@jt-harness/flow'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
 import type { Config } from '@jt-harness/memo/config'
 import { startBackground } from './background.ts'
+import { connectDatabase } from './postgres.ts'
 
 /** Hooks only claim a local refresh; the child owns embedding and database I/O. */
 export async function scheduleRecall(root: string, store: FlowStore, taskId: string) {
-  const request = store.claimRecall(taskId)
+  const request = await store.claimRecall(taskId)
   if (!request) return { started: false }
   try {
     return await startBackground(root, ['flow', 'recall', '--workspace', store.workspace, '--task', taskId, '--request', request], resolve(store.workspace, '.jth/recall.log'))
   } catch (error) {
-    store.saveRecall(taskId, memoryKey(store.task(taskId)), request, [], safeError(error))
+    await store.saveRecall(taskId, memoryKey(await store.task(taskId)), request, [], safeError(error))
     return { started: false, error: safeError(error) }
   }
 }
 
 export async function recallTask(root: string, store: FlowStore, taskId: string, pendingRequest?: string) {
-  const requestedAt = pendingRequest ?? store.claimRecall(taskId, true)
-  let task = store.task(taskId)
+  const requestedAt = pendingRequest ?? await store.claimRecall(taskId, true)
+  let task = await store.task(taskId)
   if (!requestedAt || task.memory?.requestedAt !== requestedAt || task.memory.status !== 'refreshing') return task.memory
-  const key = memoryKey(task), settings = store.settings()
+  const key = memoryKey(task), settings = await store.settings()
   let config: Config | undefined
   let pool
   try {
     config = await loadConfig(root, settings.envFile)
-    const { MemoStorage, embedTexts, openDatabase, prepareDatabase } = await import('@jt-harness/memo')
+    const { MemoStorage, embedTexts, prepareDatabase } = await import('@jt-harness/memo')
     const [vector] = await embedTexts([JSON.stringify({ goal: task.goal, constraints: task.constraints })], config.embedding, AbortSignal.timeout(45000))
-    pool = openDatabase(config)
+    pool = await connectDatabase(config)
     await prepareDatabase(pool, false)
     const storage = new MemoStorage(pool)
     const scopes = [{ kind: 'project' as const, project_ids: settings.projectIds }, { kind: 'user' as const },
@@ -38,10 +39,10 @@ export async function recallTask(root: string, store: FlowStore, taskId: string,
     const entries = matches.flatMap(match => match.entries).sort((a, b) => a.distance - b.distance).slice(0, 5).map(entry => ({
       id: entry.id, content: entry.content.slice(0, 1000), state: entry.state, claimStatus: entry.claim_status, sourceSession: entry.source_session_id,
     }))
-    store.saveRecall(taskId, key, requestedAt, entries)
+    await store.saveRecall(taskId, key, requestedAt, entries)
   } catch (error) {
-    store.saveRecall(taskId, key, requestedAt, [], safeError(error, config))
+    await store.saveRecall(taskId, key, requestedAt, [], safeError(error, config))
   } finally { await pool?.end() }
-  task = store.task(taskId)
+  task = await store.task(taskId)
   return task.memory
 }

@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { parseArgs } from 'node:util'
-import { openDatabase, runIndexWorker } from '@jt-harness/memo'
+import { runIndexWorker } from '@jt-harness/memo'
+import { connectDatabase } from './postgres.ts'
 import type { Pool } from '@jt-harness/memo'
 import { optionsSchema, submissionSchema, timestampSchema } from '@jt-harness/memo/contracts'
 import { executionProfile, loadConfig, safeError } from '@jt-harness/memo/config'
@@ -16,6 +17,7 @@ import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 
 const help = `jth flow <command>  轻量任务目标、恢复与验收；运行 jth flow --help
+jth db status|start|stop  本机 PostgreSQL 生命周期管理
 jth memo <command>
 
   model                        交互切换当前 Agent 模型；--list 查询实时列表
@@ -25,7 +27,7 @@ jth memo <command>
   evidence <id> --message <id>  读取来源原文
   send <file.json|->            DSH 提取、Embedding 和入库
   codex <command>             Codex 六阶段采集：install / uninstall / status / capture
-  status [submission-id]       队列、提炼和入库状态
+  status [submission-id]       队列、提炼和入库状态；--summary 仅显示汇总与失败原因
   work [--index]               默认采集会话并运行 DSH；--index 仅恢复手动候选
   retry <submission-id>        重试失败任务，复用已保存提炼
   search <query> <scope>       返回候选摘要，默认排除助手建议
@@ -58,14 +60,14 @@ const optionTypes = {
   project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
   session: { type: 'string' }, user: { type: 'boolean' }, submission: { type: 'string' },
   limit: { type: 'string' }, proposals: { type: 'boolean' },
-  history: { type: 'boolean' },
+  history: { type: 'boolean' }, summary: { type: 'boolean' },
   'as-of': { type: 'string' }, candidates: { type: 'boolean' }, archived: { type: 'boolean' }, review: { type: 'boolean' },
   reason: { type: 'string' }, evidence: { type: 'string' },
   'timeout-ms': { type: 'string' }, legacy: { type: 'boolean' }, index: { type: 'boolean' },
 } as const
 
 const commandOptions: Record<string, string[]> = {
-  init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: [], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy'],
+  init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: ['summary'], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy'],
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
   read: ['submission', 'as-of'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
@@ -120,8 +122,8 @@ export async function main(root: string, args = process.argv.slice(2)) {
     if (command === 'search' && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw new Error('--limit 必须为 1..50 的整数')
     const asOf = values['as-of'] ? timestampSchema.parse(values['as-of']) : undefined
     config = await loadConfig(root, values['env-file'])
-    if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL；PostgreSQL 必须已经启动')
-    pool = openDatabase(config)
+    if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
+    pool = await connectDatabase(config)
     pool.on('error', error => { process.stderr.write(`${safeError(error, config)}\n`); controller.abort(error) })
     if (command === 'doctor') {
       const report = await storageDoctor(pool)
@@ -134,7 +136,13 @@ export async function main(root: string, args = process.argv.slice(2)) {
     let result: unknown
     switch (command) {
       case 'init': result = { status: 'ready', schema_version: 4 }; break
-      case 'status': result = await jobStatus(pool, operands[0]); break
+      case 'status': {
+        const status = await jobStatus(pool, operands[0])
+        if (values.summary && operands.length) throw new Error('--summary 用于整个队列，不接受任务 ID')
+        if (values.summary) { const { recent: _recent, ...summary } = status; result = summary }
+        else result = status
+        break
+      }
       case 'stats': result = await storageStats(pool); break
       case 'archives': result = await listManagedEntries(pool, 'archives', limit); break
       case 'review': {

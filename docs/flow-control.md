@@ -14,7 +14,7 @@ flowchart TD
     H --> T[读取当前会话绑定的任务]
     T --> A[主 Agent + jth-flow Skill]
     A --> C[jth flow checkpoint / revise]
-    C --> S[(项目 SQLite 任务状态)]
+    C --> S[(PostgreSQL jt_flow 任务状态)]
     S --> T
     H --> R[必要时启动后台 recall 子进程]
     R --> E[复用 Memo Embedding 与限定范围搜索]
@@ -28,13 +28,13 @@ flowchart TD
     Q --> M
 ```
 
-`packages/flow` 拥有任务、SQLite、上下文渲染、检查执行和 Skill；不导入 Memo 或 Codex SDK。`packages/codex-hooks` 适配 Codex JSON 事件，复用原来的配置合并和原子写文件。`packages/cli` 调用这两个包，并通过 Memo 的公共 API 完成召回。`packages/memo` 的存储、版本、冲突处理和队列没有改变。
+`packages/flow` 拥有任务、PostgreSQL 存储、上下文渲染、检查执行和 Skill；不导入 Memo 或 Codex SDK。`packages/codex-hooks` 适配 Codex JSON 事件，复用原来的配置合并和原子写文件。`packages/cli` 调用这两个包，并通过 Memo 的公共 API 完成召回。`packages/memo` 保留存储、版本、冲突处理和队列；模型校验失败最多修复一次，不放宽发布规则。
 
-使用 Node 24 自带 `node:sqlite`、`node:util.parseArgs`、进程 API、Git 文件清单、已有 Zod 和 Memo API。没有增加运行时第三方依赖、HTTP 服务、调度常驻服务或新 Agent 框架，也没有复制 Trellis 实现。
+使用现有 `pg` 驱动、`pg_ctl`、Node 24 自带的 `node:util.parseArgs`、进程 API、Git 文件清单、已有 Zod 和 Memo API。`node:sqlite` 仅用于一次性读取旧库迁移。没有增加运行时第三方依赖、HTTP 服务、调度常驻服务或新 Agent 框架，也没有复制 Trellis 实现。
 
 ## 状态与恢复
 
-每个任务保存当前目标、不可覆盖的初始目标、验收条件、范围、约束、阶段、决定、未决问题、近期进展、下一步和验收结果。SQLite 事务保证一次更新完整落盘；事件表保留目标变更和检查点。普通状态只展示最近 8 条进展和决定，`status --history` 查看最近 30 次事件，避免每次读取重载全部旧上下文。
+每个任务保存当前目标、不可覆盖的初始目标、验收条件、范围、约束、阶段、决定、未决问题、近期进展、下一步和验收结果。PostgreSQL 事务与按 workspace 的事务锁保证一次更新完整落盘，并发检查点不会互相覆盖；事件表保留目标变更和检查点。普通状态只展示最近 8 条进展和决定，`status --history` 查看最近 30 次事件，避免每次读取重载全部旧上下文。
 
 `checkpoint` 追加约束和进展，不能修改目标。`revise` 要求明确说明用户变更的依据，并让旧验收结果失效。讨论转实施也需要记录依据，但不要求用户重复授权。程序检查依据是否存在，无法独立判定依据的语义是否真实。
 
@@ -64,3 +64,11 @@ Hook 在 SessionStart（包括 compact）、UserPromptSubmit 和 SubagentStart �
 - [Codex 官方 Hooks 文档](https://learn.chatgpt.com/zh-Hans/docs/hooks)：采用原生事件、JSON `additionalContext` 与 Hook 信任机制。以本机 Codex 0.153.0 生成的 app-server schema 核对实际字段。
 
 本原型不声称仅凭几条提示就能杜绝模型偏移。可验证的机制是目标不被普通检查点覆盖、压缩/恢复时重新提供状态、限制摘要规模、单一主控和有效验收；语义效果需要接下来在真实长任务中观察。
+
+## 数据库离线与旧版本迁移
+
+Flow 状态全部持久化在 `jt_flow`，和 `jt_memo` 复用同一 PostgreSQL 实例。Hook 使用 200 ms 连接超时和 500 ms 语句超时；数据库冷启动由后台承担。暂时不可用时将生命周期事件保存到 `.jth/flow-events/`，并明确提示上下文未恢复；后台和后续 CLI 调用重放事件。事件带原始接收时间，旧事件不能倒退会话最新活动。
+
+`jth flow migrate` 使用 SQLite 在线备份接口取得一致快照，将设置、任务、主从会话及完整历史一次事务导入 PG，再写入 `.jth/flow.json` 配置定位。相同快照可重试，不会覆盖已更新的 PG 任务；不同快照与已有数据冲突时拒绝覆盖。迁移后原 SQLite 与备份只作回退材料。数据备份的路径和计数由命令回执给出。
+
+PG 由明确配置的本机原生工具管理，正常 SQL 命令负责按需启动。并发启动依赖 PostgreSQL 自身的 postmaster 锁；启动后核对实际 data_directory，避免接管其他实例。它是按需启动，不额外注册开机服务；单次 CLI 退出不关闭共享 PG。

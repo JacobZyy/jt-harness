@@ -65,17 +65,17 @@ async function runCheck(command: string, workspace: string, log: string, timeout
 }
 
 export async function verifyTask(store: FlowStore, taskId: string, sessionId?: string, timeoutMs = 120000, signal?: AbortSignal) {
-  const task = store.task(taskId)
+  const task = await store.task(taskId)
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 3600000) throw new Error('单项验收超时必须为 100..3600000 毫秒')
   if (task.phase === 'discussion' || task.phase === 'completed' || task.blocked) throw new Error('只有未阻塞的实施任务可执行验收命令')
   if (!task.checks.length) throw new Error('任务没有验收命令；用 checkpoint --check 添加实际检查')
-  if (sessionId && (store.binding(sessionId)?.taskId !== taskId || store.binding(sessionId)?.role !== 'owner')) throw new Error('仅任务主控可运行验收命令')
+  if (sessionId && ((await store.binding(sessionId))?.taskId !== taskId || (await store.binding(sessionId))?.role !== 'owner')) throw new Error('仅任务主控可运行验收命令')
   const snapshot = await workspaceSnapshot(store.workspace)
   const id = randomUUID(), directory = resolve(store.workspace, '.jth/checks', id)
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const results: Verification['results'] = []
   // An interrupted or failed rerun must not leave an older green result usable.
-  store.saveVerification(taskId, { id, contractVersion: task.contractVersion, at: new Date().toISOString(), passed: false, snapshot, results }, sessionId)
+  await store.saveVerification(taskId, { id, contractVersion: task.contractVersion, at: new Date().toISOString(), passed: false, snapshot, results }, sessionId)
   for (const [index, command] of task.checks.entries()) {
     if (signal?.aborted) break
     results.push(await runCheck(command, store.workspace, resolve(directory, `${index + 1}.log`), timeoutMs, signal))
@@ -84,6 +84,6 @@ export async function verifyTask(store: FlowStore, taskId: string, sessionId?: s
   const unchanged = JSON.stringify(snapshot) === JSON.stringify(await workspaceSnapshot(store.workspace))
   const passed = !signal?.aborted && unchanged && results.length === task.checks.length && results.every(result => result.exitCode === 0 && !result.timedOut)
   const verification: Verification = { id, contractVersion: task.contractVersion, at: new Date().toISOString(), passed, snapshot, results }
-  store.saveVerification(taskId, verification, sessionId)
+  await store.saveVerification(taskId, verification, sessionId)
   return { ...verification, snapshot: undefined, sourceUnchanged: unchanged }
 }

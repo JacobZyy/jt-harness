@@ -1,12 +1,39 @@
-import { mkdir, readFile, readlink, symlink, unlink, realpath, appendFile } from 'node:fs/promises'
+import { mkdir, readFile, readlink, symlink, unlink, realpath, appendFile, readdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, relative, resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { FlowStore, renderFlowContext } from '@jt-harness/flow'
 import { mergeHooks, quote, updateHookConfig } from './install.ts'
+import { writeJson, readJson } from './capture.ts'
 
 export const flowEvents = ['SessionStart', 'UserPromptSubmit', 'SubagentStart', 'Stop', 'Interrupt', 'SessionEnd', 'SubagentStop'] as const
 const contextEvents: readonly string[] = ['SessionStart', 'UserPromptSubmit', 'SubagentStart']
-const inputSchema = z.object({ hook_event_name: z.enum(flowEvents), session_id: z.string().min(1), cwd: z.string().min(1), agent_id: z.string().min(1).optional() })
+const inputSchema = z.object({ hook_event_name: z.enum(flowEvents), session_id: z.string().min(1), cwd: z.string().min(1), agent_id: z.string().min(1).optional(), observed_at: z.iso.datetime().optional() })
+
+export async function stageFlowEvent(input: unknown, workspace: string) {
+  const event = { ...inputSchema.parse(input), observed_at: new Date().toISOString() }
+  const path = relative(workspace, await realpath(event.cwd))
+  if (path === '..' || path.startsWith('../') || isAbsolute(path)) return null
+  const file = resolve(workspace, '.jth/flow-events', `${Date.now()}-${randomUUID()}.json`)
+  await writeJson(file, event)
+  return { file, event }
+}
+
+export async function drainFlowEvents(store: FlowStore) {
+  const directory = resolve(store.workspace, '.jth/flow-events')
+  const files = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+  const taskIds = new Set<string>()
+  let processed = 0
+  for (const name of files.filter(name => name.endsWith('.json')).sort()) {
+    const file = resolve(directory, name), input = await readJson(file)
+    if (!input) continue
+    const result = await flowHook(input, store)
+    if (result.taskId) taskIds.add(result.taskId)
+    await unlink(file).catch(error => { if (error.code !== 'ENOENT') throw error })
+    processed++
+  }
+  return { processed, taskIds: [...taskIds] }
+}
 
 /** Native events are liveness signals. Only the main agent can change semantic task state. */
 export async function flowHook(input: unknown, store: FlowStore) {
@@ -17,10 +44,10 @@ export async function flowHook(input: unknown, store: FlowStore) {
   const childEvent = event.hook_event_name === 'SubagentStart' || event.hook_event_name === 'SubagentStop'
   if (childEvent && !event.agent_id) throw new Error('子 Agent Hook 缺少 agent_id')
   const sessionId = childEvent ? event.agent_id! : event.session_id
-  const task = store.observe(sessionId, event.hook_event_name, childEvent ? event.session_id : undefined)
+  const task = await store.observe(sessionId, event.hook_event_name, childEvent ? event.session_id : undefined, event.observed_at)
   if (!contextEvents.includes(event.hook_event_name)) return { output: {}, taskId: undefined }
-  const pending = task ? [] : store.tasks().filter(task => task.phase !== 'completed')
-  const context = renderFlowContext(store.workspace, sessionId, task, store.binding(sessionId), pending)
+  const pending = task ? [] : (await store.tasks()).filter(task => task.phase !== 'completed')
+  const context = renderFlowContext(store.workspace, sessionId, task, await store.binding(sessionId), pending)
   return { output: { hookSpecificOutput: { hookEventName: event.hook_event_name, additionalContext: context } }, taskId: task?.id }
 }
 

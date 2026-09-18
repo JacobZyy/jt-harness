@@ -39,6 +39,10 @@ export async function loadConfig(root: string, envFile?: string, environment: No
     envFile: file,
     databaseUrl: values.JTH_DATABASE_URL,
     dataDir: values.JTH_DATA_DIR ? resolve(dirname(file), values.JTH_DATA_DIR) : resolve(homedir(), '.jth'),
+    postgres: values.JTH_PG_DATA_DIR ? {
+      dataDir: resolve(dirname(file), values.JTH_PG_DATA_DIR),
+      binDir: values.JTH_PG_BIN_DIR ? resolve(dirname(file), values.JTH_PG_BIN_DIR) : undefined,
+    } : undefined,
     agent,
     embedding: {
       baseUrl, space, apiKey: values.EMBEDDING_API_KEY,

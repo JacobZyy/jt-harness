@@ -34,9 +34,9 @@ Codex 中这些命令由 `jth-flow` Skill 在长任务需要时调用，日常�
 
 用户明确切换到独立目标时，用 `jth flow pause --reason '切换依据'` 解除当前绑定，再 start 新任务。暂停保留旧任务，不假装完成；恢复时仍用 resume。
 
-开始、恢复和输入时的记忆召回由短生命周期后台子进程完成。Hook 只读本地状态并投递刷新，不等待 Embedding 或 PostgreSQL。结果按已配置项目、业务和用户范围检索，缓存 5 分钟，最多注入 5 条简短摘要；用 `jth flow recall` 立即刷新，用 `jth memo read <id>` 获取证据和冲突双方。长期写入继续沿用原有六阶段捕获与 DSH 队列，没有第二套提取 Agent。
+开始、恢复和输入时的记忆召回由短生命周期后台子进程完成。Flow Hook 对 PostgreSQL 做短时读取，不等待数据库冷启动、模型或 Embedding。数据库离线时先保存本地事件，后台准备数据库并重放；不能把缺少注入当成没有任务。结果按已配置项目、业务和用户范围检索，缓存 5 分钟，最多注入 5 条简短摘要；用 `jth flow recall` 立即刷新，用 `jth memo read <id>` 获取证据和冲突双方。长期写入继续沿用原有六阶段捕获与 DSH 队列。
 
-任务状态是 `.jth/flow.sqlite`，验收日志是 `.jth/checks/`，召回日志是 `.jth/recall.log`，均不入 Git。任务状态不依赖 PostgreSQL 在线；召回失败可在 `flow status` 看到错误。`jth flow uninstall` 只移除流程 Hook 和 Skill 链接，保留任务及 Memo 捕获。
+任务状态统一在 PostgreSQL 的 `jt_flow` schema，按 workspace 隔离。`.jth/flow.json` 只保存配置定位；验收日志在 `.jth/checks/`，召回日志在 `.jth/recall.log`，离线事件在 `.jth/flow-events/`，均不入 Git。旧安装运行 `jth flow migrate`：先备份 SQLite，事务性迁入任务、绑定和历史，成功后切换配置定位；原文件保留且不再作为运行存储。`jth flow uninstall` 只移除流程 Hook 和 Skill 链接，保留任务及 Memo 捕获。
 
 验收命令是当前任务明确记录的本地 shell 命令，具有调用者权限。只配置原本就允许执行的项目检查。完成需要当前目标版本的通过结果、未变化的文件快照、已解决的待讨论问题；文档型实施任务可提供 `--evidence <项目内文件>`。流程提示不能代替沙箱，也不能证明语义上绝不偏题。完整设计、约束和验证记录见 [流程原型说明](docs/flow-control.md)。
 
@@ -55,15 +55,17 @@ jth memo read --submission jth-cli-example-1
 
 `send` 默认在 PostgreSQL 持久化材料后返回，不等待模型和 Embedding。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成；待审条目是否进入默认搜索还由 `claim_status` 决定，状态输出包含 `candidate_count` 和 `publication_notes`。示例会话限定在 `jth-cli-verification` 项目范围内。
 
-本机开发库位于 `~/.jth/postgres`。`jth` 使用 `~/.jth/run` 私有 Unix socket；图形客户端使用仅监听本机的 `127.0.0.1:5432`。没有注册开机启动，系统重启后需先启动数据库：
+本机开发库位于 `~/.jth/postgres`。`jth` 使用 `~/.jth/run` 私有 Unix socket；图形客户端使用仅监听本机的 `127.0.0.1:5432`。在 `.env` 明确配置 `JTH_PG_DATA_DIR` 和 `JTH_PG_BIN_DIR` 后，数据库访问会复用运行实例或按需启动它；电脑重启后的第一次访问也适用。没有增加开机常驻服务，PG 启动后不随单次 CLI 退出而关闭。
 
 ```sh
-/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$HOME/.jth/postgres" -l "$HOME/.jth/postgres.log" start
-/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$HOME/.jth/postgres" status
-/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D "$HOME/.jth/postgres" -m fast stop
+jth db status
+jth db start
+jth db stop
 ```
 
-停止数据库前完成正在执行的任务。再次启动后运行 `jth memo work` 恢复已接收但未完成的任务。移除 CLI 软链可运行 `unlink "$HOME/.local/bin/jth"`；该操作不删除配置或记忆数据库。
+`status` 只观察，不启动；`stop` 关闭明确配置的本机实例，活动事务回滚，数据保留。停止前应先完成正在执行的任务；以后需要数据库的命令会再次启动它，`jth memo work` 恢复未完成队列。启动管理复用 `pg_ctl`，不重复安装、初始化或升级已有 PG；没有配置托管目录的外部实例只连接，不启停。移除 CLI 软链可运行 `unlink "$HOME/.local/bin/jth"`；该操作不删除配置或记忆数据库。
+
+DSH Web/桌面是否打开不影响提炼：SDK 会自行启动并关闭 `sdk-minimal` 子进程。`jth memo status --summary` 显示执行方式、队列计数与失败原因。`failed` 不等于等待 DSH 启动，也不会自动无限重试。结构或证据校验失败会携带错误反馈修复一次，仍失败则保留原材料；不放宽来源校验、不覆盖模型默认生成参数。旧失败任务用 `memo retry <id>` 恢复，已存提炼直接从后续阶段继续。
 
 ### DataGrip / Navicat 查看数据
 
@@ -109,6 +111,7 @@ node bin/jth.mjs memo init
 | 配置 | 用途 |
 | --- | --- |
 | `JTH_DATABASE_URL` | PostgreSQL 连接地址，必须配置 |
+| `JTH_PG_DATA_DIR` / `JTH_PG_BIN_DIR` | 可选本机托管实例目录与原生 PG 工具目录；配置后按需启动，只允许本地地址或 socket |
 | `EMBEDDING_BASE_URL` | OpenAI-compatible API 根地址，以 `/v1` 结尾；CLI 添加 `/embeddings` |
 | `EMBEDDING_API_KEY` | API 密钥，只在调用 Embedding 时使用 |
 | `EMBEDDING_MODEL` | 本机配置为 `qwen3.7-text-embedding-flash` |

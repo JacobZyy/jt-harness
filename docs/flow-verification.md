@@ -1,4 +1,6 @@
-# 流程原型验证记录
+# 初版流程原型验证记录（3ab47c7，历史）
+
+本记录对应 SQLite 初版。当前 PostgreSQL 托管、迁移及 DSH 恢复验证见 [运行时验证记录](postgres-runtime-verification.md)。
 
 日期：2026-09-18。环境：macOS、Node 24.21.0、Codex 0.153.0、PostgreSQL 18.6 + pgvector 0.8.6。
 

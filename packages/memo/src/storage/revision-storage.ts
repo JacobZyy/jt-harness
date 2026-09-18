@@ -158,7 +158,6 @@ export async function findRelatedEntries(database: Pool | PoolClient, submission
     `, [spaceId, JSON.stringify(probe.vector), submission.submission_id, probe.scope,
       submission.scope.project_ids, submission.scope.business_ids, submission.source.session_id])
     for (const entry of result.rows) found.set(entry.id, entry)
-    if (found.size > 20) throw new Error('本批涉及超过 20 条待比较旧记忆；请按主题拆批，不会截断候选')
   }
   return [...found.values()]
 }

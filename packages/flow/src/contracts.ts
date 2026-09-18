@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { posix } from 'node:path'
 
 const text = z.string().trim().min(1).max(2000)
+export const locatorSchema = z.strictObject({ version: z.literal(2), workspace: text, envFile: text })
 export const phaseSchema = z.enum(['discussion', 'execution', 'verification', 'completed'])
 export const relativePathSchema = z.string().trim().min(1).max(1000).refine(path => (
   !path.startsWith('/') && !path.split(/[\\/]/).includes('..') && !path.includes('\0')

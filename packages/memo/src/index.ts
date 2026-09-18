@@ -1,8 +1,11 @@
 import { Pool } from 'pg'
 import type { Config } from './config.ts'
-export function openDatabase(config: Config) {
+import { safeError as databaseError } from './config.ts'
+export function openDatabase(config: Config, fast = false) {
   if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
-  return new Pool({ connectionString: config.databaseUrl, max: 2, connectionTimeoutMillis: 3000, statement_timeout: 15000, application_name: 'jth-memo' })
+  const pool = new Pool({ connectionString: config.databaseUrl, max: 2, connectionTimeoutMillis: fast ? 200 : 3000, statement_timeout: fast ? 500 : 15000, application_name: 'jth-memo' })
+  pool.on('error', error => process.stderr.write(JSON.stringify({ database_error: databaseError(error, config) }) + '\n'))
+  return pool
 }
 export type { Pool } from 'pg'
 export type { Job } from './storage/jobs.ts'

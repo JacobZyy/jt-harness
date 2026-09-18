@@ -47,7 +47,9 @@ export async function jobStatus(database: Pool | PoolClient, id?: string) {
   }
   const counts = await database.query<{ status: string, count: number }>('SELECT status, count(*)::int AS count FROM jt_memo.jobs GROUP BY status ORDER BY status')
   const kinds = await database.query<{ kind: string, status: string, count: number }>('SELECT kind,status,count(*)::int AS count FROM jt_memo.jobs GROUP BY kind,status')
+  const failures = await database.query<{ error: string, count: number }>("SELECT error,count(*)::int AS count FROM jt_memo.jobs WHERE status='failed' GROUP BY error ORDER BY count(*) DESC")
   return { counts: Object.fromEntries(counts.rows.map(row => [row.status, row.count])),
+    execution: { dsh: 'sdk-subprocess', web_required: false }, failures: failures.rows,
     index_counts: Object.fromEntries(kinds.rows.filter(row => row.kind === 'index').map(row => [row.status, row.count])),
     legacy_counts: Object.fromEntries(kinds.rows.filter(row => row.kind === 'legacy').map(row => [row.status, row.count])), recent: jobs.rows }
 }

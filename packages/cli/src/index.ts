@@ -1,5 +1,9 @@
 export async function run(root: string, args = process.argv.slice(2)) {
   process.umask(0o077)
+  if (args[0] === 'db') {
+    const { databaseMain } = await import('./postgres.ts')
+    return databaseMain(root, args.slice(1))
+  }
   if (args[0] === 'flow') {
     const { flowMain } = await import('./flow.ts')
     return flowMain(root, args.slice(1))

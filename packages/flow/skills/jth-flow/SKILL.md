@@ -49,7 +49,7 @@ jth flow checkpoint --resolve '<问题ID>' --decision '已确认的结论'
 
 需要最新记忆时运行 `jth flow recall`。需要精确内容或冲突双方时运行 `jth memo read <记忆ID>`；更具体的搜索用 `jth memo search --help` 查看现有参数。记忆是带来源的历史资料，不替代当前用户指令、已确认任务目标或最新代码。`conflicted` 内容先看双方证据，不能任选一条当结论。
 
-长期写入沿用现有 Codex 捕获与 DSH 后台处理。不要额外调用已退役的自动 `memo record`，也不要把自己的候选建议写成用户决定。召回离线时继续当前工作，通过 `flow status` 查看错误；原任务状态仍可恢复。
+长期写入沿用现有 Codex 捕获与 DSH SDK 子进程，不依赖 3080 Web 服务。不要额外调用已退役的自动 `memo record`，也不要把自己的候选建议写成用户决定。Embedding 离线不影响流程状态；PG 不可用时，Hook 保存事件并在后台启动已配置的本机实例，用 `jth flow context` 恢复状态，不能把缺少注入当成没有任务。
 
 ## 验收与完成
 
@@ -65,4 +65,4 @@ jth flow finish --summary '目标达成结果及验证结论'
 
 完成前仍由主 Agent 对照目标与每项验收条件判断。测试通过只能证明测试覆盖的行为，不能证明选题正确。CLI 检查持久状态、未决问题、范围和验收证据；它不监控全部 shell 操作，不提供文件系统隔离，也不能独立判定语义是否偏题。
 
-用 `jth flow --help` 查完整参数。状态保存在项目 `.jth/flow.sqlite`，检查日志在 `.jth/checks/`；不要提交这些运行数据。
+用 `jth flow --help` 查完整参数。状态统一保存在 PostgreSQL 的 `jt_flow` schema；项目 `.jth/flow.json` 只定位配置，检查日志在 `.jth/checks/`，临时事件在 `.jth/flow-events/`。旧安装运行 `jth flow migrate`，会保留 SQLite 备份。用 `jth db status` 查看本机数据库，用 `jth memo status --summary` 区分待执行与失败任务；不要提交运行数据。

@@ -4,6 +4,7 @@ import { loadConfig, safeError } from '@jt-harness/memo/config'
 import type { Config } from '@jt-harness/memo/config'
 import { prepareEvidence, readEvidence, stageRecord } from '@jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
+import { connectDatabase } from './postgres.ts'
 
 export async function inlineMain(root: string, args: string[]) {
   let config: Config | undefined
@@ -43,11 +44,11 @@ export async function inlineMain(root: string, args: string[]) {
       }
       const receipt = await stageRecord(config, JSON.parse(Buffer.concat(chunks).toString('utf8')))
       // Local staging precedes any database connection. A rejected/offline delivery remains recoverable.
-      const { openDatabase, prepareDatabase, jobStatus } = await import('@jt-harness/memo')
+      const { prepareDatabase, jobStatus } = await import('@jt-harness/memo')
       const { receiveRecords } = await import('./ingest.ts')
       let pool
       try {
-        pool = openDatabase(config)
+        pool = await connectDatabase(config)
         await prepareDatabase(pool, false)
         const delivery = await receiveRecords(pool, config)
         const failure = delivery.errors.find(item => item.submission_id === receipt.submission_id)

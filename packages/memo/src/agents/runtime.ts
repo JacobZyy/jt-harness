@@ -22,6 +22,22 @@ export function assertAgentRun(run: RunResult) {
 
 export interface AgentContext { workspace?: string, signal?: AbortSignal }
 
+/** Repair one invalid answer using the same evidence and validation; never relax publication rules. */
+export async function runValidatedMemoryAgent<T>(input: object, runtime: MemoryAgentOptions, prompt: URL, schema: z.ZodType,
+  validate: (response: string) => T, context: AgentContext = {}, run = runMemoryAgent) {
+  const options = optionsSchema.parse(runtime)
+  const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs), ...(context.signal ? [context.signal] : [])])
+  let material = input
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await run(material, options, prompt, schema, { ...context, signal })
+    try { return { value: validate(result.response), run: result.run } } catch (error) {
+      if (attempt === 1) throw error
+      material = { ...input, validation_feedback: { error: error instanceof Error ? error.message : '输出格式错误', previous_output: result.response } }
+    }
+  }
+  throw new Error('记忆输出未通过校验')
+}
+
 /** Both memory stages share the same tool-free DSH process lifecycle. */
 export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions, prompt: URL, schema: z.ZodType, context: AgentContext = {}) {
   context.signal?.throwIfAborted()
