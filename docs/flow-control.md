@@ -10,22 +10,36 @@
 
 ```mermaid
 flowchart TD
-    U[用户的新消息] --> H[Codex 原生 Hook]
-    H --> T[读取当前会话绑定的任务]
-    T --> A[主 Agent + jth-flow Skill]
-    A --> C[jth flow checkpoint / revise]
-    C --> S[(PostgreSQL jt_flow 任务状态)]
-    S --> T
-    H --> R[必要时启动后台 recall 子进程]
-    R --> E[复用 Memo Embedding 与限定范围搜索]
-    E --> M[(现有 PostgreSQL + pgvector)]
-    E --> S
-    A --> V[jth flow verify]
-    V --> F[目标版本、检查结果、文件快照与待解决事项]
-    F --> D[jth flow finish]
-    H --> W[原有 Memo 捕获]
-    W --> Q[原有 DSH 后台提炼、关系比较与向量入库]
-    Q --> M
+    A["恢复目标与进度"] --> B["建立或续接工作单元"]
+    B --> C["执行与检查"]
+    C --> D["保存结果、证据、下一步"]
+    D --> E{"回执状态"}
+    E -- 连续无新证据 --> G["更换诊断假设"]
+    G --> B
+    E -- 外部阻塞 --> H["保留状态并等待"]
+    H -. 解除后恢复 .-> A
+    E -- 可继续 --> F{"阶段全部完成？"}
+    F -- 否 --> B
+    F -- 是 --> I["测试与总体验收"]
+    I --> J{"通过？"}
+    J -- 否 --> B
+    J -- 是 --> K["完成 Flow 任务"]
+    C -. 中断后恢复 .-> A
+    C -. 会话异步投递 .-> M["Memo 提炼与存储"]
+    M -. 相关记忆召回 .-> A
+
+    style A fill:#E3F2FD,stroke:#1565C0,color:#111
+    style B fill:#7B1FA2,stroke:#4A148C,color:#fff
+    style C fill:#E3F2FD,stroke:#1565C0,color:#111
+    style D fill:#E3F2FD,stroke:#1565C0,color:#111
+    style E fill:#FFF3E0,stroke:#FF9800,color:#111
+    style F fill:#FFF3E0,stroke:#FF9800,color:#111
+    style G fill:#FFF3E0,stroke:#FF9800,color:#111
+    style H fill:#FFF3E0,stroke:#FF9800,color:#111
+    style I fill:#E3F2FD,stroke:#1565C0,color:#111
+    style J fill:#FFF3E0,stroke:#FF9800,color:#111
+    style K fill:#C8E6C9,stroke:#2E7D32,color:#111
+    style M fill:#E3F2FD,stroke:#1565C0,color:#111
 ```
 
 `packages/flow` 拥有任务、PostgreSQL 存储、上下文渲染、检查执行和 Skill；不导入 Memo 或 Codex SDK。`packages/codex-hooks` 适配 Codex JSON 事件，复用原来的配置合并和原子写文件。`packages/cli` 调用这两个包，并通过 Memo 的公共 API 完成召回。`packages/memo` 保留存储、版本、冲突处理和队列；模型校验失败最多修复一次，不放宽发布规则。
@@ -34,11 +48,23 @@ flowchart TD
 
 ## 状态与恢复
 
+### 单步工作、回执与无进展处理
+
+`focus` 在既有任务内建立一个工作单元，不另建任务或调度器。单元保存当前行动、验收条件的顺序编号、项目内读取范围、预期产出及可选诊断假设，并绑定当前阶段与目标版本。验收编号必须存在，一个任务最多有一个未回执单元。`readScope` 是主 Agent 的检索边界提示，不拦截 shell；是否需要扩展由主 Agent 根据原目标判断并说明依据。
+
+`checkpoint --work-id ... --outcome ...` 保存 `progress / failed / no-progress / blocked` 四种实际结果，以及说明、证据引用、下一步与阻塞原因。progress 必须提供证据引用，blocked 必须说明阻塞。程序不验证引用的语义真实性；已有 `verify` 仍负责执行测试并生成真实日志。回执成功后释放当前单元，可以同时完成当前阶段。失败或无进展的回执不能完成阶段。
+
+相同 ID 和相同完整回执幂等，不同内容不能改写已提交结果；旧单元不能结算新工作。任务只保留最近 8 次回执供 status 读取，所有回执与工作开始记录留在既有事件表。Hook 只注入当前单元和最后一份简短回执，更多内容按需读取。开始新单元撤销旧验收资格；新增约束、检查、阶段计划、生命周期变更或 revise 会使未回执单元失效，开始记录仍保留在历史中。中断、pause/resume 不会使单元失效。
+
+`workProgress` 从当前阶段和目标版本的回执推导连续无进展次数。失败或 no-progress 开始计数；出现此前未见的证据引用或不同诊断假设时从 1 重新计数，progress 清零。连续两次无新证据且未换假设后返回 `change-approach`，下一次 focus 必须声明不同假设；没有可行下一步时记录真实阻塞。blocked 回执保留状态，解除前不能 focus。停止生成、旁支问答、Hook、重复回执不增加计数。
+
+这比较的是显式提交的引用和假设，不是完整工具日志，也不保证模型能正确判断语义进展。不能靠随机改引用、换措辞绕开停滞提示。`next` 始终是下一步建议，不是已执行的事实。自动续跑继续由显式启用的 Codex Goal 承担；Flow 没有额外 runner。旧任务缺少 work/attempts 时按空状态读取，不重写历史、不迁移或清空 Memo。
+
 每个任务保存当前目标、不可覆盖的初始目标、验收条件、范围、约束、阶段、决定、未决问题、近期进展、下一步和验收结果。PostgreSQL 事务与按 workspace 的事务锁保证一次更新完整落盘，并发检查点不会互相覆盖；事件表保留目标变更和检查点。普通状态只展示最近 8 条进展和决定，`status --history` 查看最近 30 次事件，避免每次读取重载全部旧上下文。
 
 `checkpoint` 追加约束和进展，不能修改目标。`revise` 要求明确说明用户变更的依据，并让旧验收结果失效。讨论转实施也需要记录依据，但不要求用户重复授权。程序检查依据是否存在，无法独立判定依据的语义是否真实。
 
-长任务的 `steps` 保存有序阶段，每步包含标题、完成时间和结果证据。使用 `start --step` 建计划，`checkpoint --step` 追加，`checkpoint --complete-step <序号> --done <证据>` 完成当前步骤。追加阶段让旧验收失效，未完成计划不能 finish。阶段是总目标的实施路径，不替代 goal 或 acceptance；`phase` 仍表示讨论、执行、验收和完成。没有阶段规划需求的任务保持空计划。
+长任务的 `steps` 保存有序阶段，每步包含标题、完成时间和结果证据。使用 `start --step` 建计划，`checkpoint --step` 追加，工作结果回执加 `--complete-step <序号>` 完成当前步骤。旧任务没有当前工作单元时仍支持原来的 `--done` 检查点。追加阶段让旧验收失效，未完成计划或未回执工作不能 finish。阶段是总目标的实施路径，不替代 goal 或 acceptance；`phase` 仍表示讨论、执行、验收和完成。没有阶段规划需求的任务保持空计划。
 
 Codex Goal 配合放在主 Agent 的 Skill 中：用户明确要求、宿主工具可用时，读取或创建一个总 Goal，Flow 保存阶段与检查点。恢复时核对原生 Goal 和持久任务，完成一个步骤不会关闭 Goal，只有全部验收并 `flow finish` 后才标记原生 Goal 完成。本机暴露的 `create_goal/get_goal/update_goal` 是宿主工具，不是 `jth` 可直接调用的 CLI 接口；没有引入私有 API、第二套预算状态或自建续跑调度器。不提供这些工具的宿主仍可使用 Flow。
 
@@ -64,7 +90,11 @@ Hook 在 SessionStart（包括 compact）、UserPromptSubmit 和 SubagentStart �
 
 ## 社区参考
 
+2026-09-19 的单步循环改动已通过类型检查、29 项离线测试与 41 项隔离 PostgreSQL 集成测试，Skill 格式校验通过。覆盖当前单元中断恢复、验收编号与主控边界、重复及过期回执、旧任务读取、历史回执幂等、无进展换假设、真实 CLI/Hook 和最终验收失效。检索范围和证据语义仍依赖主 Agent；测试不代表模型绝不会偏题。
+
 - [Trellis](https://github.com/mindfold-ai/Trellis/tree/e77ae89f648a78d5859fa2e8ac314655898421a5)：借鉴每任务状态、会话指针、任务上下文与 Hook 注入的组合。没有引入其完整工作流或多 Agent 编排。
+- [Rex 单步循环](https://github.com/rexleimo/rex-harness/blob/92915272a0273839d02124a65c6015a0e7395800/skill-sources/rex-workflow/SKILL.md)：借鉴单步输入边界、结果证据和恢复回执，复用 JTH 的任务状态；没有引入其能力路由和 Provider 链。
+- [AIOS Solo Loop](https://github.com/rexleimo/aios/blob/e5b21428d332845fee496e4ab498c8d09caa2fa0/scripts/lib/harness/solo-runtime/loop.mjs)：借鉴连续失败时调整或停止的思路；JTH 检查显式工作回执，不复制它的 CLI 执行器、重试预算与后台循环。
 - [Codex 官方 Hooks 文档](https://learn.chatgpt.com/zh-Hans/docs/hooks)：采用原生事件、JSON `additionalContext` 与 Hook 信任机制。以本机 Codex 0.153.0 生成的 app-server schema 核对实际字段。
 
 本原型不声称仅凭几条提示就能杜绝模型偏移。可验证的机制是目标不被普通检查点覆盖、压缩/恢复时重新提供状态、限制摘要规模、单一主控和有效验收；语义效果需要接下来在真实长任务中观察。

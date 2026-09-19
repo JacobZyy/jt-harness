@@ -10,6 +10,7 @@ import { test } from 'node:test'
 import { FlowStore, memoryKey } from './store.ts'
 import { renderFlowContext } from './context.ts'
 import { workspaceSnapshot, verifyTask } from './verification.ts'
+import { workProgress } from './work.ts'
 
 async function fixture() {
   const workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-flow-')))
@@ -21,6 +22,102 @@ async function fixture() {
   await store.install({ version: 1, workspace, envFile: resolve(workspace, '.env'), projectIds: ['test'], businessIds: [], installedAt: new Date().toISOString() })
   return { store, workspace, cleanup: async () => { await store.close(); await rm(workspace, { recursive: true, force: true }) } }
 }
+
+test('one work unit binds acceptance and survives interruption; stale and child receipts cannot settle it', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+  const f = await fixture()
+  try {
+    const task = await f.store.start({ goal: '只检查指定写法，不扩大成审查', phase: 'execution', acceptance: ['找到指定调用路径'], steps: ['定位', '验证'] }, {}, 'owner')
+    const focus = { action: '追踪目标函数', acceptance: [1], readScope: ['src/target.ts'], expected: '目标调用路径与证据' }
+    await assert.rejects(f.store.focus(task.id, { ...focus, acceptance: [2] }, 'owner'), /验收编号不存在/)
+    await assert.rejects(f.store.focus(task.id, { ...focus, readScope: ['../other'] }, 'owner'), /路径必须/)
+    const active = await f.store.focus(task.id, focus, 'owner')
+    await assert.rejects(f.store.focus(task.id, focus, 'owner'), /未回执/)
+    await assert.rejects(f.store.finish(task.id, '提前完成', {}, 'owner'), /工作单元/)
+    await assert.rejects(f.store.checkpoint(task.id, { done: ['跳过回执'] }, 'owner'), /不能跳过/)
+    await f.store.observe('child', 'SubagentStart', 'owner')
+    await assert.rejects(f.store.focus(task.id, focus, 'child'), /不是任务主控/)
+    await f.store.observe('owner', 'Interrupt')
+    await f.store.pause(task.id, '换会话恢复', 'owner')
+    const reopened = new FlowStore(f.workspace, new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL }))
+    try {
+      const restored = await reopened.resume(task.id, 'resumed')
+      assert.deepEqual(restored.work, active.work)
+      assert.equal(restored.goal, task.goal)
+      const receipt = { workId: active.work!.id, outcome: 'progress' as const, done: ['定位到目标调用'], evidence: ['src/target.ts:12'], next: '运行对应测试', completeStep: 1 }
+      await assert.rejects(reopened.checkpoint(task.id, receipt, 'child'), /不是任务主控/)
+      await assert.rejects(reopened.checkpoint(task.id, { ...receipt, evidence: [] }, 'resumed'), /可查证据/)
+      await assert.rejects(reopened.checkpoint(task.id, { ...receipt, outcome: 'failed' }, 'resumed'), /只有 progress/)
+      await assert.rejects(reopened.checkpoint(task.id, { ...receipt, workId: randomUUID() }, 'resumed'), /ID 已失效/)
+      const settled = await reopened.checkpoint(task.id, receipt, 'resumed')
+      assert.equal(settled.work, null)
+      assert.equal(settled.attempts[0].work.action, focus.action)
+      assert.equal(settled.attempts[0].next, receipt.next)
+      assert(settled.steps[0].completedAt)
+      assert.deepEqual(await reopened.checkpoint(task.id, receipt, 'resumed'), settled)
+      const next = await reopened.focus(task.id, { ...focus, action: '运行对应测试' }, 'resumed')
+      await reopened.checkpoint(task.id, { constraint: ['只读定位'] }, 'resumed')
+      assert.equal((await reopened.task(task.id)).work, null)
+      await assert.rejects(reopened.checkpoint(task.id, { ...receipt, workId: next.work!.id }, 'resumed'), /ID 已失效/)
+      assert.equal((await reopened.task(task.id)).attempts.length, 1)
+    } finally { await reopened.close() }
+  } finally { await f.cleanup() }
+})
+
+test('repeated failures without new evidence require a changed hypothesis, while hooks and duplicate receipts do not count', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+  const f = await fixture()
+  try {
+    const task = await f.store.start({ goal: '修复目标调用', acceptance: ['调用成功'] }, {}, 'owner')
+    const focus = { action: '检查调用失败', acceptance: [1], readScope: ['src'], expected: '调用成功的证据' }
+    const first = await f.store.focus(task.id, focus, 'owner')
+    const receipt = { workId: first.work!.id, outcome: 'failed' as const, done: ['调用仍失败'], evidence: ['call-error:ECONNREFUSED'], next: '检查失败原因' }
+    await f.store.checkpoint(task.id, receipt, 'owner')
+    await f.store.checkpoint(task.id, receipt, 'owner')
+    assert.equal(workProgress(await f.store.task(task.id)).consecutiveWithoutProgress, 1)
+    await assert.rejects(f.store.checkpoint(task.id, { ...receipt, done: ['改写结果'] }, 'owner'), /不能用同一 ID/)
+    const second = await f.store.focus(task.id, focus, 'owner')
+    await f.store.checkpoint(task.id, { ...receipt, workId: second.work!.id, outcome: 'no-progress' }, 'owner')
+    for (const event of ['Stop', 'SessionEnd', 'SessionStart']) await f.store.observe('owner', event)
+    const stalled = await f.store.task(task.id)
+    assert.equal(stalled.phase, 'discussion')
+    assert.equal(workProgress(stalled).action, 'change-approach')
+    assert.equal(workProgress(stalled).consecutiveWithoutProgress, 2)
+    await assert.rejects(f.store.focus(task.id, focus, 'owner'), /不同诊断假设/)
+    const changed = await f.store.focus(task.id, { ...focus, hypothesis: '检查服务监听端口是否变化' }, 'owner')
+    assert.equal(workProgress(changed).action, 'continue')
+    const advanced = await f.store.checkpoint(task.id, { ...receipt, workId: changed.work!.id, outcome: 'progress', done: ['确认端口变化'], evidence: ['listener:3081'] }, 'owner')
+    assert.equal(workProgress(advanced).consecutiveWithoutProgress, 0)
+    const blocked = await f.store.focus(task.id, focus, 'owner')
+    await assert.rejects(f.store.checkpoint(task.id, { ...receipt, workId: blocked.work!.id, outcome: 'blocked', evidence: [] }, 'owner'), /实际原因/)
+    await f.store.checkpoint(task.id, { ...receipt, workId: blocked.work!.id, outcome: 'blocked', evidence: [], blocked: '等待服务启动' }, 'owner')
+    await assert.rejects(f.store.focus(task.id, focus, 'owner'), /仍有阻塞/)
+    await f.store.checkpoint(task.id, { blocked: '', decision: ['服务已恢复'] }, 'owner')
+    for (const evidence of ['port:3081-refused', 'port:3082-refused']) {
+      const active = await f.store.focus(task.id, focus, 'owner')
+      await f.store.checkpoint(task.id, { ...receipt, workId: active.work!.id, evidence: [evidence] }, 'owner')
+    }
+    assert.equal(workProgress(await f.store.task(task.id)).action, 'continue')
+  } finally { await f.cleanup() }
+})
+
+test('legacy tasks gain empty work state, and archived receipts remain idempotent beyond the recent window', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+  const f = await fixture(), pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
+  try {
+    const task = await f.store.start({ goal: '保留旧任务', acceptance: ['历史可恢复'] }, {}, 'owner')
+    await pool.query("UPDATE jt_flow.tasks SET value=value-'work'-'attempts' WHERE workspace=$1 AND id=$2", [f.workspace, task.id])
+    assert.equal((await f.store.task(task.id)).work, null)
+    assert.deepEqual((await f.store.task(task.id)).attempts, [])
+    let firstReceipt
+    for (let i = 0; i < 9; i++) {
+      const active = await f.store.focus(task.id, { action: `验证 ${i}`, acceptance: [1], readScope: ['src'], expected: '恢复证据' }, 'owner')
+      const receipt = { workId: active.work!.id, outcome: 'progress' as const, done: [`证据 ${i}`], evidence: [`result:${i}`], next: '继续' }
+      firstReceipt ??= receipt
+      await f.store.checkpoint(task.id, receipt, 'owner')
+    }
+    const settled = await f.store.task(task.id)
+    assert.equal(settled.attempts.length, 8)
+    assert.deepEqual(await f.store.checkpoint(task.id, firstReceipt!, 'owner'), settled)
+  } finally { await pool.end(); await f.cleanup() }
+})
 
 test('ordered stages keep the overall goal through interruption, restart and final acceptance', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const f = await fixture()
@@ -118,6 +215,11 @@ test('finish needs current tests, resolved questions and in-scope changes; commi
     const first = await verifyTask(f.store, task.id, 'main')
     assert.equal(first.passed, true)
     assert.equal(await readFile(first.results[0].log, 'utf8'), '')
+    const active = await f.store.focus(task.id, { action: '核对验收结果', acceptance: [1], readScope: ['src'], expected: '实际测试日志' }, 'main')
+    assert.equal(active.verification, null)
+    await f.store.checkpoint(task.id, { workId: active.work!.id, outcome: 'progress', done: ['核对已生成日志'], evidence: [first.results[0].log], next: '重新验收' }, 'main')
+    await assert.rejects(f.store.finish(task.id, '复用旧验收', await workspaceSnapshot(f.workspace), 'main'), /尚未通过/)
+    await verifyTask(f.store, task.id, 'main')
     await f.store.checkpoint(task.id, { done: ['取得真实测试证据'] }, 'main')
     await writeFile(resolve(f.workspace, 'src/value'), 'changed')
     const changed = await workspaceSnapshot(f.workspace)

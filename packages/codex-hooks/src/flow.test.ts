@@ -34,10 +34,13 @@ test('native flow hooks coexist with DSH capture, preserve other handlers, resto
     assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-flow')), resolve(root, 'packages/flow/skills/jth-flow'))
     for (const event of flowEvents) assert.equal(JSON.parse(first).hooks[event].flatMap((group: { hooks: { statusMessage?: string }[] }) => group.hooks).filter((handler: { statusMessage?: string }) => handler.statusMessage === 'jth flow context').length, 1)
     const task = await store.start({ goal: '解决原来的长任务目标偏移', acceptance: ['保留讨论边界'] }, {}, 'parent')
+    const focused = await store.focus(task.id, { action: '查证当前问题', acceptance: [1], readScope: ['docs'], expected: '带来源的结论' }, 'parent')
     for (const hook_event_name of ['SessionStart', 'UserPromptSubmit'] as const) {
       const result = await flowHook({ hook_event_name, session_id: 'parent', cwd: workspace, source: 'compact' }, store)
       assert.equal(result.output.hookSpecificOutput!.hookEventName, hook_event_name)
       assert(result.output.hookSpecificOutput!.additionalContext.includes(task.goal))
+      assert(result.output.hookSpecificOutput!.additionalContext.includes(focused.work!.id))
+      assert(result.output.hookSpecificOutput!.additionalContext.includes(focused.work!.expected))
     }
     const child = await flowHook({ hook_event_name: 'SubagentStart', session_id: 'parent', agent_id: 'child', cwd: workspace }, store)
     assert.equal((await store.binding('child'))!.taskId, task.id)
@@ -46,6 +49,9 @@ test('native flow hooks coexist with DSH capture, preserve other handlers, resto
       assert.deepEqual((await flowHook({ hook_event_name, session_id: 'parent', cwd: workspace }, store)).output, {})
     }
     assert.equal((await store.task(task.id)).phase, 'discussion')
+    await store.checkpoint(task.id, { workId: focused.work!.id, outcome: 'progress', done: ['查证完成'], evidence: ['docs/result.md'], next: '核对结论' }, 'parent')
+    const restored = await flowHook({ hook_event_name: 'SessionStart', session_id: 'parent', cwd: workspace }, store)
+    assert(restored.output.hookSpecificOutput!.additionalContext.includes('docs/result.md'))
     assert.deepEqual((await flowHook({ hook_event_name: 'SessionStart', session_id: 'foreign', cwd: tmpdir() }, store)).output, {})
     await configureFlowHooks(root, workspace, false)
     assert.deepEqual(JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')), memoHooks)
@@ -72,7 +78,11 @@ test('built CLI delivers a persistent task, real checks and completion while mem
     const recall = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt]).catch(error => error)
     assert.equal(JSON.parse(recall.stdout).status, 'failed')
     assert.equal((await command('status')).id, created.id)
-    await command('checkpoint', '--done', '真实命令已接通', '--next', '运行验收')
+    const active = await command('focus', '验证真实 CLI 回执', '--accept', '1', '--read', 'src', '--expect', '验证回执可恢复')
+    const receipt = ['checkpoint', '--work-id', active.work.id, '--outcome', 'progress', '--done', '真实命令已接通', '--evidence', 'cli:start', '--evidence', 'cli:status', '--next', '运行验收']
+    const settled = await command(...receipt)
+    assert.equal(settled.attempts[0].evidence.length, 2)
+    assert.deepEqual(await command(...receipt), settled)
     const checked = await command('verify')
     assert.equal(checked.passed, true)
     assert.equal((await readFile(checked.results[0].log, 'utf8')).trim(), 'checked')

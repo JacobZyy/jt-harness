@@ -4,7 +4,8 @@ import { dirname, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { Pool, PoolClient } from 'pg'
-import { checkpointSchema, createTaskSchema, settingsSchema, taskSchema } from './contracts.ts'
+import { checkpointSchema, createTaskSchema, focusSchema, settingsSchema, taskSchema } from './contracts.ts'
+import { currentStep, workProgress } from './work.ts'
 import type { Binding, FlowSettings, FlowTask, Verification } from './contracts.ts'
 import type { z } from 'zod'
 
@@ -154,15 +155,48 @@ export class FlowStore {
       return this.current(sessionId)
     })
   }
+  async focus(taskId: string, input: z.input<typeof focusSchema>, sessionId?: string) {
+    const focus = focusSchema.parse(input)
+    return this.transaction(async () => {
+      await this.assertOwner(taskId, sessionId)
+      const task = await this.task(taskId)
+      if (task.phase === 'completed' || task.blocked) throw new Error('任务已完成或仍有阻塞，不能开始工作单元')
+      if (task.work) throw new Error('已有未回执的工作单元；先恢复执行或用 checkpoint --outcome 保存结果')
+      if (focus.acceptance.some(number => number > task.acceptance.length)) throw new Error('验收编号不存在；使用 status 中 acceptance 的顺序编号（从 1 开始）')
+      const progress = workProgress(task)
+      if (progress.action === 'change-approach' && (!focus.hypothesis || focus.hypothesis === progress.lastHypothesis)) {
+        throw new Error('同一步连续无新证据；用 --hypothesis 记录不同诊断假设，或 checkpoint --blocked 记录阻塞')
+      }
+      const work = { ...focus, id: randomUUID(), step: currentStep(task), contractVersion: task.contractVersion, startedAt: new Date().toISOString() }
+      return this.write({ ...task, work, verification: null, phase: task.phase === 'verification' ? 'execution' : task.phase }, 'work-started', work)
+    })
+  }
   async checkpoint(taskId: string, input: z.input<typeof checkpointSchema>, sessionId?: string) {
     const change = checkpointSchema.parse(input)
     return this.transaction(async () => {
       await this.assertOwner(taskId, sessionId)
       const task = await this.task(taskId)
+      if (change.workId) {
+        const previous = (await this.db.query("SELECT detail=$4::jsonb AS identical FROM jt_flow.events WHERE workspace=$1 AND task_id=$2 AND kind='checkpoint' AND detail->>'workId'=$3 ORDER BY sequence DESC LIMIT 1", [this.workspace, task.id, change.workId, JSON.stringify(change)])).rows[0]
+        if (previous?.identical) return task
+        if (previous) throw new Error('工作单元已有回执，不能用同一 ID 改写结果')
+      }
       if (task.phase === 'completed') throw new Error('已完成任务不能继续追加进展；请创建新任务')
       if (change.phase && change.phase !== task.phase && !change.reason) throw new Error('改变阶段必须说明用户授权或恢复依据（--reason）')
       if (change.resolve.some(id => !task.questions.some(note => note.id === id))) throw new Error('待解决问题 ID 不存在')
       const at = new Date().toISOString(), notes = (items: string[]) => items.map(text => ({ id: randomUUID(), text, at }))
+      if (!change.outcome && (change.workId || change.evidence.length)) throw new Error('工作回执需要 --outcome')
+      if (task.work && !change.outcome && (change.done.length || change.completeStep !== undefined)) throw new Error('当前工作单元需要 --work-id 和 --outcome，不能跳过回执')
+      if (change.outcome) {
+        if (!task.work || change.workId !== task.work.id) throw new Error('工作单元不存在或 ID 已失效；先读取 context 恢复当前工作')
+        if (!change.done.length || change.next === undefined) throw new Error('回执需要 --done 实际结果和 --next 下一步（结束时可为空）')
+        if (change.outcome === 'progress' && !change.evidence.length) throw new Error('有进展的回执需要 --evidence 提供可查证据')
+        if (change.outcome === 'blocked' && !change.blocked) throw new Error('阻塞回执需要 --blocked 说明实际原因')
+        if (change.completeStep !== undefined && change.outcome !== 'progress') throw new Error('只有 progress 回执可以完成当前阶段')
+      }
+      const attempts = change.outcome ? [...task.attempts, {
+        work: task.work!, outcome: change.outcome, done: change.done, evidence: change.evidence, next: change.next!, blocked: change.blocked || null, at,
+      }].slice(-8) : task.attempts
       const steps = [...task.steps, ...change.step.map(title => ({ title, completedAt: null, evidence: [] }))]
       if (change.completeStep !== undefined) {
         const current = steps.findIndex(step => !step.completedAt)
@@ -173,6 +207,7 @@ export class FlowStore {
       const constraints = [...new Set([...task.constraints, ...change.constraint])], checks = [...new Set([...task.checks, ...change.check])]
       const contractChanged = steps.length !== task.steps.length || constraints.length !== task.constraints.length || checks.length !== task.checks.length || (change.phase !== undefined && change.phase !== task.phase)
       return this.write({ ...task, constraints, checks, steps,
+        attempts, work: change.outcome || contractChanged ? null : task.work,
         contextFiles: [...new Set([...task.contextFiles, ...change.context])], decisions: [...task.decisions, ...notes(change.decision)].slice(-64),
         questions: [...task.questions.filter(note => !change.resolve.includes(note.id)), ...notes(change.question)], progress: [...task.progress, ...notes(change.done)].slice(-64),
         next: change.next ?? task.next, blocked: change.blocked === undefined ? task.blocked : change.blocked || null,
@@ -187,7 +222,7 @@ export class FlowStore {
       await this.assertOwner(taskId, sessionId)
       const task = await this.task(taskId)
       if (task.phase === 'completed') throw new Error('已完成任务不能改写目标')
-      return this.write({ ...task, goal, contractVersion: task.contractVersion + 1, verification: null, memory: null }, 'goal-revised', { previousGoal: task.goal, goal, reason })
+      return this.write({ ...task, goal, contractVersion: task.contractVersion + 1, work: null, verification: null, memory: null }, 'goal-revised', { previousGoal: task.goal, goal, reason })
     })
   }
   async saveVerification(taskId: string, verification: Verification, sessionId?: string) {
@@ -205,6 +240,7 @@ export class FlowStore {
       const task = await this.task(taskId)
       if (task.blocked) throw new Error('任务仍有阻塞项，请先 checkpoint --blocked "" 记录解除')
       if (task.phase === 'completed') return task
+      if (task.work) throw new Error('当前工作单元尚未提交结果；先 checkpoint --outcome 再完成任务')
       if (task.steps.some(step => !step.completedAt)) throw new Error('阶段计划仍有未完成步骤；阶段完成不等于总目标达成')
       if (task.questions.length) throw new Error('任务仍有未决问题；请记录结论并用 checkpoint --resolve <id> 关闭')
       if (task.checks.length) {

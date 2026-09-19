@@ -22,7 +22,9 @@
 jth flow install --project jt-harness
 # 在 Codex /hooks 审阅并信任本工具新增的定义，再恢复会话。
 jth flow start '交付本次明确目标' --phase execution --accept '可检查的完成条件' --check 'pnpm test'
-jth flow checkpoint --done '已确认关键调用路径' --next '完成实现与验证'
+jth flow focus '追踪关键调用路径' --accept 1 --read packages --expect '调用位置及对应证据'
+# 使用 focus 返回的 work.id；每个工作单元可包含多次工具调用。
+jth flow checkpoint --work-id '<work.id>' --outcome progress --done '已确认关键调用路径' --evidence 'packages/flow/src/store.ts' --next '完成实现与验证'
 jth flow status
 jth flow verify
 jth flow finish --summary '达成目标的结果'
@@ -34,7 +36,9 @@ Codex 中这些命令由 `jth-flow` Skill 在长任务需要时调用，日常�
 
 用户明确切换到独立目标时，用 `jth flow pause --reason '切换依据'` 解除当前绑定，再 start 新任务。暂停保留旧任务，不假装完成；恢复时仍用 resume。
 
-长任务可以在 `start` 或 `checkpoint` 使用重复的 `--step '阶段交付'` 保存有序计划。完成当前步骤使用 `checkpoint --complete-step 1 --done '实际结果与证据'`。Hook 注入计划和当前步骤，恢复后继续第一个未完成步骤；全部步骤完成后仍需总体验收。用户明确要求启用 Codex Goal 且宿主提供原生 Goal 工具时，主 Agent 保持一个总 Goal，由 Flow 保存阶段与证据；`flow finish` 后才完成原生 Goal。CLI 不依赖私有 App API，也不另起自动续跑循环。
+长任务可以在 `start` 或 `checkpoint` 使用重复的 `--step '阶段交付'` 保存有序计划。工作结果回执加 `--complete-step 1` 完成当前阶段。Hook 注入当前单元、计划、最近回执与下一步；恢复时继续未回执的单元，全部阶段完成后仍需总体验收。用户明确要求启用 Codex Goal 且宿主提供原生 Goal 工具时，主 Agent 保持一个总 Goal，由 Flow 保存阶段与证据；`flow finish` 后才完成原生 Goal。CLI 不依赖私有 App API，也不另起自动续跑循环。
+
+`focus` 的 `--accept` 使用验收条件的顺序编号，`--read` 是项目内读取范围，`--expect` 是预期产出。一个任务同时只有一个未回执单元。回执支持 `progress / failed / no-progress / blocked`，保存实际结果、证据、下一步和阻塞；同一 ID 重试不重复累计。相同阶段与目标版本下，连续两次失败或无进展且没有新证据/新假设时，下一单元需要不同的 `--hypothesis`，或记录实际阻塞。Hook 活动和普通问答不参与计数。证据语义与读取必要性由主 Agent 判断，程序不把字符串变更当作已证明业务进展。
 
 开始、恢复和输入时的记忆召回由短生命周期后台子进程完成。Flow Hook 对 PostgreSQL 做短时读取，不等待数据库冷启动、模型或 Embedding。数据库离线时先保存本地事件，后台准备数据库并重放；不能把缺少注入当成没有任务。结果按已配置项目、业务和用户范围检索，缓存 5 分钟，最多注入 5 条简短摘要；用 `jth flow recall` 立即刷新，用 `jth memo read <id>` 获取证据和冲突双方。长期写入继续沿用原有六阶段捕获与 DSH 队列。
 

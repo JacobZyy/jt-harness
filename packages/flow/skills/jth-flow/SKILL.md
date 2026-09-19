@@ -9,7 +9,7 @@ description: 在安装了 JTH Flow 的项目中维护跨多轮、长任务的目
 
 ## 进入与恢复
 
-读取 Hook 注入的目标、阶段、验收条件和下一步。上下文压缩后也以这些持久状态恢复。缺少注入时运行 `jth flow status`；未安装时先确认当前任务需要持久流程，再使用 `jth flow install --project <项目ID>`。
+读取 Hook 注入的目标、阶段、当前工作 `work`、最近回执和下一步。上下文压缩后也以这些持久状态恢复；已有 `work` 时继续该单元，不重新 focus。缺少注入时运行 `jth flow status`；未安装时先确认当前任务需要持久流程，再使用 `jth flow install --project <项目ID>`。
 
 长任务没有绑定时创建；已有同一任务使用 `resume <任务ID>`。不要因为用户补充一句要求就创建新目标。跨会话接管已有主控需要明确使用 `--takeover`，旧主控将成为观察者。子 Agent 只执行所委派的工作，不能修改或完成主任务。
 
@@ -26,14 +26,30 @@ jth flow status
 
 ```sh
 jth flow start '修复记忆异常恢复' --phase execution --accept '有效数据不丢失、不重复' --step '定位异常与保留基线' --step '实现局部恢复并验证' --step '回补真实任务并交付证据'
-jth flow checkpoint --complete-step 1 --done '已保存队列基线，确认两类异常的失败阶段' --next '实现局部恢复'
 ```
+
+完成工作单元的回执可同时加 `--complete-step 1` 收口当前阶段。阶段完成仍须有实际结果；失败或无进展的回执不能完成阶段。
 
 用户明确要求使用 Codex Goal，且当前宿主提供 `get_goal`、`create_goal`、`update_goal` 时，由主 Agent 配合这些原生工具：先读取当前 Goal；没有活动 Goal 才创建与 Flow 一致的总目标。未要求预算时不自行设定。每个步骤仍属于这个总目标，不为每一步重复创建 Goal，也不因阶段完成提前标记整个 Goal 完成。已有其他活动 Goal 时先明确任务关系，不能擅自覆盖。
 
 中断或上下文恢复后，读取 `get_goal` 和 `jth flow context`，接续第一个未完成步骤。进展、约束、阶段证据以 Flow 为持久来源，Goal 负责宿主的持续执行；CLI 不调用私有 App API、不另建自动续跑循环，也不复制 Goal 的预算与运行状态。若工具不可用，按 Flow 计划继续，明确没有启用原生 Goal。
 
 所有步骤、总目标验收和 `flow finish` 完成后，才调用 `update_goal` 标记总目标完成。暂时等待或一次失败不等于 Goal blocked；遵守当前宿主工具对阻塞的定义。
+
+## 单步工作与结果回执
+
+开始一段实质工作前，用 `focus` 记录一个当前行动、它服务的验收编号（从 1 开始）、项目内读取范围和预期产出。一个单元可以包含多次工具调用；不要为每次读取、旁支问答或状态查询建单元。先沿记录的范围检索，确需扩大时说明与目标的关系并记录决定；这不是文件系统访问限制。
+
+```sh
+jth flow focus '追踪目标函数的调用路径' --accept 1 --read packages/flow --expect '调用位置及对应证据'
+jth flow checkpoint --work-id '<focus 返回的 work.id>' --outcome progress --done '已定位相关调用' --evidence 'packages/flow/src/store.ts:155' --next '验证相关行为'
+```
+
+回执使用实际结果：`progress` 表示有进展，`failed` 表示尝试失败，`no-progress` 表示没有推进，`blocked` 表示真实外部阻塞。每次填写 `--done` 与 `--next`，最后一步的 next 可为空；progress 必须给可查证据，blocked 必须给 `--blocked` 原因。证据可以是文件位置、测试日志或具体观察，不能用新的随机编号冒充新证据。相同 work.id 与相同内容可以重试，不重复累计；已回执的 ID 不能改写结果。
+
+同一阶段、同一目标版本内，连续两次失败/无进展且没有新证据或新假设时，`loop.action` 为 `change-approach`。先改变诊断假设，用 `focus ... --hypothesis '与上次不同的解释及验证方法'` 开始下一单元；没有可行路径时保存实际阻塞。不要只换个措辞重复操作。新证据或新假设重新计数，有进展后清零。状态判断依据显式回执，Hook 活动、重复投递和用户旁支问题不累计失败。
+
+新增约束、验收检查、阶段计划或明确修订目标会使当前单元失效；重新读取 context 后按最新边界 focus，不能提交旧单元结果。中断和 resume 保留未回执单元及已有结果。程序约束单元 ID、验收编号与状态，不替代主 Agent 对证据真实性、语义进展和读取必要性的判断。
 
 ## 处理新消息
 
@@ -48,10 +64,10 @@ jth flow checkpoint --complete-step 1 --done '已保存队列基线，确认两�
 
 读取资料前确认它能回答当前目标中的哪个问题；按已知入口、符号、调用路径逐步展开。不要把“全局查一种写法”扩成全局代码审查。无关问题可记录为待讨论项，不自行扩大修改范围。
 
-在做出实质决定、完成一段工作或即将交接时保存简短检查点，不必每次工具调用都写：
+实质工作结果按上面的回执保存；补充决定和待讨论问题可单独追加，不算一次执行尝试：
 
 ```sh
-jth flow checkpoint --done '已查明相关调用路径' --decision '保留现有存储接口' --next '完成 Hook 适配与验证'
+jth flow checkpoint --decision '保留现有存储接口'
 jth flow checkpoint --question '尚需确认的业务边界'
 jth flow checkpoint --resolve '<问题ID>' --decision '已确认的结论'
 ```

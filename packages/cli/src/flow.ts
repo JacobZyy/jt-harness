@@ -15,9 +15,11 @@ const help = `jth flow install --project <id> [--business <id>] [--env-file <pat
 jth flow migrate  将原 SQLite 任务完整迁入 PostgreSQL，保留备份
 jth flow start <目标> --accept <完成条件> [--step <阶段交付>] [--phase discussion|execution] [--scope <相对路径>] [--check <命令>]
 jth flow status [--all] [--history] | context
+jth flow focus <当前行动> --accept <验收编号> --read <读取路径> --expect <预期产出> [--hypothesis <诊断假设>]
 jth flow checkpoint [--done <进展>] [--next <下一步>] [--constraint <约束>] [--decision <结论>] [--question <问题>] [--resolve <问题ID>]
                     [--phase discussion|execution --reason <授权依据>] [--blocked <原因或空字符串>] [--check <命令>] [--context <相对路径>]
                     [--step <追加阶段>] [--complete-step <当前步骤序号> --done <结果与证据>]
+                    [--work-id <单元ID> --outcome progress|failed|no-progress|blocked --evidence <证据引用>]
 jth flow revise <新目标> --reason <用户变更依据>
 jth flow resume <任务ID> [--takeover]
 jth flow pause --reason <暂停或切换依据>
@@ -26,7 +28,7 @@ jth flow verify [--timeout-ms <每项超时>]
 jth flow finish --summary <达成结果> [--evidence <相对文件>]
 jth flow uninstall
 通用：--workspace <项目目录>。任务命令可用 --task <ID>；Codex 内默认绑定 CODEX_THREAD_ID，终端用 --session <ID> 或明确任务 ID。
-accept、scope、check、context、constraint、done、decision、question、resolve、step 可重复。hook 是内部入口。
+accept、scope、read、check、context、constraint、done、decision、question、resolve、step、checkpoint 的 evidence 可重复。hook 是内部入口。
 `
 
 export async function flowMain(root: string, args: string[]) {
@@ -38,7 +40,8 @@ export async function flowMain(root: string, args: string[]) {
       accept: { type: 'string', multiple: true }, scope: { type: 'string', multiple: true }, check: { type: 'string', multiple: true }, context: { type: 'string', multiple: true },
       phase: { type: 'string' }, constraint: { type: 'string', multiple: true }, done: { type: 'string', multiple: true },
       decision: { type: 'string', multiple: true }, question: { type: 'string', multiple: true }, resolve: { type: 'string', multiple: true },
-      next: { type: 'string' }, reason: { type: 'string' }, blocked: { type: 'string' }, summary: { type: 'string' }, evidence: { type: 'string' },
+      next: { type: 'string' }, reason: { type: 'string' }, blocked: { type: 'string' }, summary: { type: 'string' }, evidence: { type: 'string', multiple: true },
+      read: { type: 'string', multiple: true }, expect: { type: 'string' }, hypothesis: { type: 'string' }, 'work-id': { type: 'string' }, outcome: { type: 'string' },
       step: { type: 'string', multiple: true }, 'complete-step': { type: 'string' },
       all: { type: 'boolean' }, history: { type: 'boolean' }, takeover: { type: 'boolean' }, 'timeout-ms': { type: 'string' }, request: { type: 'string' }, help: { type: 'boolean', short: 'h' },
     } })
@@ -46,13 +49,14 @@ export async function flowMain(root: string, args: string[]) {
     if (values.help || !command) { process.stdout.write(help); return }
     const allowed: Record<string, string[]> = {
       install: ['project', 'business', 'env-file'], uninstall: [], start: ['accept', 'scope', 'check', 'context', 'phase', 'constraint', 'step'],
-      status: ['all', 'history'], context: [], checkpoint: ['constraint', 'done', 'decision', 'question', 'resolve', 'next', 'phase', 'reason', 'blocked', 'check', 'context', 'step', 'complete-step'],
+      status: ['all', 'history'], context: [], focus: ['accept', 'read', 'expect', 'hypothesis'],
+      checkpoint: ['constraint', 'done', 'decision', 'question', 'resolve', 'next', 'phase', 'reason', 'blocked', 'check', 'context', 'step', 'complete-step', 'work-id', 'outcome', 'evidence'],
       revise: ['reason'], resume: ['takeover'], pause: ['reason'], verify: ['timeout-ms'], finish: ['summary', 'evidence'], recall: ['request'], hook: [], sync: [], migrate: [],
     }
     if (!Object.hasOwn(allowed, command)) throw new Error('未知 flow 命令；使用 jth flow --help')
     const invalid = Object.keys(values).filter(key => !['workspace', 'session', 'task', 'help', ...allowed[command]].includes(key))
     if (invalid.length) throw new Error(command + ' 不支持：' + invalid.join(', '))
-    if (positionals.length !== (['start', 'revise', 'resume'].includes(command) ? 2 : 1)) throw new Error('命令参数数量不符；使用 jth flow --help')
+    if (positionals.length !== (['start', 'revise', 'resume', 'focus'].includes(command) ? 2 : 1)) throw new Error('命令参数数量不符；使用 jth flow --help')
     const workspace = command === 'install' ? await realpath(resolve(values.workspace ?? process.cwd())) : findFlowWorkspace(values.workspace ?? process.cwd())
     const sessionId = values.session ?? process.env.CODEX_THREAD_ID
     const output = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n')
@@ -150,6 +154,10 @@ export async function flowMain(root: string, args: string[]) {
     }
     if (command === 'status') { output({ ...taskView(await store.task(taskId)), sessions: await store.bindings(taskId), ...(values.history ? { history: await store.history(taskId) } : {}) }); return }
     if (command === 'pause') { output(taskView(await store.pause(taskId, values.reason ?? '', sessionId))); return }
+    if (command === 'focus') {
+      output(taskView(await store.focus(taskId, { action: operand, acceptance: (values.accept ?? []).map(Number), readScope: values.read ?? [], expected: values.expect ?? '', hypothesis: values.hypothesis }, sessionId)))
+      return
+    }
     if (command === 'recall') {
       const memory = await recallTask(root, store, taskId, values.request)
       output(memory)
@@ -161,6 +169,7 @@ export async function flowMain(root: string, args: string[]) {
       output(taskView(await store.checkpoint(taskId, { constraint: values.constraint, done: values.done, decision: values.decision, question: values.question, resolve: values.resolve,
         step: values.step, completeStep: values['complete-step'] === undefined ? undefined : Number(values['complete-step']),
         next: values.next, phase: values.phase as 'discussion' | 'execution' | undefined, reason: values.reason, blocked: values.blocked, check: values.check, context: values.context,
+        workId: values['work-id'], outcome: values.outcome as 'progress' | 'failed' | 'no-progress' | 'blocked' | undefined, evidence: values.evidence,
       }, sessionId)))
       await scheduleRecall(root, store, taskId)
       return
@@ -180,11 +189,12 @@ export async function flowMain(root: string, args: string[]) {
       } finally { process.removeListener('SIGINT', abort); process.removeListener('SIGTERM', abort) }
       return
     }
-    if (values.evidence) {
-      const evidence = await realpath(resolve(workspace, values.evidence)), path = relative(workspace, evidence)
+    if (values.evidence && values.evidence.length !== 1) throw new Error('finish 只接受一个 --evidence 交付文件')
+    if (values.evidence?.[0]) {
+      const evidence = await realpath(resolve(workspace, values.evidence[0])), path = relative(workspace, evidence)
       if (path === '..' || path.startsWith('../') || isAbsolute(path) || !(await stat(evidence)).isFile()) throw new Error('验收证据必须是项目内真实文件')
     }
-    output(taskView(await store.finish(taskId, values.summary ?? '', await workspaceSnapshot(workspace), sessionId, values.evidence)))
+    output(taskView(await store.finish(taskId, values.summary ?? '', await workspaceSnapshot(workspace), sessionId, values.evidence?.[0])))
   } catch (error) {
     process.stderr.write(JSON.stringify({ error: safeError(error) }) + '\n')
     process.exitCode = 1

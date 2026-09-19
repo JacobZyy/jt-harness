@@ -17,12 +17,23 @@ export const createTaskSchema = z.strictObject({
   constraints: z.array(text).max(24).default([]),
   steps: z.array(text).max(12).default([]),
 })
+export const focusSchema = z.strictObject({
+  action: text, acceptance: z.array(z.number().int().positive()).min(1).max(16),
+  readScope: z.array(relativePathSchema).min(1).max(16), expected: text, hypothesis: text.nullable().default(null),
+})
+const workSchema = focusSchema.extend({ id: z.uuid(), step: z.number().int().positive().nullable(), contractVersion: z.number().int().positive(), startedAt: text })
+export const outcomeSchema = z.enum(['progress', 'failed', 'no-progress', 'blocked'])
 export const checkpointSchema = z.strictObject({
   constraint: z.array(text).default([]), decision: z.array(text).default([]), question: z.array(text).default([]),
   done: z.array(text).default([]), resolve: z.array(z.uuid()).default([]),
   next: z.string().trim().max(2000).optional(), phase: z.enum(['discussion', 'execution']).optional(), reason: text.optional(),
   blocked: z.string().trim().max(2000).optional(), check: z.array(text).default([]), context: z.array(relativePathSchema).default([]),
   step: z.array(text).default([]), completeStep: z.number().int().min(1).optional(),
+  workId: z.uuid().optional(), outcome: outcomeSchema.optional(), evidence: z.array(text).max(16).default([]),
+})
+const attemptSchema = z.strictObject({
+  work: workSchema, outcome: outcomeSchema, done: z.array(text).min(1).max(16), evidence: z.array(text).max(16),
+  next: z.string().max(2000), blocked: z.string().max(2000).nullable(), at: text,
 })
 const noteSchema = z.strictObject({ id: z.uuid(), text, at: text })
 const resultSchema = z.strictObject({ command: text, exitCode: z.number().int().nullable(), signal: z.string().nullable(), timedOut: z.boolean(), elapsedMs: z.number().nonnegative(), log: text })
@@ -32,12 +43,13 @@ export const taskSchema = createTaskSchema.extend({
   decisions: z.array(noteSchema).max(64), questions: z.array(noteSchema).max(64), progress: z.array(noteSchema).max(256),
   next: z.string().max(2000), blocked: z.string().max(2000).nullable(), summary: z.string().max(4000).nullable(),
   baseline: z.record(z.string(), z.string()),
+  work: workSchema.nullable().default(null), attempts: z.array(attemptSchema).max(8).default([]),
   verification: z.strictObject({ id: z.uuid(), contractVersion: z.number().int(), at: text, passed: z.boolean(), snapshot: z.record(z.string(), z.string()), results: z.array(resultSchema) }).nullable(),
   memory: z.strictObject({ key: text, requestedAt: text, refreshedAt: text.nullable(), status: z.enum(['refreshing', 'ready', 'failed']), error: z.string().nullable(),
     entries: z.array(z.strictObject({ id: z.uuid(), content: text, state: text, claimStatus: text, sourceSession: text })).max(5),
   }).nullable(),
 }).superRefine((task, context) => {
-  const required = JSON.stringify({ goal: task.goal, acceptance: task.acceptance, scope: task.scope, constraints: task.constraints, steps: task.steps.map(step => step.title) })
+  const required = JSON.stringify({ goal: task.goal, acceptance: task.acceptance, scope: task.scope, constraints: task.constraints, steps: task.steps.map(step => step.title), ...(task.work ? { work: task.work } : {}) })
   if (Buffer.byteLength(required) > 8000) context.addIssue({ code: 'custom', message: '目标与边界超过 8000 字节；请把独立目标拆成任务，不能截断关键约束' })
 })
 export type FlowTask = z.infer<typeof taskSchema>
