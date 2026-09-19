@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import type { Extraction, Submission } from '../contracts.ts'
 import type { MemoryEntry, PublicationNote } from './contract.ts'
-import { validateRelations } from './relations.ts'
+import { validateRelations, comparisonLimits } from './relations.ts'
 import type { Relation, StateEntry } from './relations.ts'
 import { entrySnapshot } from './metadata.ts'
 
@@ -144,10 +144,10 @@ export async function readRelations(database: Pool | PoolClient, ids: string[], 
 
 /** Retrieval nominates candidates only; similarity never authorizes a correction. */
 export async function findRelatedEntries(database: Pool | PoolClient, submission: Submission, spaceId: string, probes: { vector: number[], scope: MemoryEntry['scope'] | null }[]) {
-  const found = new Map<string, StateEntry>()
+  const found = new Map<string, StateEntry & { similarity: number }>()
   for (const probe of probes) {
-    const result = await database.query<StateEntry>(`
-      SELECT e.* FROM jt_memo.entry_states e JOIN jt_memo.embeddings v ON v.entry_id = e.id
+    const result = await database.query<StateEntry & { similarity: number }>(`
+      SELECT e.*, 1 - (v.embedding OPERATOR(public.<=>) $2::public.vector) AS similarity FROM jt_memo.entry_states e JOIN jt_memo.embeddings v ON v.entry_id = e.id
       WHERE v.space_id = $1 AND e.claim_status IN ('asserted','observed','verified') AND NOT e.archived AND e.state IN ('active', 'conflicted', 'scheduled')
         AND e.submission_id <> $3 AND ($4::text IS NULL OR e.scope = $4)
         AND (e.scope = 'user'
@@ -157,7 +157,10 @@ export async function findRelatedEntries(database: Pool | PoolClient, submission
       ORDER BY v.embedding OPERATOR(public.<=>) $2::public.vector, e.id LIMIT 5
     `, [spaceId, JSON.stringify(probe.vector), submission.submission_id, probe.scope,
       submission.scope.project_ids, submission.scope.business_ids, submission.source.session_id])
-    for (const entry of result.rows) found.set(entry.id, entry)
+    for (const entry of result.rows) {
+      if (entry.similarity < comparisonLimits.minimumSimilarity) continue
+      if (!found.has(entry.id) || found.get(entry.id)!.similarity < entry.similarity) found.set(entry.id, entry)
+    }
   }
-  return [...found.values()]
+  return [...found.values()].sort((a, b) => b.similarity - a.similarity || a.id.localeCompare(b.id)).slice(0, comparisonLimits.maxEntries)
 }

@@ -63,6 +63,21 @@ jth memo read --submission jth-cli-example-1
 
 ### 按条目接收与输出留存
 
+DSH 使用独立的模型材料视图，数据库继续保留完整来源。用户和助手消息保持原文；长工具结果只提供元数据与首尾原文片段，单条最多 1,200 个 Unicode 字符、每批最多 8,000 个工具正文字符，优先保留最近结果，并明确标记省略数量。工具中段的独有事实可能需要回查来源，不把这个压缩视图当成完整日志。
+
+关系比较只提供被新事实/修订引用的消息、新旧事实的必要字段与相关冲突，不重复发送整批 submission 和新事实正文。向量召回保留每个查询 top 5，同时要求余弦相似度至少 0.5，合并最多 24 条；模型侧旧事实再按 24,000 字节预算选择整条事实，不截断事实含义。候选不足不代表数据库没有其他冲突。这些预算是模型输入约束，不修改模型的 effort 或输出上限。
+
+固定规则放在 system prompt；模型材料按明确顺序构造，来源 ID 等动态元数据放在语义内容之后，旧候选选定后按 ID 稳定排序。每次返回的 DSH 输出附带 `run.usage`（实际输入、缓存命中、输出与请求数），以及 `source_bytes / input_bytes / system_prompt_bytes`。`jth memo outputs <id>` 可查看每次尝试，计算总命中率应汇总所有尝试后用命中 token 除以输入 token；没有 usage 不代表零消耗。
+
+手动验证两条独立用例，不安装 Hook、不读取生产队列：
+
+```sh
+pnpm build
+node scripts/test-postgres.mjs --memory-live --env-file /absolute/path/to/.env
+```
+
+该命令调用真实 DSH 与 Embedding API，在隔离 PostgreSQL 中验证更正和冲突，随后清理测试数据库；报告保存在 `artifacts/memo-inputs/`。运行结果见 [输入优化验证](docs/memory-input-optimization-verification.md)。普通 `pnpm test:postgres` 不调用真实模型。
+
 提炼不再要求实体名称逐字出现在原文、不强制每条引用新增消息、不按来源角色或确认顺序拒收模型分类。原始消息、角色和顺序保持原样。Agent 判断语义；程序仍校验 JSON、真实引用 ID、项目范围、有效期证据和关联事务。
 
 小的格式差异会规范化：实体去空和去重、重复来源 ID 去重、未提供的可选元数据保留为空。未知辅助字段留在原始模型输出中，不进入规范条目。无法接收的独立条目保存 `path/error/value`，其他有效条目继续生成向量、发布。无效关系不修改旧事实，也不把已经通过提炼检查的正文重新降级；它作为未应用的关系保留诊断，不冒充更正成功。

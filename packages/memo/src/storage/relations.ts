@@ -2,6 +2,8 @@ import { z } from 'zod'
 import type { Extraction, Submission } from '../contracts.ts'
 import type { MemoryEntry } from './contract.ts'
 
+export const comparisonLimits = { minimumSimilarity: 0.5, maxEntries: 24, maxBytes: 24000 } as const
+
 export const relationSchema = z.strictObject({
   kind: z.enum(['correction', 'supplement', 'conflict']),
   previous_entry_id: z.uuid(),

@@ -6,6 +6,7 @@ import type { RunResult } from '@deepseek-ai/dsh-sdk-client'
 import { z } from 'zod'
 import { optionsSchema } from '../contracts.ts'
 import type { MemoryAgentOptions } from '../contracts.ts'
+import type { AgentRun } from '../storage/contract.ts'
 
 export function assertAgentRun(run: RunResult) {
   const turnEnd = run.events.findLast(event => event.type === 'turn/end')
@@ -20,12 +21,24 @@ export function assertAgentRun(run: RunResult) {
   }
 }
 
-export interface AgentOutput { response: string, run: { session_id: string, provider: string, model: string } }
+export interface AgentOutput { response: string, run: AgentRun }
 export interface AgentContext {
   workspace?: string
+  sourceBytes?: number
   signal?: AbortSignal
   onOutput?: (output: AgentOutput) => Promise<void>
   onInvalidOutput?: (output: AgentOutput, error: string) => Promise<void>
+}
+
+/** DSH inputTokens excludes cache reads/writes. Missing usage is not a zero-cost request. */
+export function agentUsage(run: RunResult): AgentRun['usage'] {
+  const usages = run.events.flatMap(event => event.type === 'assistant/message' && event.data.usage ? [event.data.usage] : [])
+  if (!usages.length) return undefined
+  return usages.reduce((sum, usage) => ({
+    input_tokens: sum.input_tokens + usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0),
+    cache_hit_tokens: sum.cache_hit_tokens + (usage.cacheReadTokens ?? 0),
+    output_tokens: sum.output_tokens + usage.outputTokens, requests: sum.requests + 1,
+  }), { input_tokens: 0, cache_hit_tokens: 0, output_tokens: 0, requests: 0 })
 }
 
 /** A stopped generation may still contain useful text. Keep it before rejecting the run. */
@@ -56,10 +69,12 @@ export async function runValidatedMemoryAgent<T>(input: object, runtime: MemoryA
 }
 
 /** Both memory stages share the same tool-free DSH process lifecycle. */
-export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions, prompt: URL, schema: z.ZodType, context: AgentContext = {}) {
+export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions, prompt: URL, schema: z.ZodType, context: AgentContext = {}): Promise<AgentOutput> {
   context.signal?.throwIfAborted()
   const options = optionsSchema.parse(runtime)
   const instructions = await readFile(prompt, 'utf8')
+  const systemPrompt = `${instructions}\n${JSON.stringify(z.toJSONSchema(schema))}`
+  const material = JSON.stringify(input)
   const workspace = context.workspace ?? fileURLToPath(new URL('../../../../artifacts/memory-agent/workspace/', import.meta.url))
   await mkdir(workspace, { recursive: true })
   const harness = new DeepSeekHarness({
@@ -76,7 +91,7 @@ export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions
       EMBEDDING_API_KEY: '',
       JTH_DATABASE_URL: '',
       PGPASSWORD: '',
-      DSH_SYSTEM_PROMPT: `${instructions}\n${JSON.stringify(z.toJSONSchema(schema))}`,
+      DSH_SYSTEM_PROMPT: systemPrompt,
     },
   })
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -84,7 +99,7 @@ export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions
   const sessionId = `session-${randomUUID().replaceAll('-', '')}`
   try {
     const run = await Promise.race([
-      harness.run(JSON.stringify(input), { sessionId }),
+      harness.run(material, { sessionId }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`DSH 提炼超过 ${options.timeoutMs}ms，已请求关闭本次运行`)), options.timeoutMs)
         abort = () => reject(context.signal?.reason ?? new Error('记忆任务已中断'))
@@ -94,7 +109,8 @@ export async function runMemoryAgent(input: unknown, runtime: MemoryAgentOptions
     ])
     const output = {
       response: run.finalResponse,
-      run: { session_id: run.sessionId, provider: options.provider, model: options.model },
+      run: { session_id: run.sessionId, provider: options.provider, model: options.model, usage: agentUsage(run),
+        input_bytes: Buffer.byteLength(material), system_prompt_bytes: Buffer.byteLength(systemPrompt), source_bytes: context.sourceBytes },
     }
     await checkAgentCompletion(run, output, context)
     return output

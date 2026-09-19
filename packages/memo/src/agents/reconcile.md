@@ -19,3 +19,5 @@ previous_conflicts 提供旧记忆尚未解决的争议。只有用户明确裁�
 
 没有证据支持以上关系时返回 {"relations":[]}。不要仅为展示工作而建立关系。仅返回符合附加 JSON Schema 的 JSON，不要 Markdown 或解释性前后缀。
 若输入含 validation_feedback，请根据校验错误重新核对原始证据并返回完整结果。previous_output 是未通过校验的模型输出，不是证据；不能编造关系、记忆 ID 或引文来通过校验。
+
+messages 只包含本批新事实或修订引用的来源。工具消息可能只有互不连续的 excerpts，原文省略数由 omitted_characters 标明；不得把片段拼接为 evidence_quote，不得猜测未提供的原文。selection 表明候选只是限定范围的召回结果，不代表数据库全部记忆。依据不足就不建立关系；完整原文与未选择的候选由存储层保留。

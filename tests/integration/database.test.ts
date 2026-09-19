@@ -20,6 +20,8 @@ import { listManagedEntries, manageEntry, storageStats } from '@jt-harness/memo'
 import { storageDoctor } from '@jt-harness/memo'
 import { captureEvent, prepareEvidence, readEvidence, registerCaptures } from '@jt-harness/codex-hooks'
 import { recordMemories, runIndexWorker } from '@jt-harness/memo'
+import { findRelatedEntries } from '../../packages/memo/src/storage/revision-storage.ts'
+import { comparisonLimits } from '../../packages/memo/src/storage/relations.ts'
 
 const execute = promisify(execFile)
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -41,6 +43,29 @@ const extraction: Extraction = {
   revisions: [{ kind: 'correction', earlier_content: '旧说法', later_content: '新说法', explanation: '保留纠正证据。', source_message_ids: ['u1'] }],
 }
 const run = { session_id: 'test-dsh-session', provider: 'test', model: 'test' }
+
+test('comparison retrieval rejects distant facts and caps the union of per-fact neighbors', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+  const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
+  try {
+    assert.equal((await pool.query('SELECT current_database() AS name')).rows[0].name, 'jth_test')
+    await prepareDatabase(pool, true)
+    const storage = new MemoStorage(pool), submission = source('retrieval-budget-seed')
+    submission.scope = { project_ids: ['retrieval-budget'], business_ids: [] }
+    const facts: Extraction = { schema_version: 1, memories: Array.from({ length: 30 }, (_, i) => ({ content: `检索预算测试事实 ${i}`, scope: 'project', basis: 'user_statement', source_message_ids: ['u1'] })), proposals: [], revisions: [] }
+    await storage.store({ submission, extraction: facts, run })
+    const entries = (await storage.getSubmission(submission.submission_id)).entries
+    const vectors = entries.map((_entry, i) => [Math.cos(i / 200), Math.sin(i / 200)])
+    const space = { id: 'retrieval-budget-v1', provider: 'test', model: 'test', dimensions: 2, input_version: 'content-v1' as const }
+    await storage.index({ submission_id: submission.submission_id, space, embeddings: entries.map((entry, i) => ({ entry_id: entry.id, content_sha256: entry.content_sha256, vector: vectors[i] })) })
+    const next = { ...submission, submission_id: 'retrieval-budget-next' }
+    assert.deepEqual(await findRelatedEntries(pool, next, space.id, [{ vector: [0, -1], scope: 'project' }]), [])
+    const matches = await findRelatedEntries(pool, next, space.id, vectors.map(vector => ({ vector, scope: 'project' })))
+    assert.equal(matches.length, comparisonLimits.maxEntries)
+    assert(matches.every(entry => entry.similarity >= comparisonLimits.minimumSimilarity))
+    assert.equal(new Set(matches.map(entry => entry.id)).size, matches.length)
+    assert.deepEqual(await findRelatedEntries(pool, { ...next, scope: { project_ids: ['different-project'], business_ids: [] } }, space.id, [{ vector: [1, 0], scope: 'project' }]), [])
+  } finally { await pool.end() }
+})
 
 test('native PostgreSQL + pgvector: durable queue, atomic publication, scope isolation and recovery', {
   skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 60_000,

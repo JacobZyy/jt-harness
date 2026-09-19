@@ -9,7 +9,14 @@ import type { IntakeIssue } from '../intake.ts'
 const text = z.string().min(1).max(500).refine(value => value.trim().length > 0)
 const ids = z.array(text).min(1).refine(values => new Set(values).size === values.length)
 
-export const runSchema = z.strictObject({ session_id: text, provider: text, model: text, reasoningEffort: text.optional() })
+export const usageSchema = z.strictObject({
+  input_tokens: z.number().int().nonnegative(), cache_hit_tokens: z.number().int().nonnegative(),
+  output_tokens: z.number().int().nonnegative(), requests: z.number().int().positive(),
+})
+export const runSchema = z.strictObject({ session_id: text, provider: text, model: text, reasoningEffort: text.optional(),
+  usage: usageSchema.optional(), input_bytes: z.number().int().nonnegative().optional(), system_prompt_bytes: z.number().int().nonnegative().optional(), source_bytes: z.number().int().nonnegative().optional(),
+})
+export type AgentRun = z.infer<typeof runSchema>
 export const storeInputSchema = z.strictObject({
   submission: submissionSchema,
   extraction: extractionSchema,

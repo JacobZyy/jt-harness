@@ -6,6 +6,7 @@ import type { AgentContext } from './runtime.ts'
 import type { AgentOutput } from './runtime.ts'
 import { inspectExtraction } from '../intake.ts'
 import type { IntakeIssue } from '../intake.ts'
+import { extractionMaterial, jsonBytes } from './material.ts'
 
 export type ExtractionResult = Awaited<ReturnType<typeof extractionResult>> & { issues?: IntakeIssue[] }
 function extractionResult(submission: Submission, extraction: ReturnType<typeof parseExtraction>, run: AgentOutput['run']) {
@@ -20,7 +21,7 @@ export function finishExtraction(run: RunResult, submission: Submission) {
 /** Extract source-only candidates. Reconciliation and publication belong to the worker. */
 export async function extractMemories(input: unknown, runtime: MemoryAgentOptions, context: AgentContext = {}): Promise<ExtractionResult> {
   const submission = submissionSchema.parse(input)
-  const result = await runValidatedMemoryAgent(submission, runtime, new URL('./agent.md', import.meta.url), agentExtractionSchema,
-    response => inspectExtraction(response, submission), context)
+  const result = await runValidatedMemoryAgent(extractionMaterial(submission), runtime, new URL('./agent.md', import.meta.url), agentExtractionSchema,
+    response => inspectExtraction(response, submission), { ...context, sourceBytes: jsonBytes(submission) })
   return { ...extractionResult(submission, result.value.extraction, result.run), issues: result.value.issues }
 }

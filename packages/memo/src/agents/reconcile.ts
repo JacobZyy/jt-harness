@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { collectItems } from '../intake.ts'
 import type { IntakeIssue } from '../intake.ts'
 import { relationSchema } from '../storage/relations.ts'
+import { comparisonMaterial, jsonBytes } from './material.ts'
 
 export interface ComparisonInput {
   submission: Submission
@@ -36,8 +37,11 @@ export function inspectRelations(response: string, input: ComparisonInput) {
 }
 
 export async function reconcileMemories(input: ComparisonInput, runtime: MemoryAgentOptions, context: AgentContext = {}): Promise<{ relations: Relation[], issues?: IntakeIssue[], run: AgentOutput['run'] }> {
-  if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 384_000) throw new Error('记忆比较上下文超过 384000 字节；请拆分材料，不会截断证据')
-  const result = await runValidatedMemoryAgent(input, runtime, new URL('./reconcile.md', import.meta.url), reconciliationSchema,
-    response => inspectRelations(response, input), context)
+  const material = comparisonMaterial(input)
+  if (jsonBytes(material) > 384_000) throw new Error('精简后的记忆比较上下文仍超过 384000 字节；请拆分材料，不会截断事实')
+  const selected = new Set(material.previous_entries.map(entry => entry.id))
+  const validation = { ...input, previous_entries: input.previous_entries.filter(entry => selected.has(entry.id)), previous_conflicts: material.previous_conflicts }
+  const result = await runValidatedMemoryAgent(material, runtime, new URL('./reconcile.md', import.meta.url), reconciliationSchema,
+    response => inspectRelations(response, validation), { ...context, sourceBytes: jsonBytes(input) })
   return { ...result.value, run: result.run }
 }
