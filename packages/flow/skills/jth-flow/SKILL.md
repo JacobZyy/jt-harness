@@ -17,7 +17,7 @@ description: 在安装了 JTH 的项目中，用 Codex 原生 Goal、任务列�
 - 上下文压缩或新会话恢复时，读取原生会话、Goal 和计划，接续当前未完成步骤；`jth flow status` 只提供安装配置，不保存任务进度。
 - 反馈只调整计划、约束或当前步骤；只有用户明确更换目标时才改变目标。同步调整受影响的验收条件，保留仍然适用的条件。
 
-JTH 默认 CLI 入口只有：
+Flow 状态命令如下；项目接入、升级和诊断使用 `jth install`、`jth upgrade`、`jth doctor`：
 
 ```sh
 jth flow install --project <项目ID>

@@ -14,6 +14,7 @@
     "test:live": "DSH_MEMORY_LIVE=1 node --test packages/memo/src/agents/*.test.ts",
     "typecheck": "node scripts/typecheck.mjs",
     "build": "node scripts/build.mjs",
+    "bundle": "node scripts/bundle.mjs",
     "jth": "node bin/jth.mjs",
     "prepack": "pnpm build",
     "test:postgres": "pnpm build && node scripts/test-postgres.mjs"
@@ -40,8 +41,9 @@
     "bin/",
     "packages/",
     "README.md",
+    "docs/",
     ".env.example",
     "examples/"
   ],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

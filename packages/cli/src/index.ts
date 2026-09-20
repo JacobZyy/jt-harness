@@ -1,5 +1,20 @@
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+
 export async function run(root: string, args = process.argv.slice(2)) {
   process.umask(0o077)
+  if (args.length === 1 && ['--version', '-v'].includes(args[0])) {
+    const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+    process.stdout.write(`${manifest.version}\n`); return
+  }
+  if (args[0] === 'monitor') {
+    const { monitorMain } = await import('./monitor.ts')
+    return monitorMain(root, args.slice(1))
+  }
+  if (['install', 'upgrade', 'doctor', 'uninstall'].includes(args[0])) {
+    const { deliveryMain } = await import('./delivery.ts')
+    return deliveryMain(root, args)
+  }
   if (args[0] === 'db') {
     const { databaseMain } = await import('./postgres.ts')
     return databaseMain(root, args.slice(1))

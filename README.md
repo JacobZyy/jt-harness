@@ -4,6 +4,8 @@
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
+本地交付命令：`jth install / upgrade / doctor / uninstall`；本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
+
 ## 模块与运行模式
 
 生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。

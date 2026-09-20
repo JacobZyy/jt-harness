@@ -15,8 +15,11 @@
   "dependencies": {
     "@inquirer/search": "^4.3.3",
     "@jt-harness/codex-hooks": "workspace:*",
+    "@jt-harness/flow": "workspace:*",
     "@jt-harness/memo": "workspace:*",
-    "@jt-harness/flow": "workspace:*"
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.222.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0"
   },
   "scripts": {
     "build": "node ../../scripts/build-package.mjs",

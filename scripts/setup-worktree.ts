@@ -1,8 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { access, lstat, realpath, symlink } from 'node:fs/promises'
+import { access, lstat, readFile, realpath, symlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { FlowSettings } from '../packages/flow/src/contracts.ts'
 
 /** Share local configuration and external source dependencies without replacing local overrides. */
 export async function ensureSharedLink(source: string, target: string) {
@@ -22,16 +21,23 @@ export async function ensureSharedLink(source: string, target: string) {
   await symlink(actualSource, target)
 }
 
+export async function readPrimaryInstallation(primary: string) {
+  const primaryCli = resolve(primary, 'bin/jth.mjs')
+  // Reuse the primary installation's scope and config instead of copying workspace-bound runtime files.
+  const status = JSON.parse(execFileSync(process.execPath, [primaryCli, 'flow', 'status', '--workspace', primary], {
+    cwd: primary, encoding: 'utf8',
+  })) as { memo_scope: { project_ids: string[], business_ids: string[] } | null }
+  const locator = JSON.parse(await readFile(resolve(primary, '.jth/flow.json'), 'utf8')) as { envFile: string }
+  if (!status.memo_scope) throw new Error('主工作区尚未配置 Memo 范围')
+  const envFile = await realpath(locator.envFile)
+  return { envFile, projectIds: status.memo_scope.project_ids, businessIds: status.memo_scope.business_ids }
+}
+
 export async function setupWorktree() {
   const workspace = await realpath(execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim())
   const worktrees = execFileSync('git', ['worktree', 'list', '--porcelain', '-z'], { cwd: workspace, encoding: 'utf8' })
   const primary = await realpath(worktrees.split('\0').find(field => field.startsWith('worktree '))!.slice('worktree '.length))
-  const primaryCli = resolve(primary, 'bin/jth.mjs')
-  // Reuse the primary installation's scope and config instead of copying workspace-bound runtime files.
-  const { settings } = JSON.parse(execFileSync(process.execPath, [primaryCli, 'flow', 'status', '--all', '--workspace', primary], {
-    cwd: primary, encoding: 'utf8',
-  })) as { settings: FlowSettings }
-  const envFile = await realpath(settings.envFile)
+  const { envFile, projectIds, businessIds } = await readPrimaryInstallation(primary)
   const dsh = resolve(dirname(primary), 'deepseek-harness')
   await access(resolve(dsh, 'package.json'))
   if (workspace !== primary) {
@@ -43,8 +49,8 @@ export async function setupWorktree() {
   execFileSync('pnpm', ['build'], { cwd: workspace, stdio: 'inherit' })
   execFileSync(process.execPath, [resolve(workspace, 'bin/jth.mjs'), 'flow', 'install',
     '--workspace', workspace, '--env-file', envFile,
-    ...settings.projectIds.flatMap(id => ['--project', id]),
-    ...settings.businessIds.flatMap(id => ['--business', id]),
+    ...projectIds.flatMap(id => ['--project', id]),
+    ...businessIds.flatMap(id => ['--business', id]),
   ], { cwd: workspace, stdio: 'inherit' })
   return { status: 'configured', workspace, primary, envFile }
 }
