@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { lstat, readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
@@ -12,7 +12,11 @@ const endpoint = z.url().transform(value => new URL(value)).refine(url => (
 ), 'Embedding 地址必须为不含凭据、查询参数的 HTTP(S) URL').transform(url => url.href.replace(/\/$/, ''))
 
 export async function loadConfig(root: string, envFile?: string, environment: NodeJS.ProcessEnv = process.env) {
-  const file = resolve(envFile ?? environment.JTH_ENV_FILE ?? resolve(root, '.env'))
+  const requestedFile = resolve(envFile ?? environment.JTH_ENV_FILE ?? resolve(root, '.env'))
+  const file = await lstat(requestedFile).then(info => info.isSymbolicLink() ? realpath(requestedFile) : requestedFile).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return requestedFile
+    throw error
+  })
   let contents = ''
   try { contents = await readFile(file, 'utf8') } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error

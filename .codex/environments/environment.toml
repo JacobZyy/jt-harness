@@ -1,0 +1,25 @@
+version = 1
+name = "jt-harness"
+
+[setup]
+script = "node scripts/setup-worktree.ts"
+
+[[actions]]
+name = "Sync environment"
+icon = "run"
+command = "node scripts/setup-worktree.ts"
+
+[[actions]]
+name = "Build"
+icon = "run"
+command = "pnpm build"
+
+[[actions]]
+name = "Tests"
+icon = "test"
+command = "pnpm test"
+
+[[actions]]
+name = "Type check"
+icon = "test"
+command = "pnpm typecheck"

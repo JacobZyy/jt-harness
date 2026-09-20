@@ -7,6 +7,7 @@
   },
   "packageManager": "pnpm@10.12.4",
   "scripts": {
+    "setup:worktree": "node scripts/setup-worktree.ts",
     "memo:extract": "node packages/memo/src/agents/run.ts",
     "memo:eval": "node packages/memo/src/agents/evaluation/run.ts",
     "test": "node scripts/test.mjs",

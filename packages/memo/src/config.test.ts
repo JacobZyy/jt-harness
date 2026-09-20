@@ -1,10 +1,27 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { executionProfile, loadConfig, safeError } from './config.ts'
+
+test('a worktree env symlink keeps relative runtime paths anchored to the shared source', async () => {
+  const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-linked-config-')))
+  const primary = resolve(directory, 'main'), worktree = resolve(directory, 'worktree')
+  try {
+    await mkdir(primary); await mkdir(worktree)
+    const source = resolve(primary, '.env'), link = resolve(worktree, '.env')
+    await writeFile(source, 'JTH_DATA_DIR=./data\nJTH_DSH_BIN=../dsh/bin.js\n', { mode: 0o600 })
+    await symlink(source, link)
+    const config = await loadConfig(worktree, undefined, {})
+    assert.equal(config.envFile, source)
+    assert.equal(config.dataDir, resolve(primary, 'data'))
+    assert.equal(config.agent.dshBin, resolve(directory, 'dsh/bin.js'))
+    await writeFile(source, 'JTH_DATA_DIR=./updated\n', { mode: 0o600 })
+    assert.equal((await loadConfig(worktree, undefined, {})).dataDir, resolve(primary, 'updated'))
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
 
 test('.env uses explicit paths and environment overrides; durable profile excludes credentials', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'jth-config-'))
