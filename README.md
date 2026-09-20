@@ -59,7 +59,7 @@ jth memo read <entry-id>
 jth memo work
 ```
 
-`memo codex status` 查看声明待投递数量和本地诊断，`memo status` 查看索引任务。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成。重复声明可以直接复用已有条目，不新增索引任务；详情及新增来源通过 `memo read` 查看。当前仓库自动 Hook 保持关闭，本次只在隔离环境安装和测试。
+`memo codex status` 查看声明待投递数量和本地诊断，`memo status` 查看索引任务。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成。重复声明可以直接复用已有条目，不新增索引任务；详情及新增来源通过 `memo read` 查看。当前仓库已重新安装 Memo Stop Hook、Flow 生命周期 Hook 和项目 Skill；自动执行以 Codex 加载并信任这些定义为准。默认后台只处理声明与向量索引。
 
 ### 历史 DSH 路径：按条目接收与输出留存
 
