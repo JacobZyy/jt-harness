@@ -55,7 +55,10 @@ test('explicit legacy flow hooks preserve memory handlers, restore old goals and
     assert.deepEqual((await flowHook({ hook_event_name: 'SessionStart', session_id: 'foreign', cwd: tmpdir() }, store)).output, {})
     const preserved = await store.task(task.id)
     await configureFlowHooks(root, workspace)
-    assert.deepEqual(JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')), memoHooks)
+    const nativeHooks = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'))
+    assert.equal(nativeHooks.hooks.UserPromptSubmit[0].hooks[0].statusMessage, 'jth flow entry')
+    delete nativeHooks.hooks.UserPromptSubmit
+    assert.deepEqual(nativeHooks, memoHooks)
     assert.deepEqual(await store.task(task.id), preserved, 'Native installation must not rewrite historical tasks')
     await configureFlowHooks(root, workspace, false)
     assert.deepEqual(JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')), memoHooks)

@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { FlowStore, renderFlowContext } from '@jt-harness/flow'
 import { mergeHooks, quote, updateHookConfig } from './install.ts'
 import { writeJson, readJson } from './capture.ts'
+import { flowEntryMarker } from './flow-entry.ts'
 
 export const flowEvents = ['SessionStart', 'UserPromptSubmit', 'SubagentStart', 'Stop', 'Interrupt', 'SessionEnd', 'SubagentStop'] as const
 const contextEvents: readonly string[] = ['SessionStart', 'UserPromptSubmit', 'SubagentStart']
@@ -66,15 +67,16 @@ export async function configureFlowHooks(root: string, workspace: string, enable
     if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
   }
   const command = enabled && mode === 'legacy' ? [process.execPath, resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'hook', '--workspace', workspace].map(quote).join(' ') : undefined
+  const entry = enabled && mode === 'native' ? [process.execPath, resolve(root, 'bin/jth.mjs'), 'flow', 'prompt', '--workspace', workspace].map(quote).join(' ') : undefined
   const hooksPath = resolve(workspace, '.codex/hooks.json')
-  await updateHookConfig(hooksPath, resolve(workspace, '.jth/backups'), document => mergeHooks(document, command, {
+  await updateHookConfig(hooksPath, resolve(workspace, '.jth/backups'), document => mergeHooks(mergeHooks(document, command, {
     marker: 'jth flow context', events: flowEvents, additionalContextLimit: 6000,
-  }))
+  }), entry, { marker: flowEntryMarker, events: ['UserPromptSubmit'], additionalContextLimit: 512 }))
   if (!enabled && prior) await unlink(target)
   const activation = !enabled ? '任务数据和 Memo Hooks 均保留'
-    : mode === 'native' ? '恢复会话以加载更新后的 Skill；原生目标与任务列表由 Codex 管理，Flow 不再注入旧任务'
+    : mode === 'native' ? '在 Codex /hooks 审阅并信任入口定义；恢复会话后，UserPromptSubmit 注入短 Flow 提示，原生目标与任务列表仍由 Codex 管理'
       : '在 Codex /hooks 审阅并信任历史 Flow 定义'
-  return { status: enabled ? 'installed' : 'uninstalled', mode, hooksPath, skill: target, events: command ? flowEvents : [],
+  return { status: enabled ? 'installed' : 'uninstalled', mode, hooksPath, skill: target, events: command ? flowEvents : entry ? ['UserPromptSubmit'] : [],
     activation,
   }
 }

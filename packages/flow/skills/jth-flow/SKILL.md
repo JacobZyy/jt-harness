@@ -26,7 +26,9 @@ jth flow context
 jth flow uninstall
 ```
 
-旧数据库任务仅通过 `jth flow legacy ...` 使用。默认不创建或同步第二份 PostgreSQL 任务，不注册重复生命周期 Hook；不要主动安装、迁移或开启 Hook。
+安装后，`UserPromptSubmit` 只注入短入口提示，促使主 Agent 按本技能执行；它不替代语义验收、不读取旧任务或聊天全文。`jth flow status` 的 `entry_hook.last_emission` 证明最近一次 Hook 输出，不证明模型已执行验收。
+
+旧数据库任务仅通过 `jth flow legacy ...` 使用。默认不创建或同步第二份 PostgreSQL 任务；除已安装的入口提示外，不注册重复生命周期 Hook。没有用户安装要求时，不主动安装、迁移或开启 Hook。
 
 ## 执行与检查点
 

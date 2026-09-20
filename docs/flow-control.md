@@ -45,7 +45,11 @@ jth flow context
 jth flow uninstall
 ```
 
-`install` 管理项目 Skill 和 Memo 声明入口，移除旧 `jth flow context` Hook。没有新增 Flow Hook。项目 `.jth/flow.json` 仅定位 workspace 和 `.env`；Memo 的安装记录提供 `memo_scope`，不复制到第二张配置表。
+`install` 管理项目 Skill、`UserPromptSubmit` 短入口提示和 Memo Stop 声明入口，移除旧 `jth flow context` Hook。项目 `.jth/flow.json` 仅定位 workspace 和 `.env`；Memo 的安装记录提供 `memo_scope`，不复制到第二张配置表。卸载 Flow 移除 Skill 与入口 Hook，保留 Memo、第三方 Hook 和历史数据。
+
+入口执行 `jth flow prompt --workspace <项目目录>`，接收 Codex 的 Hook JSON，只输出固定流程提醒和 Skill 路径。它不读取用户正文、聊天记录、旧目标或记忆，不连接数据库或模型；普通问答由主 Agent 直接回答，实质任务按 Skill 进入与验收。Hook 定义设置 512 的 `additionalContextLimit`，异常输出诊断并放行，防止入口故障阻塞会话。
+
+`.jth/flow-entry.json` 仅保留最近一次输出的时间、会话/回合 ID、工作目录和字符数。`flow status/context` 的 `entry_hook` 展示安装与最近输出记录；这不是任务状态表，也不能单独证明模型遵守流程。Codex 必须同时信任项目层和当前 Hook 定义；仅写入 hooks.json 不代表已激活。已有会话重新加载后，同会话恢复的下一次用户输入会再次收到短提示。
 
 `status/context` 只读本地配置，不连接 PostgreSQL，不读取旧任务、旧阶段和缓存记忆，也不声称读取了原生 Goal/计划的实时状态。原生状态在 Codex 中查看。安装、状态和退役 Hook 入口在数据库离线时也可运行。
 
@@ -93,3 +97,16 @@ pnpm test:postgres
 - [Codex Goal](https://developers.openai.com/zh-Hans/use-cases/follow-goals)：负责持久目标与跨轮推进。
 - [App Server](https://developers.openai.com/zh-Hans/docs/app-server)：会话恢复、steering、压缩、计划通知与工具结果。
 - [定制机制](https://developers.openai.com/es-419/docs/customization/overview)：AGENTS.md、Skills 与工具接入的职责。
+- [Codex Hooks](https://learn.chatgpt.com/docs/hooks)：`UserPromptSubmit` 的上下文输出、项目及定义信任、上下文长度阈值。
+
+## 短入口实测（2026-09-20）
+
+本次实现使用原生 Goal 管理总目标，按 JTH Flow 的验收约定收口。主会话没有原生任务列表工具，以会话中的交付项和忽略目录内的证据报告关联结果；没有创建第二套任务数据库或审阅 Agent。
+
+构建、类型检查、Skill 校验、39 项离线测试和 44 项隔离 PostgreSQL 测试通过。入口回归验证配置文件离线、非法及过大输入、跨项目事件、诊断写入失败、重复安装和卸载后残留调用；入口不访问 PG、模型或原始对话。原有 Memo 与第三方 Hook 保留。
+
+真实 Codex App Server 在可移除项目和独立 CODEX_HOME 中执行了一次小型代码修复。由宿主自动触发两次 UserPromptSubmit，均返回上下文，耗时分别为 133 ms 和 110 ms，提示各 249 字符。模型实际读取了安装后的 Flow Skill 及验收约定，修改目标文件并运行项目检查。在检查执行时使用原生 `turn/interrupt` 中断，随后卸载该线程的连接并通过 `thread/resume` 恢复；仅发送“继续刚才的任务，从中断的位置恢复”，仍完成同一目标、重跑检查并核对修改范围。最终只有目标文件发生变化，检查输出 `slug checks passed`。
+
+最初的隔离 CLI 尝试未获得入口输出，因此不算通过。最终场景通过原生配置 API 在独立 CODEX_HOME 中记录已审阅 Hook 的信任，并以宿主 `hook/completed` 事件、实际 Skill 读取、代码差异和检查结果共同判定通过；测试结束后移除了独立运行目录。主项目也经原生 API 确认入口为 trusted，只更新了该入口的信任哈希，保留用户模型、委派设置及 Memo Hook 配置。
+
+原始证据位于本地忽略目录 `artifacts/flow-entry/`：`task.md`、`live-result.json`、`live-app-server.jsonl`、`activation.json` 和测试日志。实测证明该场景的自动进入与恢复执行；Hook 输出本身仍不等于语义验收结果。

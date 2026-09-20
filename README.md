@@ -23,7 +23,7 @@ jth flow install --project jt-harness
 jth flow status
 ```
 
-安装保留 Memo Stop 声明入口，链接项目 `jth-flow` Skill，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 只读取本地安装配置和 Memo 范围，不返回旧目标、阶段或缓存记忆。
+安装保留 Memo Stop 声明入口，链接项目 `jth-flow` Skill，增加 `UserPromptSubmit` 短流程提醒，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 只读取本地安装配置、最近一次入口输出与 Memo 范围，不返回旧目标、阶段或缓存记忆。入口记录位于 `.jth/flow-entry.json`，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
 
 复杂任务由主 Agent 使用实际可用的 Codex 原生计划工具记录待办、进行中和完成；用户反馈进入同一份计划。已选择 Goal 的长任务复用一个原生 Goal，在续轮或恢复后接续未完成步骤。原生计划工具未暴露时明确说明，不伪造原生列表，也不用旧 Flow Task 代替。
 
@@ -215,7 +215,7 @@ jth memo codex uninstall
 
 `--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo Stop Hook，以及 `AGENTS.md` 中 `JTH_MEMORY_START/END` 标记包围的短说明。其他 Hook 与说明保持原样，更新前备份到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除这两个托管部分。Codex 的 Hook 信任机制保持不变。
 
-Memo 只安装 `Stop`，调用 `jth memo codex declare`。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 不再注册额外的生命周期 Hook。
+Memo 只安装 `Stop`，调用 `jth memo codex declare`。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短入口提示，不恢复旧任务生命周期 Hook。
 
 Hook 检查本轮最终回复，只保存含声明的本地交接记录并启动独立 worker，超时为 3 秒。Hook 内不连接数据库、不调用模型、不等待 Embedding。来源以硬链接保留，文件边界和原始位置一并记录；声明解析和引文匹配在后台本地执行。只有新记忆正文发送到 Embedding API。
 
