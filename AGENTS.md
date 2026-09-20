@@ -10,6 +10,14 @@ Default memory ingestion uses short declarations in the main Codex reply and a S
 
 Memory model configuration selects only Provider and model. Do not impose reasoning effort or output-token overrides; use DSH/Provider defaults. A task timeout is an execution safeguard, not a model-generation setting.
 
+## Flow acceptance
+
+Apply the shared [task acceptance contract](packages/flow/skills/jth-flow/references/acceptance.md) before completing substantive work. Add only the following project checks when their area changes:
+
+- CLI behavior: command help, documented arguments and actual execution agree. Use the relevant CLI invocation and focused checks as evidence.
+- Flow or Skill guidance: the installed Skill can load its referenced files; instructions preserve native Goal and plan ownership and do not start a second task loop or model call. Inspect the installed files and use the existing native installation test when installation behavior is affected.
+- Memory or Hook behavior: changes preserve the package boundaries and existing source, scope, revision and queue contracts. Use the affected existing tests and actual changed call path as evidence; do not make new live model calls or clear real data merely to produce acceptance evidence.
+
 <!-- JTH_MEMORY_START -->
 任务产生新的可复用事实或明确更正时，在最终回复末尾附一个记忆声明；没有新增事实就不附。不要为记忆另开任务、总结全文或重复输出运行状态。
 格式：<!-- jth-memory {"items":[{"text":"短事实","scope":"project","basis":"user_statement","quote":"此前消息中的一小段连续原文"}]} -->
