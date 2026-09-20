@@ -16,6 +16,7 @@ import { storageDoctor } from '@jt-harness/memo'
 import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jt-harness/memo'
+import { rememberEntryRead } from '@jt-harness/codex-hooks'
 
 const help = `jth flow <command>  轻量任务目标、恢复与验收；运行 jth flow --help
 jth db status|start|stop  本机 PostgreSQL 生命周期管理
@@ -26,11 +27,11 @@ jth memo <command>
   prepare --session <id>       为当前 Agent 返回可引用来源
   record <file.json|->         保存会话内候选，后台仅生成向量
   evidence <id> --message <id>  读取来源原文
-  send <file.json|->            DSH 提取、Embedding 和入库
-  codex <command>             Codex 六阶段采集：install / uninstall / status / capture
+  send <file.json|-> --legacy   显式使用历史 DSH 提炼路径
+  codex <command>             末尾声明：install / uninstall / status / declare
   status [submission-id]       队列、提炼和入库状态；--summary 仅显示汇总与失败原因
   outputs <submission-id>      查看原始模型返回，包括无法解析的结果
-  work [--index]               默认采集会话并运行 DSH；--index 仅恢复手动候选
+  work [--index]               接收声明并生成向量；--legacy 才处理历史 DSH 队列
   retry <submission-id>        重试失败任务，复用已保存提炼
   recover <id> [file.json|-]   查看未接收条目；按路径提交 replace/dismiss 修正和原因
   search <query> <scope>       返回候选摘要，默认排除助手建议
@@ -67,13 +68,13 @@ const optionTypes = {
   history: { type: 'boolean' }, summary: { type: 'boolean' },
   'as-of': { type: 'string' }, candidates: { type: 'boolean' }, archived: { type: 'boolean' }, review: { type: 'boolean' },
   reason: { type: 'string' }, evidence: { type: 'string' },
-  'timeout-ms': { type: 'string' }, legacy: { type: 'boolean' }, index: { type: 'boolean' },
+  'timeout-ms': { type: 'string' }, legacy: { type: 'boolean' }, index: { type: 'boolean' }, 'source-session': { type: 'string' },
 } as const
 
 const commandOptions: Record<string, string[]> = {
   init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: ['summary'], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy', 'provider', 'model'],
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
-  read: ['submission', 'as-of'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
+  read: ['submission', 'as-of', 'source-session'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
   outputs: [], recover: [],
 }
@@ -116,6 +117,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
       : command === 'restore' ? operands.length === 1
       : operands.length === 0
     if (!count) throw new Error('命令参数数量不正确；运行 jth --help 查看用法')
+    if (command === 'send' && !values.legacy) throw new Error('自动 DSH 提炼已停用；需要历史路径时显式使用 send --legacy')
     const scopes = [
       ...(values.project ? [{ kind: 'project', project_ids: values.project }] : []),
       ...(values.business ? [{ kind: 'business', business_ids: values.business }] : []),
@@ -124,7 +126,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
       ...(values.submission ? [{ kind: 'unspecified', submission_id: values.submission }] : []),
     ]
     if (command === 'search' && scopes.length !== 1) throw new Error('search 必须明确指定一种范围；不会默认搜索全部记忆')
-    const limit = Number(values.limit ?? 10)
+    const limit = Number(values.limit ?? (command === 'search' ? 3 : 10))
     if (command === 'search' && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw new Error('--limit 必须为 1..50 的整数')
     const asOf = values['as-of'] ? timestampSchema.parse(values['as-of']) : undefined
     config = await loadConfig(root, values['env-file'])
@@ -148,10 +150,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
           : await readIntakeRecovery(pool, operands[0])
         result = recovery
         if (operands[1] && recovery.issues.some(issue => ['queued', 'running'].includes(issue.recovery?.followup_status))) {
-          try { result = { ...recovery, worker: await startWorker(root, config) } } catch (error) {
-            result = { ...recovery, worker: { started: false, error: safeError(error, config), recovery: 'jth memo work' } }
-            process.exitCode = 1
-          }
+          result = { ...recovery, worker: { started: false, recovery: '历史 DSH 回补保留在队列；显式 memo work --legacy 才执行' } }
         }
         break
       }
@@ -184,15 +183,24 @@ export async function main(root: string, args = process.argv.slice(2)) {
       case 'restore': result = await manageEntry(pool, { action: command, entry_id: operands[0], source_session_id: values.session, reason: values.reason ?? '' }); break
       case 'work': {
         if (values.legacy && values.index) throw new Error('--legacy 和 --index 不可同时使用')
-        const capture = values.index ? await receiveRecords(pool, config) : await receiveDshCaptures(pool, config, controller.signal)
-        const counts = !values.index
+        const capture = values.legacy ? await receiveDshCaptures(pool, config, controller.signal) : await receiveRecords(pool, config)
+        const counts = values.legacy
           ? await (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
           : await runIndexWorker(pool, file => loadConfig(root, file), controller.signal)
-        if (counts.failed > 0 || (capture?.errors.length ?? 0) > 0) process.exitCode = 1
+        if (counts.failed > 0 || (capture?.errors.length ?? 0) > 0 || ('declaration_errors' in capture && capture.declaration_errors.length > 0)) process.exitCode = 1
         result = { ...counts, capture }
         break
       }
-      case 'read': result = values.submission ? await storage.getSubmission(values.submission, asOf) : await storage.getEntry(operands[0], asOf); break
+      case 'read': {
+        if (values.submission) result = await storage.getSubmission(values.submission, asOf)
+        else {
+          const entry = await storage.getEntry(operands[0], asOf)
+          const sessionId = values['source-session'] ?? process.env.CODEX_THREAD_ID
+          if (sessionId && entry.version) await rememberEntryRead(config, sessionId, entry.id, entry.version)
+          result = entry
+        }
+        break
+      }
       case 'search': {
         const scope = scopeFilterSchema.parse(scopes[0])
         const profile = executionProfile(config)
@@ -214,6 +222,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
         if (command === 'retry') {
           const previous = await jobStatus(pool, operands[0])
           indexOnly = previous.kind === 'index'
+          if (!indexOnly && !values.legacy) throw new Error('历史 DSH 任务需显式 retry --legacy；默认声明流程不会启动 DSH')
           if (indexOnly && values.legacy) throw new Error('索引任务不使用 --legacy')
           if (Boolean(values.provider) !== Boolean(values.model)) throw new Error('retry 切换模型须同时指定 --provider 和 --model')
           if (indexOnly && values.provider) throw new Error('索引任务不调用 DSH，不能覆盖 Provider 或模型')
@@ -228,7 +237,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
           : await retryJob(pool, operands[0], values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']),
             values.provider && values.model ? { provider: values.provider, model: values.model } : undefined)
         if (values.wait) {
-          await (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
+          await (indexOnly ? runIndexWorker(pool, file => loadConfig(root, file), controller.signal) : (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal))
           result = await jobStatus(pool, receipt.submission_id)
           if (!['complete', 'partial'].includes((result as { status: string }).status)) process.exitCode = 1
         } else if (receipt.status === 'queued' || receipt.status === 'running') {

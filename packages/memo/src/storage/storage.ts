@@ -189,6 +189,11 @@ export class MemoStorage {
     return {
       ...entry, source: source.source, version: asOf ? null : sha256(JSON.stringify(version_data)),
       messages: source.messages.filter(message => entry.source_message_ids.includes(message.message_id)),
+      additional_sources: (await this.pool.query(`SELECT ds.declaration_id,ds.source_message_ids,r.received_at,
+        r.evidence->>'id' AS evidence_id,r.evidence->'submission'->'source' AS source
+        FROM jt_memo.declaration_sources ds JOIN jt_memo.declaration_receipts r ON r.id=ds.declaration_id
+        WHERE ds.entry_id=$1 AND r.received_at<=COALESCE($2::timestamptz,CURRENT_TIMESTAMP)
+          AND r.result->>'submission_id' IS DISTINCT FROM $3::text ORDER BY r.received_at DESC LIMIT 20`, [entry.id, asOf ?? null, entry.submission_id])).rows,
       index_receipts: commits.rows.map(indexReceipt),
       as_of: asOf ?? null,
       ...await readRelations(this.pool, [entry.id], undefined, asOf),

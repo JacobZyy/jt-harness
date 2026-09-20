@@ -183,7 +183,7 @@ test('install/uninstall keep unrelated hooks; uninstall stops discovering new co
     assert.equal((await drainCaptureFiles(config, f.deliver)).accepted, 0)
     assert.deepEqual(JSON.parse(await readFile(hookPath, 'utf8')).hooks, {})
     await assert.rejects(f.capture('Stop'), /已卸载/)
-    assert.equal(installed.events.length, 6)
+    assert.deepEqual(installed.events, ['Stop'])
   } finally { await f.cleanup() }
 })
 

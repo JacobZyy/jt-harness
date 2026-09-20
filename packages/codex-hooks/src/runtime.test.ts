@@ -8,7 +8,6 @@ import { loadConfig } from '@jt-harness/memo/config'
 import { captureEvent, captureStatus, hookEvents } from './capture.ts'
 import { configureHooks, mergeHooks } from './install.ts'
 import { prepareEvidence, readEvidence, stageRecord, registerCaptures, deliverRecords } from './evidence.ts'
-import { startInstructions } from './instructions.ts'
 
 const timestamp = '2026-09-17T00:00:00.000Z'
 const row = (type: string, payload: unknown) => JSON.stringify({ timestamp, type, payload }) + '\n'
@@ -26,7 +25,7 @@ async function fixture() {
   return { directory, home, source, config, settings, capture, cleanup: () => rm(directory, { recursive: true, force: true }) }
 }
 
-test('six hooks remain idempotent and preserve other tools; startup supplies the in-session protocol', async () => {
+test('legacy source registrations remain recoverable without injecting the retired inline protocol', async () => {
   const existing = { hooks: { Stop: [{ hooks: [{ command: 'another-tool' }] }] } }
   const installed = mergeHooks(existing, 'jth memo codex capture')
   assert.deepEqual(mergeHooks(installed, 'jth memo codex capture'), installed)
@@ -34,13 +33,11 @@ test('six hooks remain idempotent and preserve other tools; startup supplies the
   assert.equal(Object.keys(installed.hooks).length, 6)
   const f = await fixture()
   try {
-    const capture = await f.capture('SessionStart')
-    assert(startInstructions(capture).includes('memo prepare --session parent'))
-    assert(startInstructions(capture).includes('memo record'))
+    await f.capture('SessionStart')
     assert.equal((await registerCaptures(f.config)).received, 1)
     assert.equal((await registerCaptures(f.config)).received, 0)
     const status = await captureStatus(f.config)
-    assert.equal(status.mode, 'dsh')
+    assert.equal(status.mode, 'declaration')
     assert.equal(status.sessions[0].session_id, 'parent')
     assert.equal(status.pending_records, 0)
     assert.deepEqual((await deliverRecords(f.config, async () => { throw new Error('No implicit extraction or delivery is allowed') })).accepted, [])

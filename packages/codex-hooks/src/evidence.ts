@@ -1,6 +1,6 @@
 import { readdir, stat, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { evidenceSchema, recordDraftSchema, recordId, parseExtraction, submissionSchema } from '@jt-harness/memo/contracts'
+import { evidenceSchema, recordDraftSchema, recordId, declarationId, parseExtraction, submissionSchema } from '@jt-harness/memo/contracts'
 import type { Evidence, RecordDraft, Submission } from '@jt-harness/memo/contracts'
 import { captureSchema, codexDirectory, hash, inside, readJson, retainTranscript, writeJson } from './capture.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
@@ -133,26 +133,26 @@ export async function readEvidence(config: CapturePaths, id: string) {
   return evidence
 }
 
-export async function stageRecord(config: CapturePaths, input: RecordDraft) {
+export async function stageRecord(config: CapturePaths, input: RecordDraft, declaration = false) {
   const draft = recordDraftSchema.parse(input)
   const evidence = await readEvidence(config, draft.evidence_id)
   parseExtraction(JSON.stringify(draft.extraction), evidence.submission)
-  const id = recordId(draft)
-  await writeJson(resolve(codexDirectory(config), 'records', `${id}.json`), { draft, evidence_id: evidence.id, env_file: config.envFile })
+  const id = declaration ? declarationId(draft) : recordId(draft)
+  await writeJson(resolve(codexDirectory(config), 'records', `${id}.json`), { draft, evidence_id: evidence.id, env_file: config.envFile, ...(declaration ? { declaration: true } : {}) })
   return { submission_id: id, status: 'staged' }
 }
 
 /** The receiver is supplied by the CLI; this adapter owns no SQL or DSH configuration. */
-export async function deliverRecords(config: CapturePaths, accept: (draft: RecordDraft, evidence: Evidence) => Promise<unknown>) {
+export async function deliverRecords(config: CapturePaths, accept: (draft: RecordDraft, evidence: Evidence, declaration?: boolean) => Promise<unknown>) {
   const accepted: unknown[] = [], errors: { submission_id: string, error: string }[] = []
   for (const path of await files(resolve(codexDirectory(config), 'records'))) {
-    const raw = await readJson(path) as { draft: RecordDraft, env_file: string }
+    const raw = await readJson(path) as { draft: RecordDraft, env_file: string, declaration?: boolean }
     if (raw?.env_file !== config.envFile) continue
     const id = path.slice(path.lastIndexOf('/') + 1, -5)
     try {
       const draft = recordDraftSchema.parse(raw.draft)
-      if (recordId(draft) !== id) throw new Error('候选文件身份不匹配')
-      const receipt = await accept(draft, await readEvidence(config, draft.evidence_id))
+      if ((raw.declaration ? declarationId(draft) : recordId(draft)) !== id) throw new Error('候选文件身份不匹配')
+      const receipt = await accept(draft, await readEvidence(config, draft.evidence_id), raw.declaration)
       await writeJson(resolve(codexDirectory(config), 'receipts', `${id}.json`), receipt)
       const { unlink } = await import('node:fs/promises')
       await unlink(path)

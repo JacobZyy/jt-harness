@@ -80,7 +80,7 @@ jth flow checkpoint --resolve '<问题ID>' --decision '已确认的结论'
 
 需要最新记忆时运行 `jth flow recall`。需要精确内容或冲突双方时运行 `jth memo read <记忆ID>`；更具体的搜索用 `jth memo search --help` 查看现有参数。记忆是带来源的历史资料，不替代当前用户指令、已确认任务目标或最新代码。`conflicted` 内容先看双方证据，不能任选一条当结论。
 
-长期写入沿用现有 Codex 捕获与 DSH SDK 子进程，不依赖 3080 Web 服务。不要额外调用已退役的自动 `memo record`，也不要把自己的候选建议写成用户决定。Embedding 离线不影响流程状态；PG 不可用时，Hook 保存事件并在后台启动已配置的本机实例，用 `jth flow context` 恢复状态，不能把缺少注入当成没有任务。
+长期写入采用主会话末尾的短记忆声明，遵循项目已安装的 Memo 说明；Stop Hook 后台保存并生成向量，不调用 DSH。没有安装 Memo 时不输出声明，不因使用 Flow 自动开启 Hook。不要为声明执行 `prepare/record`，也不要把自己的候选建议写成用户决定。Embedding 离线不影响流程状态；PG 不可用时，Hook 保存事件并在后台启动已配置的本机实例，用 `jth flow context` 恢复状态，不能把缺少注入当成没有任务。
 
 ## 验收与完成
 

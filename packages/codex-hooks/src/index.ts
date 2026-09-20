@@ -2,6 +2,6 @@ export { captureEvent, captureSettingsSchema, captureStatus, hookEvents, hash, r
 export type { CaptureSettings, Capture } from './capture.ts'
 export { configureHooks, mergeHooks } from './install.ts'
 export { prepareEvidence, readEvidence, stageRecord, registerCaptures, deliverRecords } from './evidence.ts'
-export { startInstructions } from './instructions.ts'
 export { drainCaptureFiles } from './dsh-ingest.ts'
 export { configureFlowHooks, flowHook, flowEvents, stageFlowEvent, drainFlowEvents } from './flow.ts'
+export { captureDeclaration, collectDeclarations, rememberEntryRead } from './declarations.ts'

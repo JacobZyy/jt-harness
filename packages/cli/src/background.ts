@@ -3,8 +3,8 @@ import { mkdir, open } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 /** Acceptance is durable before this process is launched. No model work runs in a hook. */
-export async function startWorker(root: string, config: { dataDir: string, envFile: string }, indexOnly = false) {
-  return startBackground(root, ['memo', 'work', '--env-file', config.envFile, ...(indexOnly ? ['--index'] : [])], resolve(config.dataDir, 'worker.log'))
+export async function startWorker(root: string, config: { dataDir: string, envFile: string }, indexOnly = true) {
+  return startBackground(root, ['memo', 'work', '--env-file', config.envFile, ...(indexOnly ? ['--index'] : ['--legacy'])], resolve(config.dataDir, 'worker.log'))
 }
 
 export async function startBackground(root: string, args: string[], logPath: string) {

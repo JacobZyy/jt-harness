@@ -25,7 +25,7 @@ flowchart TD
     J -- 否 --> B
     J -- 是 --> K["完成 Flow 任务"]
     C -. 中断后恢复 .-> A
-    C -. 会话异步投递 .-> M["Memo 提炼与存储"]
+    C -. 短声明异步投递 .-> M["Memo 存储与向量化"]
     M -. 相关记忆召回 .-> A
 
     style A fill:#E3F2FD,stroke:#1565C0,color:#111
@@ -42,7 +42,7 @@ flowchart TD
     style M fill:#E3F2FD,stroke:#1565C0,color:#111
 ```
 
-`packages/flow` 拥有任务、PostgreSQL 存储、上下文渲染、检查执行和 Skill；不导入 Memo 或 Codex SDK。`packages/codex-hooks` 适配 Codex JSON 事件，复用原来的配置合并和原子写文件。`packages/cli` 调用这两个包，并通过 Memo 的公共 API 完成召回。`packages/memo` 保留存储、版本、冲突处理和队列；模型校验失败最多修复一次，不放宽发布规则。
+`packages/flow` 拥有任务、PostgreSQL 存储、上下文渲染、检查执行和 Skill；不导入 Memo 或 Codex SDK。`packages/codex-hooks` 适配 Codex JSON 事件，复用原来的配置合并和原子写文件。`packages/cli` 调用这两个包，并通过 Memo 的公共 API 完成召回。`packages/memo` 保留存储、版本、冲突处理和队列；默认写入仅接收主会话声明并生成向量。
 
 使用现有 `pg` 驱动、`pg_ctl`、Node 24 自带的 `node:util.parseArgs`、进程 API、Git 文件清单、已有 Zod 和 Memo API。`node:sqlite` 仅用于一次性读取旧库迁移。没有增加运行时第三方依赖、HTTP 服务、调度常驻服务或新 Agent 框架，也没有复制 Trellis 实现。
 
@@ -78,7 +78,7 @@ Hook 在 SessionStart（包括 compact）、UserPromptSubmit 和 SubagentStart �
 
 5 分钟缓存减少输入时的重复 API 调用；90 秒刷新租约防止每条消息启动同样的工作。任务目标或约束变动后重新召回。请求标识阻止过时结果覆盖新任务上下文。后台进程失败时保留原目标和进度，错误可见；重试使用 `flow recall`，不阻塞正常会话。
 
-长期写入继续来自原会话材料，经过已有 DSH Agent 与 Memo 持久化流程。没有额外把任务检查点直接写成“用户事实”，也没有在主会话恢复自动 `memo record`。记忆是历史资料，当前任务状态是本次执行依据，两个 owner 各自唯一。
+长期写入由主会话在正常回复末尾输出短记忆声明，已安装的 Memo Stop Hook 收集声明并自动绑定来源，后台只持久化与向量化。DSH 仅用于显式的历史任务恢复。没有额外把任务检查点直接写成“用户事实”，也不要求主会话执行 `prepare/record`。记忆是历史资料，当前任务状态是本次执行依据，两个 owner 各自唯一。手动使用 Flow 不会重新安装用户关闭的 Hook。声明协议及验证见 [主会话记忆声明](memory-declarations.md)。
 
 ## 验收边界
 

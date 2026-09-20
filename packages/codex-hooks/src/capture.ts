@@ -13,6 +13,7 @@ export const hookEventSchema = z.object({
   agent_id: identifier.optional(), agent_type: identifier.optional(),
   agent_transcript_path: absolutePath.nullable().optional(), source: z.string().optional(),
   model: z.string().optional(),
+  last_assistant_message: z.string().optional(),
 }).superRefine((event, context) => {
   if (event.hook_event_name.startsWith('Subagent') && !event.agent_id) context.addIssue({ code: 'custom', path: ['agent_id'], message: '子 Agent 事件缺少 agent_id' })
 })
@@ -78,7 +79,7 @@ export async function retainTranscript(path: string, settings: CaptureSettings, 
   return { original_path: source, path: target, end: info.size }
 }
 
-export async function captureEvent(input: unknown, settings: CaptureSettings, config: { dataDir: string }) {
+export async function captureEvent(input: unknown, settings: CaptureSettings, config: { dataDir: string }, inbox = 'inbox') {
   const event = hookEventSchema.parse(input)
   if (!event.agent_id && !inside(settings.workspace, event.cwd)) throw new Error('Hook cwd 不在安装时指定的项目范围内')
   const installation = await readJson(installationPath(config, settings.workspace)) as { disabled?: boolean } | undefined
@@ -90,7 +91,7 @@ export async function captureEvent(input: unknown, settings: CaptureSettings, co
     throw error
   }) : undefined
   const capture = captureSchema.parse({ version: 1, id: randomUUID(), received_at: new Date().toISOString(), settings, event, snapshot })
-  await writeJson(resolve(codexDirectory(config), 'inbox', `${capture.id}.json`), capture)
+  await writeJson(resolve(codexDirectory(config), inbox, `${capture.id}.json`), capture)
   return capture
 }
 
@@ -116,7 +117,13 @@ export async function captureStatus(config: { dataDir: string }) {
     return { session_id: state.session_id, last_event: state.last_event, last_receipt: state.last_receipt,
       message_count: Array.isArray(state.seen) ? state.seen.length : 0, pending_batch: Boolean(state.pending), error: state.error, waiting_for_transcript: state.waiting_for_transcript ?? false }
   }))
-  return { streams, directory, mode: 'dsh', pending_events: inbox.length, pending_records: records.length, evidence_count: evidence.length,
+  const declarationPending = await list('declaration-inbox'), declarationErrors = await list('declaration-errors')
+  return { streams, directory, mode: 'declaration', legacy_pending_events: inbox.length, pending_events: inbox.length, pending_records: records.length, evidence_count: evidence.length,
+    pending_declarations: declarationPending.length,
+    declaration_errors: await Promise.all(declarationErrors.map(async file => {
+      const value = await readJson(resolve(directory, 'declaration-errors', file)) as { capture: Capture, error: string }
+      return { event_id: value.capture.id, session_id: value.capture.event.session_id, error: value.error }
+    })),
     delivery_errors: await Promise.all(errors.map(async file => ({ submission_id: file.slice(0, -5), ...await readJson(resolve(directory, 'record-errors', file)) as object }))),
     sessions: [...sessions.values()].map(capture => ({ session_id: capture.event.agent_id ?? capture.event.session_id,
       parent_session_id: capture.event.agent_id ? capture.event.session_id : undefined, scope: capture.settings.scope,

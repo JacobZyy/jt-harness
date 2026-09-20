@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
 import type { Config } from '@jt-harness/memo/config'
-import { captureSettingsSchema, captureEvent, captureStatus, configureHooks } from '@jt-harness/codex-hooks'
+import { captureSettingsSchema, captureDeclaration, captureStatus, configureHooks } from '@jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
 
 export async function codexMain(root: string, args: string[]) {
@@ -15,13 +15,14 @@ export async function codexMain(root: string, args: string[]) {
       project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true }, help: { type: 'boolean', short: 'h' },
     } })
     if (values.help || !positionals.length) {
-      process.stdout.write('jth memo codex install --project <id> [--business <id>] [--workspace <path>]\njth memo codex uninstall [--workspace <path>]\njth memo codex status\njth memo codex capture < Hook JSON stdin\n通用：--env-file <path>、--codex-home <path>。install 默认当前项目，仅采集安装后的内容。\n')
+      process.stdout.write('jth memo codex install --project <id> [--business <id>] [--workspace <path>]\njth memo codex uninstall [--workspace <path>]\njth memo codex status\njth memo codex declare < Stop JSON stdin\n通用：--env-file <path>、--codex-home <path>。install 只安装 Stop 声明入口和一份简短项目说明，后台仅生成向量。\n')
       return
     }
-    if (positionals.length !== 1 || !['install', 'uninstall', 'status', 'capture'].includes(positionals[0])) throw new Error('未知 Codex 采集命令')
+    if (positionals.length !== 1 || !['install', 'uninstall', 'status', 'capture', 'declare'].includes(positionals[0])) throw new Error('未知 Codex 采集命令')
     const allowed: Record<string, string[]> = {
       install: ['workspace', 'codex-home', 'project', 'business'], uninstall: ['workspace'], status: [],
       capture: ['workspace', 'codex-home', 'since', 'project', 'business'],
+      declare: ['workspace', 'codex-home', 'since', 'project', 'business'],
     }
     const invalid = Object.keys(values).filter(name => !['env-file', 'help', ...allowed[positionals[0]]].includes(name))
     if (invalid.length) throw new Error(`${positionals[0]} 不支持：${invalid.join(', ')}`)
@@ -29,7 +30,7 @@ export async function codexMain(root: string, args: string[]) {
     const workspace = await realpath(resolve(values.workspace ?? process.cwd()))
     const home = resolve(values['codex-home'] ?? process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
     const scope = { project_ids: values.project ?? [], business_ids: values.business ?? [] }
-    if (positionals[0] === 'capture') {
+    if (['capture', 'declare'].includes(positionals[0])) {
       const settings = captureSettingsSchema.parse({ workspace, codex_home: home, env_file: config.envFile, enabled_at: values.since, scope })
       const chunks: Buffer[] = []
       let bytes = 0
@@ -38,8 +39,8 @@ export async function codexMain(root: string, args: string[]) {
         if (bytes > 512_000) throw new Error('Hook 输入超过 512000 字节')
         chunks.push(Buffer.from(chunk))
       }
-      const capture = await captureEvent(JSON.parse(Buffer.concat(chunks).toString('utf8')), settings, config)
-      await startWorker(root, config)
+      const capture = await captureDeclaration(JSON.parse(Buffer.concat(chunks).toString('utf8')), settings, config)
+      if (capture) await startWorker(root, config)
       // Hook stdout belongs to Codex's control protocol, not the memo CLI receipt.
       return
     }
@@ -48,6 +49,6 @@ export async function codexMain(root: string, args: string[]) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
   } catch (error) {
     process.stderr.write(`${JSON.stringify({ error: safeError(error, config), recovery: 'jth memo work' })}\n`)
-    process.exitCode = 1
+    process.exitCode = args.some(arg => arg === 'capture' || arg === 'declare') ? 0 : 1
   }
 }

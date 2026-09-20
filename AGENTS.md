@@ -4,6 +4,6 @@ After completing an implementation turn in this repository, run checks appropria
 
 Keep memory persistence, Codex Hook integration, and CLI orchestration in their respective packages. Use existing code and tooling before adding abstractions.
 
-Default memory ingestion uses Codex Hooks and the background DSH Agent. Do not proactively call in-session `memo record` under the retired automatic inline instructions. Preserve both DSH and index queue data when changing runtime modes.
+Default memory ingestion uses short declarations in the main Codex reply and a Stop Hook. The background worker persists declarations and calls Embedding only; DSH is an explicit `--legacy` recovery path. Follow declaration instructions only in projects where Memo is installed. Do not proactively call `prepare/record` or install Hooks while running Flow manually. Preserve both DSH and index queue data when changing runtime modes.
 
 Memory model configuration selects only Provider and model. Do not impose reasoning effort or output-token overrides; use DSH/Provider defaults. A task timeout is an execution safeguard, not a model-generation setting.

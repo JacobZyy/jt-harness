@@ -59,7 +59,7 @@ test('partial intake publishes independent memories and preserves rejected and u
         ALTER TABLE jt_memo.jobs DROP CONSTRAINT jobs_status_check;
         ALTER TABLE jt_memo.jobs ADD CONSTRAINT jobs_status_check CHECK(status IN ('queued','running','complete','failed'));
         UPDATE jt_memo.schema_version SET version=4;`)
-      await assert.rejects(prepareDatabase(pool, false), /v6/)
+      await assert.rejects(prepareDatabase(pool, false), /v7/)
       await prepareDatabase(pool, true)
       assert.deepEqual(await snapshot(), before)
       assert.deepEqual((await storage.getSubmission(submission.submission_id)).intake_issues, [])
