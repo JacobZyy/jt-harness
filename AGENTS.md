@@ -4,6 +4,8 @@ After completing an implementation turn in this repository, run checks appropria
 
 Keep memory persistence, Codex Hook integration, and CLI orchestration in their respective packages. Use existing code and tooling before adding abstractions.
 
+Use Codex native Goal, task list, session recovery, compaction, command execution and permissions for flow control. Maintain the actual native plan when the host exposes its planning tool; do not claim native UI updates when that tool is unavailable. JTH supplies concise project guidance and Memo access, not a second task database or execution loop. Old Flow state is available only through explicit `jth flow legacy` commands. Preserve historical tasks and queues; run project checks before completing the native plan or Goal.
+
 Default memory ingestion uses short declarations in the main Codex reply and a Stop Hook. The background worker persists declarations and calls Embedding only; DSH is an explicit `--legacy` recovery path. Follow declaration instructions only in projects where Memo is installed. Do not proactively call `prepare/record` or install Hooks while running Flow manually. Preserve both DSH and index queue data when changing runtime modes.
 
 Memory model configuration selects only Provider and model. Do not impose reasoning effort or output-token overrides; use DSH/Provider defaults. A task timeout is an execution safeguard, not a model-generation setting.

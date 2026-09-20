@@ -15,7 +15,7 @@ import { configureFlowHooks, flowHook, flowEvents } from './flow.ts'
 const execute = promisify(execFile)
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 
-test('native flow hooks coexist with DSH capture, preserve other handlers, restore goals and never finish on Stop', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+test('explicit legacy flow hooks preserve memory handlers, restore old goals and never finish on Stop', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-flow-hooks-')))
   const config = { dataDir: resolve(workspace, '.jth/memo-test'), envFile: resolve(workspace, '.env') }
   const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
@@ -27,9 +27,9 @@ test('native flow hooks coexist with DSH capture, preserve other handlers, resto
     await store.install({ version: 1, workspace, envFile: config.envFile, projectIds: ['fixture'], businessIds: [], installedAt: new Date().toISOString() })
     await configureHooks(root, config, workspace, { project_ids: ['fixture'], business_ids: [] }, resolve(workspace, '.codex'))
     const memoHooks = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'))
-    await configureFlowHooks(root, workspace)
+    await configureFlowHooks(root, workspace, true, 'legacy')
     const first = await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')
-    await configureFlowHooks(root, workspace)
+    await configureFlowHooks(root, workspace, true, 'legacy')
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), first)
     assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-flow')), resolve(root, 'packages/flow/skills/jth-flow'))
     for (const event of flowEvents) assert.equal(JSON.parse(first).hooks[event].flatMap((group: { hooks: { statusMessage?: string }[] }) => group.hooks).filter((handler: { statusMessage?: string }) => handler.statusMessage === 'jth flow context').length, 1)
@@ -53,13 +53,17 @@ test('native flow hooks coexist with DSH capture, preserve other handlers, resto
     const restored = await flowHook({ hook_event_name: 'SessionStart', session_id: 'parent', cwd: workspace }, store)
     assert(restored.output.hookSpecificOutput!.additionalContext.includes('docs/result.md'))
     assert.deepEqual((await flowHook({ hook_event_name: 'SessionStart', session_id: 'foreign', cwd: tmpdir() }, store)).output, {})
+    const preserved = await store.task(task.id)
+    await configureFlowHooks(root, workspace)
+    assert.deepEqual(JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')), memoHooks)
+    assert.deepEqual(await store.task(task.id), preserved, 'Native installation must not rewrite historical tasks')
     await configureFlowHooks(root, workspace, false)
     assert.deepEqual(JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')), memoHooks)
     assert.equal((await store.task(task.id)).goal, task.goal)
   } finally { await store.close(); await rm(workspace, { recursive: true, force: true }) }
 })
 
-test('built CLI delivers a persistent task, real checks and completion while memory is offline', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+test('explicit legacy CLI retains historical task execution while memory is offline', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-flow-cli-')))
   await execute('git', ['init', '-q', workspace])
   const envFile = resolve(workspace, '.env')
@@ -68,16 +72,20 @@ test('built CLI delivers a persistent task, real checks and completion while mem
   await prepareFlowDatabase(pool)
   const store = new FlowStore(workspace, pool)
   const command = async (...args: string[]) => {
-    const result = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', ...args, '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace })
+    const result = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', ...args, '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace })
     return JSON.parse(result.stdout)
   }
   try {
     await command('install', '--env-file', envFile, '--project', 'fixture')
+    await mkdir(resolve(workspace, '.jth/flow-events'), { recursive: true })
+    const pendingEvent = JSON.stringify({ hook_event_name: 'Stop', session_id: 'pending-session', cwd: workspace })
+    await writeFile(resolve(workspace, '.jth/flow-events/pending.json'), pendingEvent)
     const created = await command('start', '验证真实 CLI 闭环', '--phase', 'execution', '--accept', '验收命令通过', '--check', `${process.execPath} -e "console.log('checked')"`)
     assert.equal(created.phase, 'execution')
-    const recall = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt]).catch(error => error)
+    const recall = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt]).catch(error => error)
     assert.equal(JSON.parse(recall.stdout).status, 'failed')
     assert.equal((await command('status')).id, created.id)
+    assert.equal(await readFile(resolve(workspace, '.jth/flow-events/pending.json'), 'utf8'), pendingEvent, 'Reading legacy status must not replay pending lifecycle events')
     const active = await command('focus', '验证真实 CLI 回执', '--accept', '1', '--read', 'src', '--expect', '验证回执可恢复')
     const receipt = ['checkpoint', '--work-id', active.work.id, '--outcome', 'progress', '--done', '真实命令已接通', '--evidence', 'cli:start', '--evidence', 'cli:status', '--next', '运行验收']
     const settled = await command(...receipt)

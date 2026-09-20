@@ -1,4 +1,4 @@
-export { captureEvent, captureSettingsSchema, captureStatus, hookEvents, hash, readJson, writeJson, codexDirectory } from './capture.ts'
+export { captureEvent, captureSettingsSchema, captureStatus, hookEvents, hash, readJson, writeJson, codexDirectory, installationPath } from './capture.ts'
 export type { CaptureSettings, Capture } from './capture.ts'
 export { configureHooks, mergeHooks } from './install.ts'
 export { prepareEvidence, readEvidence, stageRecord, registerCaptures, deliverRecords } from './evidence.ts'

@@ -1,12 +1,12 @@
 # jt-harness · jth
 
-`jth` 是本地 TypeScript CLI，提供长任务流程控制与长期记忆。`jth flow` 用 Skill、Codex Hook 和持久任务状态保持目标、阶段与恢复点；`jth memo` 接收主会话末尾的短记忆声明，只将新记忆正文发送给 Embedding API，记忆和来源保存在 PostgreSQL + pgvector。
+`jth` 是本地 TypeScript CLI，提供长任务流程控制与长期记忆。`jth flow` 用短 Skill 配合 Codex 原生 Goal、任务列表、会话恢复和项目测试；`jth memo` 接收主会话末尾的短记忆声明，只将新记忆正文发送给 Embedding API，记忆和来源保存在 PostgreSQL + pgvector。
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
 ## 模块与运行模式
 
-生产代码分为 `packages/flow`（任务状态、上下文、验收和 Skill）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
+生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
 
 默认使用主会话声明：安装时在项目 `AGENTS.md` 写入一段固定说明，Agent 在有值得保留的结论时输出最多三条短声明。Stop Hook 保存事件，后台 `memo work` 绑定原始证据、精确去重并生成向量。没有声明就不调用 Embedding；Hook 不等待后台处理。
 
@@ -14,37 +14,32 @@
 
 会话内 `prepare / evidence / record` 保留为手动工具，默认声明流程不需要调用。`record` 只启动 index worker。协议、流程图与实测见 [主会话记忆声明](docs/memory-declarations.md)。
 
-## 轻量流程控制
+## Codex 原生流程
 
-在需要使用的 Git 项目里运行，`--project` 与该项目已有 Memo 安装保持一致：
+在需要使用的项目运行一次，项目 ID 与已有 Memo 范围保持一致：
 
 ```sh
 jth flow install --project jt-harness
-# 在 Codex /hooks 审阅并信任本工具新增的定义，再恢复会话。
-jth flow start '交付本次明确目标' --phase execution --accept '可检查的完成条件' --check 'pnpm test'
-jth flow focus '追踪关键调用路径' --accept 1 --read packages --expect '调用位置及对应证据'
-# 使用 focus 返回的 work.id；每个工作单元可包含多次工具调用。
-jth flow checkpoint --work-id '<work.id>' --outcome progress --done '已确认关键调用路径' --evidence 'packages/flow/src/store.ts' --next '完成实现与验证'
 jth flow status
-jth flow verify
-jth flow finish --summary '达成目标的结果'
 ```
 
-Codex 中这些命令由 `jth-flow` Skill 在长任务需要时调用，日常简短问答不要求建任务。新增约束用 `checkpoint --constraint`；只有用户明确改变目标才用 `revise ... --reason ...`。`start` 默认处于 discussion；用户已授权实施时指定 execution。SessionStart（含 compact）、UserPromptSubmit 和 SubagentStart 注入目标与少量上下文；Stop、Interrupt、SessionEnd、SubagentStop 只记录活动，不自动判定完成。
+安装保留 Memo Stop 声明入口，链接项目 `jth-flow` Skill，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 只读取本地安装配置和 Memo 范围，不返回旧目标、阶段或缓存记忆。
 
-新会话使用 `jth flow status --all` 选择原任务，`jth flow resume <id>` 恢复；旧会话仍占有主控时显式加 `--takeover`。子 Agent 只能读取主任务状态。终端不带 Codex 会话 ID 时，用 `--task <id>` 指定操作对象，或 `--session <id>` 明确绑定。
+复杂任务由主 Agent 使用实际可用的 Codex 原生计划工具记录待办、进行中和完成；用户反馈进入同一份计划。已选择 Goal 的长任务复用一个原生 Goal，在续轮或恢复后接续未完成步骤。原生计划工具未暴露时明确说明，不伪造原生列表，也不用旧 Flow Task 代替。
 
-用户明确切换到独立目标时，用 `jth flow pause --reason '切换依据'` 解除当前绑定，再 start 新任务。暂停保留旧任务，不假装完成；恢复时仍用 resume。
+检查点复用原生计划、会话记录、必要的证据文件与 Git 提交。主 Agent 直接运行项目检查并核对产出，通过后更新计划和 Goal；不为每次工具调用复制一份流程日志。权限、会话恢复和压缩使用 Codex 自带机制。
 
-长任务可以在 `start` 或 `checkpoint` 使用重复的 `--step '阶段交付'` 保存有序计划。工作结果回执加 `--complete-step 1` 完成当前阶段。Hook 注入当前单元、计划、最近回执与下一步；恢复时继续未回执的单元，全部阶段完成后仍需总体验收。用户明确要求启用 Codex Goal 且宿主提供原生 Goal 工具时，主 Agent 保持一个总 Goal，由 Flow 保存阶段与证据；`flow finish` 后才完成原生 Goal。CLI 不依赖私有 App API，也不另起自动续跑循环。
+Memo 按实际需要查询。通过 `flow status` 查看 `memo_scope`，再用 `jth memo search <问题> --project <ID>` 或 `jth memo read <ID>` 获取历史依据。默认不再于每条用户消息后启动 Flow 召回，也不注入已完成任务的旧记忆。主会话末尾短声明的后台存储与 Embedding 保持独立。
 
-`focus` 的 `--accept` 使用验收条件的顺序编号，`--read` 是项目内读取范围，`--expect` 是预期产出。一个任务同时只有一个未回执单元。回执支持 `progress / failed / no-progress / blocked`，保存实际结果、证据、下一步和阻塞；同一 ID 重试不重复累计。相同阶段与目标版本下，连续两次失败或无进展且没有新证据/新假设时，下一单元需要不同的 `--hypothesis`，或记录实际阻塞。Hook 活动和普通问答不参与计数。证据语义与读取必要性由主 Agent 判断，程序不把字符串变更当作已证明业务进展。
+历史 PostgreSQL 任务、绑定、回执和 SQLite 迁移材料不删除；显式使用：
 
-开始、恢复和输入时的记忆召回由短生命周期后台子进程完成。Flow Hook 对 PostgreSQL 做短时读取，不等待数据库冷启动、模型或 Embedding。数据库离线时先保存本地事件，后台准备数据库并重放；不能把缺少注入当成没有任务。结果按已配置项目、业务和用户范围检索，缓存 5 分钟，最多注入 5 条简短摘要；用 `jth flow recall` 立即刷新，用 `jth memo read <id>` 获取证据和冲突双方。长期写入使用独立的 Memo Stop Hook 与短声明。手动使用 Flow 不会重新开启已经关闭的 Hook。
+```sh
+jth flow legacy status --all
+jth flow legacy status --task <旧任务ID> --history
+jth flow legacy migrate
+```
 
-任务状态统一在 PostgreSQL 的 `jt_flow` schema，按 workspace 隔离。`.jth/flow.json` 只保存配置定位；验收日志在 `.jth/checks/`，召回日志在 `.jth/recall.log`，离线事件在 `.jth/flow-events/`，均不入 Git。旧安装运行 `jth flow migrate`：先备份 SQLite，事务性迁入任务、绑定和历史，成功后切换配置定位；原文件保留且不再作为运行存储。`jth flow uninstall` 只移除流程 Hook 和 Skill 链接，保留任务及 Memo 捕获。
-
-验收命令是当前任务明确记录的本地 shell 命令，具有调用者权限。只配置原本就允许执行的项目检查。完成需要当前目标版本的通过结果、未变化的文件快照、已解决的待讨论问题；文档型实施任务可提供 `--evidence <项目内文件>`。流程提示不能代替沙箱，也不能证明语义上绝不偏题。完整设计、约束和验证记录见 [流程原型说明](docs/flow-control.md)。
+旧版本已经加载的 `flow hook`、`flow sync` 和后台 `flow recall --request` 入口会安静跳过，不重放历史事件或启动旧任务召回。`jth flow uninstall` 移除 Flow Skill，Memo 和历史数据保留。详细说明见 [原生流程与验证](docs/flow-control.md)；旧运行器见 [历史 Flow](docs/flow-legacy.md)。
 
 ## 当前本机使用
 
@@ -59,7 +54,7 @@ jth memo read <entry-id>
 jth memo work
 ```
 
-`memo codex status` 查看声明待投递数量和本地诊断，`memo status` 查看索引任务。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成。重复声明可以直接复用已有条目，不新增索引任务；详情及新增来源通过 `memo read` 查看。当前仓库已重新安装 Memo Stop Hook、Flow 生命周期 Hook 和项目 Skill；自动执行以 Codex 加载并信任这些定义为准。默认后台只处理声明与向量索引。
+`memo codex status` 查看声明待投递数量和本地诊断，`memo status` 查看索引任务。`queued` 表示已接收，`complete` 且具有 `index_receipt_id` 表示处理完成。重复声明可以直接复用已有条目，不新增索引任务；详情及新增来源通过 `memo read` 查看。当前仓库采用 Memo Stop Hook 与原生流程 Skill；旧 Flow 生命周期 Hook 已退出默认路径。Memo 自动执行以 Codex 加载并信任定义为准，后台只处理声明与向量索引。
 
 ### 历史 DSH 路径：按条目接收与输出留存
 
@@ -220,7 +215,7 @@ jth memo codex uninstall
 
 `--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo Stop Hook，以及 `AGENTS.md` 中 `JTH_MEMORY_START/END` 标记包围的短说明。其他 Hook 与说明保持原样，更新前备份到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除这两个托管部分。Codex 的 Hook 信任机制保持不变。
 
-Memo 只安装 `Stop`，调用 `jth memo codex declare`。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；Flow 自己的生命周期 Hook 不受影响。
+Memo 只安装 `Stop`，调用 `jth memo codex declare`。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 不再注册额外的生命周期 Hook。
 
 Hook 检查本轮最终回复，只保存含声明的本地交接记录并启动独立 worker，超时为 3 秒。Hook 内不连接数据库、不调用模型、不等待 Embedding。来源以硬链接保留，文件边界和原始位置一并记录；声明解析和引文匹配在后台本地执行。只有新记忆正文发送到 Embedding API。
 

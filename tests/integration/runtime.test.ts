@@ -82,7 +82,7 @@ test('managed PG starts once under contention; cold hooks return promptly and re
     await stop()
     const started = performance.now()
     const result = await new Promise<{ stdout: string, stderr: string }>((done, reject) => {
-      const child = execFile(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'hook', '--workspace', workspace], (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
+      const child = execFile(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'hook', '--workspace', workspace], (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
       child.stdin!.end(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'cold-session', cwd: workspace }))
     })
     assert(performance.now() - started < 2000, 'Hook must return before its native three-second timeout')

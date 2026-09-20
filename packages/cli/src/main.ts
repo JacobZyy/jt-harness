@@ -18,7 +18,7 @@ import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jt-harness/memo'
 import { rememberEntryRead } from '@jt-harness/codex-hooks'
 
-const help = `jth flow <command>  轻量任务目标、恢复与验收；运行 jth flow --help
+const help = `jth flow <command>  Codex 原生流程指导与 Memo 接入；运行 jth flow --help
 jth db status|start|stop  本机 PostgreSQL 生命周期管理
 jth memo <command>
 

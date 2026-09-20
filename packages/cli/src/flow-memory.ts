@@ -11,7 +11,7 @@ export async function scheduleRecall(root: string, store: FlowStore, taskId: str
   const request = await store.claimRecall(taskId)
   if (!request) return { started: false }
   try {
-    return await startBackground(root, ['flow', 'recall', '--workspace', store.workspace, '--task', taskId, '--request', request], resolve(store.workspace, '.jth/recall.log'))
+    return await startBackground(root, ['flow', 'legacy', 'recall', '--workspace', store.workspace, '--task', taskId, '--request', request], resolve(store.workspace, '.jth/recall.log'))
   } catch (error) {
     await store.saveRecall(taskId, memoryKey(await store.task(taskId)), request, [], safeError(error))
     return { started: false, error: safeError(error) }

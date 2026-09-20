@@ -51,7 +51,7 @@ export async function flowHook(input: unknown, store: FlowStore) {
   return { output: { hookSpecificOutput: { hookEventName: event.hook_event_name, additionalContext: context } }, taskId: task?.id }
 }
 
-export async function configureFlowHooks(root: string, workspace: string, enabled = true) {
+export async function configureFlowHooks(root: string, workspace: string, enabled = true, mode: 'native' | 'legacy' = 'native') {
   const source = resolve(root, 'packages/flow/skills/jth-flow')
   const target = resolve(workspace, '.agents/skills/jth-flow')
   const prior = await readlink(target).catch(error => { if (error.code === 'ENOENT') return null; throw new Error('已有 jth-flow Skill 不是本工具的链接；保留原文件') })
@@ -65,13 +65,16 @@ export async function configureFlowHooks(root: string, workspace: string, enable
     const missing = ['/.jth/', '/.agents/skills/jth-flow', '/.codex/hooks.json'].filter(line => !ignore.split(/\r?\n/).includes(line))
     if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
   }
-  const command = enabled ? [process.execPath, resolve(root, 'bin/jth.mjs'), 'flow', 'hook', '--workspace', workspace].map(quote).join(' ') : undefined
+  const command = enabled && mode === 'legacy' ? [process.execPath, resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'hook', '--workspace', workspace].map(quote).join(' ') : undefined
   const hooksPath = resolve(workspace, '.codex/hooks.json')
   await updateHookConfig(hooksPath, resolve(workspace, '.jth/backups'), document => mergeHooks(document, command, {
     marker: 'jth flow context', events: flowEvents, additionalContextLimit: 6000,
   }))
   if (!enabled && prior) await unlink(target)
-  return { status: enabled ? 'installed' : 'uninstalled', hooksPath, skill: target, events: enabled ? flowEvents : [],
-    activation: enabled ? '在 Codex /hooks 审阅并信任新增定义；恢复会话后检查 flow status 的绑定与 lastEvent' : '任务数据和 Memo Hooks 均保留',
+  const activation = !enabled ? '任务数据和 Memo Hooks 均保留'
+    : mode === 'native' ? '恢复会话以加载更新后的 Skill；原生目标与任务列表由 Codex 管理，Flow 不再注入旧任务'
+      : '在 Codex /hooks 审阅并信任历史 Flow 定义'
+  return { status: enabled ? 'installed' : 'uninstalled', mode, hooksPath, skill: target, events: command ? flowEvents : [],
+    activation,
   }
 }

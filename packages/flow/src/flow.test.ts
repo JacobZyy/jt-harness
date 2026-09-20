@@ -147,7 +147,12 @@ test('ordered stages keep the overall goal through interruption, restart and fin
       await reopened.checkpoint(task.id, { completeStep: 3, done: ['真实回补回执已核对'] }, 'resumed')
       await assert.rejects(reopened.finish(task.id, '旧验收', await workspaceSnapshot(f.workspace), 'resumed'), /尚未通过/)
       await verifyTask(reopened, task.id, 'resumed')
-      assert.equal((await reopened.finish(task.id, '原目标全部完成', await workspaceSnapshot(f.workspace), 'resumed')).phase, 'completed')
+      const completed = await reopened.finish(task.id, '原目标全部完成', await workspaceSnapshot(f.workspace), 'resumed')
+      assert.equal(completed.phase, 'completed')
+      const completedContext = renderFlowContext(f.workspace, 'resumed', completed, await reopened.binding('resumed'))
+      assert(completedContext.includes('任务已完成') && completedContext.includes('jth flow legacy'))
+      assert(!completedContext.includes(task.goal) && !completedContext.includes('不做独立交付'))
+      assert(!completedContext.includes('checkpoint') && !completedContext.includes('长期记忆'))
     } finally { await reopened.close() }
   } finally { await f.cleanup() }
 })
