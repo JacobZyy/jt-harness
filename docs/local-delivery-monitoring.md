@@ -4,12 +4,12 @@
 
 ## 安装工具本体
 
-开发者运行 `pnpm bundle`，得到 `artifacts/distribution/jt-harness-0.2.0.tar.gz` 及 SHA-256 文件。构建复用 pnpm deploy，包含生产依赖、编译结果和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
+开发者运行 `pnpm bundle`，得到 `artifacts/distribution/jt-harness-0.3.0.tar.gz` 及 SHA-256 文件。构建复用 pnpm deploy，包含生产依赖、编译结果和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
 
 解压后安装：
 
 ```sh
-tar -xzf jt-harness-0.2.0.tar.gz
+tar -xzf jt-harness-0.3.0.tar.gz
 node jt-harness/bin/jth.mjs install --cli --env-file /absolute/path/to/.env
 jth --version
 ```
