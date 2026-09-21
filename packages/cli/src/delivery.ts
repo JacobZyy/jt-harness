@@ -28,7 +28,7 @@ doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数
 export function isManagedHook(hook: NativeHook, root: string, workspace: string, monitoring: boolean) {
   const events: Record<string, string[]> = { 'jth flow entry': ['userPromptSubmit'], 'jth memo declaration': ['stop'],
     'jth monitor': monitoring ? ['userPromptSubmit', 'stop', 'interrupt'] : [] }
-  const prefix = [process.execPath, resolve(root, 'bin/jth.mjs')].map(quote).join(' ') + ' '
+  const prefix = [process.execPath, '--', resolve(root, 'bin/jth.mjs')].map(quote).join(' ') + ' '
   return hook.source === 'project' && hook.sourcePath === resolve(workspace, '.codex/hooks.json')
     && Boolean(events[hook.statusMessage ?? '']?.includes(hook.eventName) && hook.command?.startsWith(prefix))
 }
@@ -47,7 +47,7 @@ export async function installCli(source: string, prefix: string, envFile?: strin
   const manifest = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'))
   const build = manifest.jthDistribution?.build
   if (manifest.name !== 'jt-harness' || !/^[a-z0-9-]{8,80}$/.test(build ?? '')) throw new Error('需要独立发行目录；先运行 pnpm bundle 并解压发行包')
-  await execute(process.execPath, [resolve(packageRoot, 'bin/jth.mjs'), '--help'], { timeout: 15000 })
+  await execute(process.execPath, ['--', resolve(packageRoot, 'bin/jth.mjs'), '--help'], { timeout: 15000 })
   const home = resolve(prefix, 'share/jth'), target = resolve(home, 'releases', build), binary = resolve(prefix, 'bin/jth')
   const existing = await lstat(binary).catch(error => { if (error.code === 'ENOENT') return null; throw error })
   if (existing) {
@@ -69,7 +69,7 @@ export async function installCli(source: string, prefix: string, envFile?: strin
     try {
       await cp(packageRoot, staging, { recursive: true, verbatimSymlinks: true, filter: path => path !== resolve(packageRoot, '.env') })
       await symlink(userConfig.envFile, resolve(staging, '.env'))
-      await execute(process.execPath, [resolve(staging, 'bin/jth.mjs'), '--help'], { timeout: 15000 })
+      await execute(process.execPath, ['--', resolve(staging, 'bin/jth.mjs'), '--help'], { timeout: 15000 })
       await rename(staging, target)
     } finally { await rm(staging, { recursive: true, force: true }) }
   }
@@ -108,7 +108,7 @@ export async function deliveryMain(root: string, args: string[]) {
     if ((command === 'install' && values.cli) || (command === 'upgrade' && values.from)) {
       const installed = await installCli(resolve(values.from ?? root), resolve(values.prefix ?? resolve(homedir(), '.local')), values['env-file'])
       if (command === 'upgrade' && await access(resolve(workspace, '.jth/flow.json')).then(() => true, () => false)) {
-        const updated = await execute(process.execPath, [resolve(installed.root, 'bin/jth.mjs'), 'upgrade', '--workspace', workspace, ...(values.trust ? ['--trust'] : [])])
+        const updated = await execute(process.execPath, ['--', resolve(installed.root, 'bin/jth.mjs'), 'upgrade', '--workspace', workspace, ...(values.trust ? ['--trust'] : [])])
         output({ ...installed, project: JSON.parse(updated.stdout) }); return
       }
       output(installed); return
@@ -148,7 +148,7 @@ export async function deliveryMain(root: string, args: string[]) {
       output({ flow, memo, data_preserved: true }); return
     }
     if (!['init', 'install', 'upgrade'].includes(command)) throw new Error('未知交付命令')
-    const status = locator ? JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'status', '--workspace', workspace])).stdout) : null
+    const status = locator ? JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.mjs'), 'flow', 'status', '--workspace', workspace])).stdout) : null
     const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? []
     const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? []
     if (!projects.length && !businesses.length) throw new Error('首次安装需要 --project <id> 或 --business <id>')

@@ -13,12 +13,13 @@ test('user configuration survives source removal and upgrades old repository bin
   const fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-config-migration-')))
   const root = resolve(import.meta.dirname, '../../..'), workspace = resolve(fixture, 'project'), source = resolve(fixture, 'old.env')
   const environment = { ...process.env, JTH_CONFIG_DIR: resolve(fixture, 'user') }, execute = promisify(execFile)
-  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace, env: environment })).stdout)
+  const cli = async (...args: string[]) => JSON.parse((await execute(resolve(root, 'bin/jth.mjs'), [...args, '--workspace', workspace], { cwd: workspace, env: environment })).stdout)
   try {
     await mkdir(workspace)
     const original = 'JTH_DATA_DIR=./state\nJTH_PG_DATA_DIR=./postgres\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=old-private-key\n'
     await writeFile(source, original)
     const installed = await cli('install', '--project', 'migration-project', '--env-file', source)
+    const hook = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')).hooks.Stop[0].hooks[0].command
     const migrated = await ensureUserConfig(fixture, source, environment)
     assert.equal((await stat(migrated.envFile)).mode & 0o777, 0o600)
     assert.equal((await stat(migrated.directory)).mode & 0o777, 0o700)
@@ -31,6 +32,13 @@ test('user configuration survives source removal and upgrades old repository bin
     assert.equal(config.embedding.apiKey, 'old-private-key')
     assert(matchesConfigFile(config, source))
     assert(!matchesConfigFile(config, resolve(fixture, 'foreign.env')))
+    assert.equal((await cli('install', '--env-file', source)).configuration.envFile, migrated.envFile)
+    const captured = await new Promise<{ stdout: string, stderr: string }>((done, reject) => {
+      const child = execFile('/bin/sh', ['-c', hook], { cwd: workspace, env: environment, timeout: 10000 },
+        (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
+      child.stdin!.end(JSON.stringify({ hook_event_name: 'Stop', session_id: 'migration-check', cwd: workspace, last_assistant_message: 'No declaration.' }))
+    })
+    assert.deepEqual(captured, { stdout: '', stderr: '' })
     const upgraded = await cli('upgrade')
     assert.equal(upgraded.memo.settings.env_file, migrated.envFile)
     assert.equal(upgraded.memo.settings.enabled_at, installed.memo.settings.enabled_at)

@@ -24,7 +24,7 @@ export async function ensureSharedLink(source: string, target: string) {
 export async function readPrimaryInstallation(primary: string) {
   const primaryCli = resolve(primary, 'bin/jth.mjs')
   // Reuse the primary installation's scope and config instead of copying workspace-bound runtime files.
-  const status = JSON.parse(execFileSync(process.execPath, [primaryCli, 'flow', 'status', '--workspace', primary], {
+  const status = JSON.parse(execFileSync(process.execPath, ['--', primaryCli, 'flow', 'status', '--workspace', primary], {
     cwd: primary, encoding: 'utf8',
   })) as { memo_scope: { project_ids: string[], business_ids: string[] } | null, configuration?: { envFile: string } }
   const locator = JSON.parse(await readFile(resolve(primary, '.jth/flow.json'), 'utf8')) as { envFile: string }
@@ -47,7 +47,7 @@ export async function setupWorktree() {
   }
   execFileSync('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'], { cwd: workspace, stdio: 'inherit' })
   execFileSync('pnpm', ['build'], { cwd: workspace, stdio: 'inherit' })
-  execFileSync(process.execPath, [resolve(workspace, 'bin/jth.mjs'), 'flow', 'install',
+  execFileSync(process.execPath, ['--', resolve(workspace, 'bin/jth.mjs'), 'flow', 'install',
     '--workspace', workspace, '--env-file', envFile,
     ...projectIds.flatMap(id => ['--project', id]),
     ...businessIds.flatMap(id => ['--business', id]),

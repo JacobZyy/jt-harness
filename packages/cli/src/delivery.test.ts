@@ -16,7 +16,7 @@ import { readPrimaryInstallation } from '../../../scripts/setup-worktree.ts'
 test('trust selection excludes foreign markers, events, commands and ancestor projects', () => {
   const root = '/tool', workspace = '/project'
   const hook = { key: 'fixture', source: 'project', sourcePath: '/project/.codex/hooks.json', eventName: 'userPromptSubmit', currentHash: 'hash',
-    statusMessage: 'jth flow entry', command: [process.execPath, '/tool/bin/jth.mjs', 'flow', 'prompt'].map(quote).join(' '), enabled: true, trustStatus: 'untrusted' }
+    statusMessage: 'jth flow entry', command: [process.execPath, '--', '/tool/bin/jth.mjs', 'flow', 'prompt'].map(quote).join(' '), enabled: true, trustStatus: 'untrusted' }
   assert(isManagedHook(hook, root, workspace, false))
   for (const changed of [{ statusMessage: 'jth unknown' }, { eventName: 'preToolUse' }, { sourcePath: '/parent/.codex/hooks.json' },
     { command: `echo ${hook.command}` }, { statusMessage: 'jth monitor' }]) assert.equal(isManagedHook({ ...hook, ...changed }, root, workspace, false), false)

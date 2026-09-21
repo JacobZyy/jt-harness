@@ -69,7 +69,7 @@ export async function configureHooks(root: string, config: { dataDir: string, en
   }) : undefined
   if (settings && prior?.settings && !prior.disabled && (JSON.stringify(prior.settings.scope) !== JSON.stringify(settings.scope)
     || prior.settings.workspace !== settings.workspace || !matchesConfigFile(config, prior.settings.env_file) || prior.settings.codex_home !== settings.codex_home)) throw new Error('已有安装的范围不同；请先 uninstall，再重新 install')
-  const command = settings ? [process.execPath, resolve(root, 'bin/jth.mjs'), 'memo', 'codex', 'declare',
+  const command = settings ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'memo', 'codex', 'declare',
     '--env-file', config.envFile, '--workspace', settings.workspace, '--codex-home', settings.codex_home,
     '--since', settings.enabled_at, ...settings.scope.project_ids.flatMap(id => ['--project', id]),
     ...settings.scope.business_ids.flatMap(id => ['--business', id]),

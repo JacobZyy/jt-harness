@@ -12,7 +12,7 @@ export async function startBackground(root: string, args: string[], logPath: str
   const log = await open(logPath, 'a', 0o600)
   try {
     await log.chmod(0o600)
-    const child = spawn(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args], {
+    const child = spawn(process.execPath, ['--', resolve(root, 'bin/jth.mjs'), ...args], {
       cwd: root, detached: true, stdio: ['ignore', log.fd, log.fd], env: process.env,
     })
     await new Promise<void>((done, reject) => { child.once('spawn', done); child.once('error', reject) })
