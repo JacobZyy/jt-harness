@@ -76,6 +76,22 @@ test('project install and upgrade are idempotent; uninstall preserves data and o
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
+test('upgrade --summary prints human-readable text while JSON remains the default', async () => {
+  const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-summary-')))
+  const execute = promisify(execFile), envFile = resolve(workspace, '.env')
+  const run = async (...args: string[]) => (await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })).stdout
+  try {
+    await mkdir(resolve(workspace, '.codex'), { recursive: true })
+    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
+    await run('install', '--project', 'fixture', '--env-file', envFile)
+    const summary = await run('upgrade', '--summary')
+    assert(summary.includes('项目已同步'))
+    assert(summary.includes('策略 '))
+    assert.throws(() => JSON.parse(summary))
+    JSON.parse(await run('upgrade'))
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
 test('project preferences preserve TOML comments and unrelated values; inherit removes only memory overrides', async () => {
   const workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-memory-config-')))
   const path = resolve(workspace, '.codex/config.toml')

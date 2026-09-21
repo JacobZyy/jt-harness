@@ -10,7 +10,7 @@ const digest = createHash('sha256')
 digest.update(await readFile(resolve(root, 'pnpm-lock.yaml')))
 execFileSync(process.execPath, [resolve(root, 'scripts/build.mjs')], { cwd: root, stdio: 'inherit' })
 await rm(target, { recursive: true, force: true })
-execFileSync('pnpm', ['--filter', 'jt-harness', 'deploy', '--prod', '--no-optional', '--legacy', target], { cwd: root, stdio: 'inherit' })
+execFileSync('pnpm', ['--filter', '@jacob-z/jt-harness', 'deploy', '--prod', '--no-optional', '--legacy', target], { cwd: root, stdio: 'inherit' })
 // The normal distribution deliberately omits optional, source-linked legacy DSH SDKs.
 async function inspect(directory) {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {

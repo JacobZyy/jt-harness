@@ -1,6 +1,6 @@
 {
-  "name": "jt-harness",
-  "private": true,
+  "name": "@jacob-z/jt-harness",
+  "private": false,
   "type": "module",
   "engines": {
     "node": ">=24.21.0"
@@ -45,5 +45,8 @@
     ".env.example",
     "examples/"
   ],
-  "version": "0.3.1"
+  "version": "0.3.2",
+  "publishConfig": {
+    "access": "public"
+  }
 }
