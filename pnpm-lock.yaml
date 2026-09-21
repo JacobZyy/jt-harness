@@ -45,6 +45,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@decimalturn/toml-patch':
+        specifier: 3.1.0
+        version: 3.1.0
       '@inquirer/search':
         specifier: ^4.3.3
         version: 4.3.3(@types/node@22.20.3)
@@ -112,6 +115,10 @@ importers:
         version: link:../../../deepseek-harness/packages/sdk/protocol
 
 packages:
+
+  '@decimalturn/toml-patch@3.1.0':
+    resolution: {integrity: sha512-evgFLNmp5TUs+5R0VvPIMkj4ZLXfDsmSSzaBBR3KScrZ6uQ+/YAwg7UFNrrmILnjxW2qFjN6Dow8y1Zks56iMQ==}
+    engines: {node: '>=16'}
 
   '@inquirer/ansi@2.0.8':
     resolution: {integrity: sha512-WpQM+Ti6Z40EFwwt+uL2p4UabT+W179zHp6HhLVOzfbwnVn05IPO/eXIZXGNqcT1jbQ15SujNLzQ39k4QPPxBQ==}
@@ -306,6 +313,8 @@ packages:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
+
+  '@decimalturn/toml-patch@3.1.0': {}
 
   '@inquirer/ansi@2.0.8': {}
 

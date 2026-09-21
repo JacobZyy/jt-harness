@@ -6,17 +6,19 @@ import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { loadConfig, openDatabase, safeError } from '@jt-harness/memo'
 import { configureFlowHooks, configureHooks, configureMonitorHooks, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
-import { flowMain } from './flow.ts'
-import { inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
+import { installFlow } from './flow.ts'
+import { configureProjectMemories, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
 
 const execute = promisify(execFile)
-const help = `jth install --project <id> [--workspace <path>] [--env-file <path>] [--trust]
+const help = `jth init --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
+jth install --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
 jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-file <path>]
 jth upgrade [--from <已解压发行目录>] [--prefix <目录>] [--workspace <项目目录>] [--trust]
 jth doctor [--workspace <path>] [--env-file <path>]
 jth uninstall [--workspace <path>]
-install 接入项目；--cli 安装 CLI 本体。upgrade 更新发行目录并同步当前项目。
+init 复用项目安装，默认将本项目 Codex 原生记忆的读取和生成关闭；inherit 移除这两个项目覆盖项，跟随上层配置。
+install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录并同步当前项目。
 doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数据库、队列与凭据。
 `
 
@@ -80,16 +82,20 @@ export async function deliveryMain(root: string, args: string[]) {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
       workspace: { type: 'string' }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
       from: { type: 'string' }, prefix: { type: 'string' }, cli: { type: 'boolean' }, trust: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      'codex-memory': { type: 'string' },
     } })
     const [command] = positionals
     if (values.help) { process.stdout.write(help); return }
     if (positionals.length !== 1) throw new Error('参数数量不符；运行 jth install --help')
     const allowed: Record<string, string[]> = {
-      install: ['workspace', 'env-file', 'project', 'business', 'from', 'prefix', 'cli', 'trust'],
+      init: ['workspace', 'env-file', 'project', 'business', 'trust', 'codex-memory'],
+      install: ['workspace', 'env-file', 'project', 'business', 'from', 'prefix', 'cli', 'trust', 'codex-memory'],
       upgrade: ['workspace', 'from', 'prefix', 'trust'], doctor: ['workspace', 'env-file'], uninstall: ['workspace', 'env-file'],
     }
     if (!allowed[command] || Object.keys(values).some(key => !allowed[command].includes(key))) throw new Error(`${command} 参数不支持；运行 jth install --help`)
-    if (values.cli && (values.project || values.business || values.trust)) throw new Error('--cli 安装工具本体；项目接入请另用 jth install')
+    const memoryPolicy = values['codex-memory'] ?? (command === 'init' ? 'off' : undefined)
+    if (memoryPolicy !== undefined && memoryPolicy !== 'off' && memoryPolicy !== 'inherit') throw new Error('--codex-memory 仅支持 off 或 inherit')
+    if (values.cli && (values.project || values.business || values.trust || memoryPolicy)) throw new Error('--cli 安装工具本体；项目接入请另用 jth init 或 jth install')
     if (values.cli && command !== 'install') throw new Error('--cli 仅用于 install')
     if ((values.from || values.prefix) && !values.cli && command !== 'upgrade') throw new Error('--from/--prefix 用于 install --cli 或 upgrade')
     const workspace = await realpath(resolve(values.workspace ?? process.cwd()))
@@ -136,14 +142,14 @@ export async function deliveryMain(root: string, args: string[]) {
       const memo = await configureHooks(root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
       output({ flow, memo, data_preserved: true }); return
     }
-    if (!['install', 'upgrade'].includes(command)) throw new Error('未知交付命令')
+    if (!['init', 'install', 'upgrade'].includes(command)) throw new Error('未知交付命令')
     const status = locator ? JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'status', '--workspace', workspace])).stdout) : null
     const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? []
     const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? []
     if (!projects.length && !businesses.length) throw new Error('首次安装需要 --project <id> 或 --business <id>')
     if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
-    await flowMain(root, ['install', '--workspace', workspace, '--env-file', config.envFile, ...projects.flatMap(id => ['--project', id]), ...businesses.flatMap(id => ['--business', id])])
-    if (process.exitCode) return
+    const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
+    const codexMemory = memoryPolicy ? await configureProjectMemories(workspace, memoryPolicy) : undefined
     const monitoring = Boolean((await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined)?.enabled)
     if (monitoring) await configureMonitorHooks(root, workspace, true)
     if (values.trust) await withCodex(async call => {
@@ -152,5 +158,6 @@ export async function deliveryMain(root: string, args: string[]) {
       if (!hooks.length) throw new Error('Codex 未发现项目 Hook；先信任项目配置层')
       await call('config/batchWrite', { edits: hooks.map(h => ({ keyPath: `hooks.state.${JSON.stringify(h.key)}.trusted_hash`, value: h.currentHash, mergeStrategy: 'replace' })), reloadUserConfig: true })
     })
+    output({ ...installed, ...(codexMemory ? { codex_memory: codexMemory } : {}) })
   } catch (error) { process.stderr.write(JSON.stringify({ error: safeError(error, config) }) + '\n'); process.exitCode = 1 }
 }

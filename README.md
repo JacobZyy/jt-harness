@@ -4,7 +4,7 @@
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
-本地交付命令：`jth install / upgrade / doctor / uninstall`；本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
+本地交付命令：`jth init / install / upgrade / doctor / uninstall`；`jth init --project <id>` 接入项目并默认关闭本项目的 Codex 原生记忆读写，使用 `--codex-memory inherit` 跟随上层配置。本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
 
 ## 模块与运行模式
 

@@ -13,6 +13,7 @@
     }
   },
   "dependencies": {
+    "@decimalturn/toml-patch": "3.1.0",
     "@inquirer/search": "^4.3.3",
     "@jt-harness/codex-hooks": "workspace:*",
     "@jt-harness/flow": "workspace:*",

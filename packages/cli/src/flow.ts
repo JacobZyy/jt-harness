@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { findFlowWorkspace, flowPath, locatorSchema } from '@jt-harness/flow'
-import { captureSettingsSchema, configureFlowHooks, configureHooks, flowEntryHook, flowEntryMarker, flowEntryReceiptPath, installationPath, readJson, writeJson } from '@jt-harness/codex-hooks'
+import { captureSettingsSchema, configureFlowHooks, configureHooks, flowEntryHook, flowEntryMarker, flowEntryReceiptPath, installationPath, readJson, writeJson, type CaptureSettings } from '@jt-harness/codex-hooks'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
 
 const help = `jth flow install --project <id> [--business <id>] [--env-file <path>]
@@ -15,6 +15,12 @@ jth flow legacy <command>        显式访问旧任务，例如 status --all、c
 通用：--workspace <项目目录>
 目标、任务列表、续跑与恢复由 Codex 原生能力管理；项目测试直接使用原有命令。
 `
+
+export async function installFlow(root: string, workspace: string, config: { dataDir: string, envFile: string }, scope: CaptureSettings['scope']) {
+  const memo = await configureHooks(root, config, workspace, scope, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
+  await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
+  return { ...await configureFlowHooks(root, workspace), memo, task_owner: 'Codex', locator: flowPath(workspace) }
+}
 
 /** Native mode configures guidance and memory only. It owns no task state or execution loop. */
 export async function flowMain(root: string, args: string[]) {
@@ -58,9 +64,7 @@ export async function flowMain(root: string, args: string[]) {
     }
     if (command === 'install') {
       const config = await loadConfig(root, values['env-file'])
-      const memo = await configureHooks(root, config, workspace, { project_ids: values.project ?? [], business_ids: values.business ?? [] }, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-      await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
-      output({ ...await configureFlowHooks(root, workspace), memo, task_owner: 'Codex', locator: flowPath(workspace) })
+      output(await installFlow(root, workspace, config, { project_ids: values.project ?? [], business_ids: values.business ?? [] }))
       return
     }
     if (command === 'uninstall') { output(await configureFlowHooks(root, workspace, false)); return }

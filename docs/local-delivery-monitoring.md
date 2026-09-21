@@ -21,17 +21,29 @@ jth --version
 ## 项目接入和升级
 
 ```sh
-jth install --project my-project --trust
+jth init --project my-project --trust
 jth doctor
 jth upgrade --from /absolute/path/to/new-release/jt-harness --trust
 jth uninstall
 ```
 
-`install` 安装 Flow Skill、短入口 Hook 和 Memo Stop。`--trust` 只信任刚生成且属于本安装的 JTH Hook；Codex 项目配置层仍需受信任。省略该选项时，在 Codex `/hooks` 审阅定义。
+`init` 复用 `install` 安装 Flow Skill、短入口 Hook 和 Memo Stop，并默认向项目 `.codex/config.toml` 写入：
+
+```toml
+[memories]
+use_memories = false
+generate_memories = false
+```
+
+这两个 [Codex 原生配置项](https://learn.chatgpt.com/docs/customization/memories) 关闭本项目的原生记忆读取和生成，由 JTH 管理跨会话记忆。只修改项目文件，保留其他配置和注释；不修改全局记忆、模型、Goal 或上下文压缩配置。[项目配置需要受信任](https://learn.chatgpt.com/docs/config-file/config-basic)，新会话读取；当前会话可通过 `/memories` 调整。
+
+`jth init --codex-memory inherit` 移除这两个项目覆盖项，恢复跟随上层配置；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置，升级也不会重置用户选择。
+
+`--trust` 只信任刚生成且属于本安装的 JTH Hook；Codex 项目配置层仍需受信任。省略该选项时，在 Codex `/hooks` 审阅定义。
 
 `upgrade --from` 安装指定已解压发行目录，验证可执行后切换命令链接，并同步当前已接入项目；其他项目随后运行 `jth upgrade` 同步。无 `--from` 时只同步当前项目。项目/业务范围和原 `.env` 引用继续使用已有安装配置。
 
-`uninstall` 移除当前项目的 JTH Skill、Memo 说明和 JTH Hooks，保留其他工具配置、凭据、数据库、历史队列及观测数据，不卸载共享 Phoenix 服务。
+`uninstall` 移除当前项目的 JTH Skill、Memo 说明和 JTH Hooks，保留其他工具配置、凭据、数据库、历史队列及观测数据，不卸载共享 Phoenix 服务。Codex 项目记忆偏好作为用户配置保留；希望恢复跟随全局时，先运行 `jth install --codex-memory inherit`，再卸载。
 
 `doctor` 输出 CLI/Node、配置完整性、数据库队列、原生 Hook 信任状态、入口最近触发和 Phoenix 状态。它不调用模型，不触发 Embedding，也不将“已安装”当成“已执行”。完整记忆一致性检查仍使用 `jth memo doctor`。
 

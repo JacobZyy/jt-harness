@@ -18,7 +18,8 @@ import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jt-harness/memo'
 import { rememberEntryRead } from '@jt-harness/codex-hooks'
 
-const help = `jth install|upgrade|doctor|uninstall  项目接入、独立安装升级和运行诊断；运行 jth install --help
+const help = `jth init --project <id>  初始化项目；默认关闭本项目 Codex 原生记忆，--codex-memory inherit 跟随全局
+jth install|upgrade|doctor|uninstall  项目接入、独立安装升级和运行诊断；运行 jth install --help
 jth monitor <command>  本地 Phoenix 与会话观测
 jth flow <command>  Codex 原生流程指导与 Memo 接入；运行 jth flow --help
 jth db status|start|stop  本机 PostgreSQL 生命周期管理

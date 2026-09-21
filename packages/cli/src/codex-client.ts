@@ -1,5 +1,41 @@
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { parse, patch } from '@decimalturn/toml-patch'
+
+/** Project preferences stay in Codex's own config; never follow links into a shared user config. */
+export async function configureProjectMemories(workspace: string, policy: 'off' | 'inherit') {
+  const directory = resolve(workspace, '.codex'), path = resolve(directory, 'config.toml')
+  await mkdir(directory, { recursive: true })
+  if (await realpath(directory) !== directory) throw new Error('项目 .codex 是符号链接；未修改共享配置')
+  const metadata = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+  if (metadata && !metadata.isFile()) throw new Error('项目 config.toml 不是普通文件；未修改共享配置')
+  const read = () => readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
+  const original = await read()
+  let document: Record<string, unknown>
+  try { document = parse(original) } catch { throw new Error('Codex 项目配置不是有效 TOML；未修改原文件') }
+  if (document.memories !== undefined && (!document.memories || typeof document.memories !== 'object' || Array.isArray(document.memories) || document.memories instanceof Date)) {
+    throw new Error('Codex 项目的 memories 必须是 TOML table；未修改原文件')
+  }
+  const memories = { ...document.memories as Record<string, unknown> }
+  if (policy === 'off') { memories.use_memories = false; memories.generate_memories = false }
+  else { delete memories.use_memories; delete memories.generate_memories }
+  if (Object.keys(memories).length) document.memories = memories
+  else delete document.memories
+  const next = patch(original, document)
+  if (next !== original) {
+    const temporary = `${path}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporary, next, { flag: 'wx', mode: metadata ? metadata.mode & 0o777 : 0o600 })
+      if (await read() !== original) throw new Error('Codex 项目配置被其他进程更新；请重试，原配置未覆盖')
+      await rename(temporary, path)
+    } finally { await rm(temporary, { force: true }) }
+  }
+  return { policy, path, activation: '受信任项目的新会话生效；当前会话可用 /memories 调整',
+    ...(policy === 'off' ? { use_memories: false, generate_memories: false } : {}) }
+}
 
 /** Read native configuration/status without starting a model turn. */
 export async function withCodex<T>(operation: (call: (method: string, params: object) => Promise<any>) => Promise<T>) {
