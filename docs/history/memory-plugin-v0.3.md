@@ -1,12 +1,14 @@
 # jt-memo 记忆系统技术设计
 
-**最新归属决定（2026-09-16）：** 用户要求将记忆前置与后置逻辑统一并入现有 `jt-cli`，以 Rust 实现。DSH 只负责运行已验收的提炼 Agent。本文的 TypeScript 原生存储插件方向停止实施，下文保留为历史设计；当前 Rust 方案以 `jt-cli/docs/harness-memo-rust-design.md` 为准。未完成的 TypeScript 存储代码已移入 `artifacts/retired-memo-storage/`，不再处于运行路径。
+> 历史草案，不作为当前实施依据。Rust / HTTP / DSH 插件方向后来已收敛为独立 TypeScript `jth`；默认记忆再改为主会话声明。现行说明见[文档导航](../README.md)。下文“当前”“下一阶段”均指 2026-09-16 当时的讨论。
+
+**当时的归属决定（2026-09-16，后已替代）：** 用户曾要求将记忆前置与后置逻辑统一并入 `jt-cli`，以 Rust 实现，DSH 负责运行提炼 Agent。当时未完成的 TypeScript 存储代码已移入 `artifacts/retired-memo-storage/`；该 Rust 方案也不再是当前路线。
 
 版本：v0.3。日期：2026-09-16。状态：DSH SDK 提炼与 Agent 测试已收口；下一阶段为 Embedding 与记忆持久化。
 
 用户已确认当前 Agent 可以继续使用，C15 的孤立测试流水过滤不作为阻塞问题。保留现有 Agent 和评测基线，后续只验证新增接入与存储行为；当前实施顺序以第 12 节为准。
 
-本文把已确认的需求收敛为模块职责、调用契约、数据模型与实施顺序。当前可运行交付见 [DSH 记忆提炼 Agent](../memory-agent/README.md)：TypeScript 通过 DSH SDK 启动专用 Agent，使用独立任务模型提炼结构化结果。CLI、Embedding、数据库与持久化队列后置；下文涉及它们的部分仍是后续设计。社区插件目前仍是复用候选，兼容性和 UI 可见性需要实际验证。
+本文把当时已确认的需求收敛为模块职责、调用契约、数据模型与实施顺序。当时可运行交付为 [DSH 记忆提炼 Agent](../../packages/memo/src/agents/README.md)：TypeScript 通过 DSH SDK 启动专用 Agent，使用独立任务模型提炼结构化结果。CLI、Embedding、数据库与持久化队列在当时后置；下文涉及它们的部分保留为历史设计。社区插件当时仍是复用候选，未完成兼容性和 UI 可见性验证。
 
 当前接入方式已定为 DSH SDK：它启动独立本地运行时，不调用 3080 Web 接口；每次调用返回提炼结果，不提供队列接收确认。这替代本阶段的 HTTP/Automation 接入安排。未来可靠投递与后台队列需要另行接入，不能将本文的完整系统图误读为当前已有实现。
 

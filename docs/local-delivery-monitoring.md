@@ -4,17 +4,26 @@
 
 ## 安装工具本体
 
-开发者运行 `pnpm bundle`，得到 `artifacts/distribution/jt-harness-0.3.1.tar.gz` 及 SHA-256 文件。构建复用 pnpm deploy，包含生产依赖、编译结果和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
+npm 安装和更新使用同一个包名：
+
+```sh
+npm install --global @jacob-z/jt-harness
+jth --version
+```
+
+使用其他包管理器时，由该包管理器负责全局包的安装和版本更新。更新工具后，在已接入的项目执行 `jth upgrade --trust` 同步 Hook 和 Skill；裸 `jth upgrade` 不下载 npm 新版本。
+
+开发者也可运行 `pnpm bundle`，得到当前版本的 `artifacts/distribution/jt-harness-<版本>.tar.gz` 及 SHA-256 文件。构建复用 pnpm deploy，包含生产依赖、编译结果和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
 
 解压后安装：
 
 ```sh
-tar -xzf jt-harness-0.3.1.tar.gz
+tar -xzf jt-harness-0.3.3.tar.gz
 node -- jt-harness/bin/jth.mjs install --cli --env-file /absolute/path/to/.env
 jth --version
 ```
 
-默认命令链接为 `~/.local/bin/jth`，不可替换的构建目录位于 `~/.local/share/jth/releases/`。确保 `~/.local/bin` 在 PATH 中。可用 `--prefix <目录>` 修改安装位置。
+通过 `install --cli` 安装时，默认命令链接为 `~/.local/bin/jth`，不可替换的构建目录位于 `~/.local/share/jth/releases/`。确保 `~/.local/bin` 在 PATH 中。可用 `--prefix <目录>` 修改安装位置。npm 等包管理器安装的命令由对应包管理器定位，用 `command -v jth` 确认实际入口。
 
 用户配置保存在 `~/.jt-harness/.env`。首次安装指定 `--env-file` 时导入其内容，不继续依赖原文件；已有用户配置不会被覆盖。旧版指向源码的共享配置会迁移，并保留旧路径兼容。没有配置时准备模板，由 `jth init` 交互补全缺失项。发行包不含密钥，配置和运行数据不随发行目录替换。分层、覆盖和迁移规则见[配置说明](configuration.md)。
 
@@ -45,6 +54,17 @@ enabled = true
 `jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，仍开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`install`、`upgrade` 和 `uninstall` 均保留用户已有的计划工具开关；再次执行 `init` 会将其设为开启。
 
 `--trust` 只信任刚生成且属于本安装的 JTH Hook；Codex 项目配置层仍需受信任。省略该选项时，在 Codex `/hooks` 审阅定义。
+
+Codex 将信任绑定到 Hook 定义的哈希；更换 CLI 路径或更新定义后可能出现 `trustStatus: modified`，这些 Hook 会被跳过。按 [OpenAI 官方 Hook 说明](https://learn.chatgpt.com/docs/hooks)重新审阅，或在确认本次 JTH 更新后运行：
+
+```sh
+jth upgrade --trust --summary
+jth doctor
+```
+
+确认 JTH Hook 均为 `enabled: true`、`trustStatus: trusted`，然后重新加载已有 Codex 会话。`flow_entry` 的旧回执不能证明本次更新已经触发；后续输入和回复结束后，应检查 `jth flow status` 的新回执、`jth memo codex status` 及 `jth monitor status`。没有新记忆声明的回复不产生 Memo 入库回执。
+
+包管理器升级可能移除旧安装目录。`upgrade` 可根据同一项目中匹配旧安装路径的 JTH Hook 确认归属，修复失效的 Skill 链接并更新 Hook；缺少归属证据时保留链接并报错。`doctor` 同时检查 `skill_available`，避免把已受信任但安装文件缺失的状态报为正常。
 
 `upgrade --from` 安装指定已解压发行目录，验证可执行后切换命令链接，并同步当前已接入项目；其他项目随后运行 `jth upgrade` 同步。无 `--from` 时只同步当前项目。项目/业务范围和原 `.env` 引用继续使用已有安装配置。
 

@@ -1,6 +1,8 @@
 # jth 本地记忆系统技术设计
 
-日期：2026-09-16。状态：独立 CLI，数据库 v3，三类修订及五项存储增强已实施。本文取代此前 HTTP / DSH 原生存储插件 / Rust `jt-cli` 合并草案；旧文档保存在 `history/memory-plugin-v0.3.md`，不再作为实施依据。
+> 历史设计：本文记录 2026-09-16 起的 DSH 提炼路径及存储演进，后续补记 v5 接收行为。2026-09-20 起默认入口已改为[主会话声明](memory-declarations.md)，Flow 使用[Codex 原生能力](flow-control.md)。下文模块路径、默认命令和未完成项只描述历史版本；现行配置与分发见[文档导航](README.md)。
+
+当时交付：独立 CLI、数据库 v3、三类修订及五项存储增强。本文当时取代 HTTP / DSH 原生存储插件 / Rust `jt-cli` 合并草案；更早草案保存在 `history/memory-plugin-v0.3.md`。
 
 ## 交付边界
 

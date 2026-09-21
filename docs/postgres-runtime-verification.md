@@ -1,5 +1,7 @@
 # PostgreSQL 托管、Flow 迁移与 DSH 运行验证
 
+> 历史验证：本文记录旧 Flow 迁入 PostgreSQL 与 DSH 恢复；当前默认 Flow 使用 Codex 原生状态，旧任务只通过 flow legacy 访问。现行操作见[文档导航](README.md)。
+
 日期：2026-09-18。改动采用现有 PostgreSQL 18 原生工具、pg 驱动和 DSH SDK，没有增加 Web 服务依赖或数据库引擎。
 
 ## DSH 优先排查

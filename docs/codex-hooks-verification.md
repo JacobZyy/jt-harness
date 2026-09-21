@@ -1,5 +1,7 @@
 # Codex 六阶段自动投递验证
 
+> 历史验证：本文记录旧 DSH 六阶段采集；当前默认只用 Memo Stop 声明入口，Flow 另有 UserPromptSubmit 短提示。现行操作见[文档导航](README.md)。
+
 验证日期：2026-09-17（Asia/Shanghai）。实现位于现有 TypeScript `jth` 项目，没有引入 Rust、HTTP 服务或额外依赖。
 
 ## 交付与启用

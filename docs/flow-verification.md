@@ -1,6 +1,6 @@
 # 初版流程原型验证记录（3ab47c7，历史）
 
-本记录对应 SQLite 初版。当前 PostgreSQL 托管、迁移及 DSH 恢复验证见 [运行时验证记录](postgres-runtime-verification.md)。
+本记录对应 SQLite 初版；[PostgreSQL 迁移验证](postgres-runtime-verification.md)也是后续历史记录。当前默认使用 [Codex 原生流程](flow-control.md)，下文命令和限制不作为当前任务指引。
 
 日期：2026-09-18。环境：macOS、Node 24.21.0、Codex 0.153.0、PostgreSQL 18.6 + pgvector 0.8.6。
 

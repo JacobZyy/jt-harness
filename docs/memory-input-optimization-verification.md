@@ -1,5 +1,7 @@
 # DSH 输入优化与手动验证
 
+> 历史验证：本文记录旧 DSH 路径的输入和缓存实验；其中 Hook 开关与运行数据只反映验证当时。现行操作见[文档导航](README.md)。
+
 验证时间：2026-09-19 23:47，北京时间。运行标识：`2026-09-19T15-47-31.151Z`。
 
 保留 DSH，Provider/model 为 `.env` 中的 `deepseek-official / deepseek-flash`，没有调整 effort、输出 token 上限或用户的 DSH Web 配置。本仓库 Hooks 始终为空，未恢复自动采集、自动召回或后台生产队列。

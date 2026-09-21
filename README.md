@@ -8,6 +8,8 @@
 
 共享配置与凭据默认存放于 `~/.jt-harness/.env`；仓库只保存自己的接入、范围与开关，默认不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级与仓库级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
 
+当前操作说明与历史设计的入口见[文档导航](docs/README.md)。历史报告中的“当前”“默认”和未完成项只描述报告当时的版本，不作为今天的安装或执行指令。
+
 ## 模块与运行模式
 
 生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
@@ -49,7 +51,7 @@ jth flow legacy migrate
 
 ## 当前本机使用
 
-当前工作区已构建，并安装 `~/.local/bin/jth` 软链。配置位于本工具目录的 `.env`。
+工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，项目可显式选择覆盖配置。安装、版本更新与项目同步见[本地交付](docs/local-delivery-monitoring.md)。
 
 ```sh
 jth --help
@@ -151,7 +153,7 @@ Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness`
 
 工作树 `.env` 链接到主配置，密钥更新立即共享，不提交 Git；相对运行路径以源配置所在目录解析。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 和构建产物保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成下方构建与 `jth flow install`，作为可用的配置来源。
 
-需要 Node.js ≥ 24.21.0、pnpm 10，以及已经安装并构建的 DeepSeek Harness。当前 SDK 和开发工具依赖仍链接到相邻 `../deepseek-harness` 工作区，已验证版本为 `0.1.6-alpha.1`；这是本机源码交付，不是可独立分发到任意机器的 npm 包。
+源码开发需要 Node.js ≥ 24.21.0、pnpm 10；开发工具及可选 DSH SDK 仍链接到相邻 `../deepseek-harness` 工作区。普通使用者安装 npm 包或独立发行包即可，默认 Flow/Memo 不依赖该源码目录。发行包不捆绑显式 legacy 路径需要的 DSH SDK。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -165,9 +167,9 @@ node bin/jth.mjs memo init
 
 `memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v7，保留原材料、条目、向量与回执。v7 增加 `declaration_receipts`、`declaration_sources` 和精确内容索引，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
 
-`.env.local` 已改为 `.env`。`.gitignore` 忽略 `.env` 和 `.env.*`，只允许无凭据的 `.env.example`。仓库已初始化并托管于 GitHub 私有仓库 `JacobZyy/jt-harness`。打包文件采用白名单，同样不包含 `.env`。实际部署的凭据注入后续处理。
+仓库公开托管于 [JacobZyy/jt-harness](https://github.com/JacobZyy/jt-harness)，npm 包为 `@jacob-z/jt-harness`。`.gitignore` 忽略 `.env` 和 `.env.*`，仅允许无凭据的 `.env.example`。用户凭据独立于仓库和发行目录；打包白名单不包含凭据、数据库、运行记录或本地备份。
 
-默认读取**工具安装目录**下的 `.env`，不读取业务项目当前目录中的同名文件。`--env-file /absolute/path/.env` 或 `JTH_ENV_FILE` 可指定配置；进程环境变量优先于文件。配置内的相对目录、DSH 入口路径以配置文件所在目录为基准。环境变量不会写回 `.env`，文件内容也不会整体导出给 DSH。
+配置文件按 `--env-file`、`JTH_ENV_FILE`、仓库绑定、用户默认 `~/.jt-harness/.env` 的顺序选择，不自动读取业务项目当前目录中的同名文件。选定后，进程环境变量覆盖文件值。配置内的相对目录、DSH 入口路径以配置文件所在目录为基准。环境变量不会写回文件，文件内容也不会整体导出给 DSH。详见[配置来源与迁移](docs/configuration.md)。
 
 | 配置 | 用途 |
 | --- | --- |
@@ -345,7 +347,7 @@ v3 五项存储能力及真实 CLI 验证见 [存储增强验证报告](docs/mem
 
 运行 `jth memo model`，使用方向键从 DSH 实时目录中单选模型；直接输入可搜索模型名称、ID 或 Provider，空格分隔多个关键词。列表分页显示并标注当前项，回车确认，Ctrl+C 取消。`jth memo model --list` 输出 JSON；也可用 `jth memo model --provider zz-tokenhub --model deepseek-flash` 精确选择。
 
-选择只保存项目 `.env` 的 Provider 和模型，不影响默认声明模式。DSH 执行器不指定 reasoningEffort 或 maxTokens，也不修改 Provider 的能力声明；全部采用 DSH/Provider 默认行为。任务超时仍由本工具管理。配置冲突或取消选择不会覆盖文件，已有凭据和其他配置保持原样。
+选择只保存当前选定配置文件中的 Provider 和模型，默认文件为 `~/.jt-harness/.env`，不影响声明模式。DSH 执行器不指定 reasoningEffort 或 maxTokens，也不修改 Provider 的能力声明；全部采用 DSH/Provider 默认行为。任务超时仍由本工具管理。配置冲突或取消选择不会覆盖文件，已有凭据和其他配置保持原样。
 
 模型发现复用独立 DSH SDK 进程中的 llm.listProviders/listModels；只读目录插件补充 SDK 缺少的目录端点，不调用模型、不依赖浏览器或 Web 服务。只在选择时查询目录，正常提取没有额外目录查询进程。
 

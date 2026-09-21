@@ -1,4 +1,4 @@
-> 历史检查点：会话内自动提取已切回 DSH。当前状态见 [DSH 恢复验收](dsh-restore-verification.md)。
+> 历史验证：本文记录 2026-09-17 的 prepare/record 方案；同日曾切回 DSH，2026-09-20 又改为主会话短声明。两次历史切换均不代表当前默认入口，现行说明见[主会话记忆声明](memory-declarations.md)。
 
 # 会话内记忆重构验收
 

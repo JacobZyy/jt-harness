@@ -6,7 +6,7 @@
 | --- | --- |
 | 用户级 | `~/.jt-harness/.env`：数据库连接、Embedding 服务地址、模型、维度、API Key，以及可选的运行数据路径和 legacy 模型设置 |
 | 仓库级 | 项目和业务范围属于当前仓库的 Memo 安装记录；`.jth/flow.json` 定位配置，`.jth/monitor.json` 控制项目采集；`.codex/` 和 `AGENTS.md` 保存宿主接入及项目约定 |
-| 程序 | `~/.local/bin/jth` 和 `~/.local/share/jth/releases/` 保存命令链接与不可替换发行目录，不存放权威凭据 |
+| 程序 | npm 等包管理器管理自己的全局安装；`install --cli` 使用 `~/.local/bin/jth` 和 `~/.local/share/jth/releases/`。程序目录不存放权威凭据 |
 | 运行数据 | 继续使用当前 `JTH_DATA_DIR`、PostgreSQL 和队列位置；未指定数据目录时沿用 `~/.jth`，升级不迁移或清空数据 |
 
 项目范围继续由现有 Memo 安装记录维护，Flow 不复制第二份范围或任务状态。仓库的 Hook、Skill 路径本来就应指向该仓库；共享 `env_file` 默认指向用户配置。
@@ -51,4 +51,4 @@ Memo、数据库、监控和项目接入命令的配置文件选择顺序为 `--
 
 若现有用户配置与旧配置不同，不建立等价映射，也不覆盖其中任何一份；已有项目继续保留自己的配置引用。明确核对后再选择需要的配置。
 
-安装或升级后重新加载 Codex 任务，使新的 Hook 定义和项目指令生效。
+安装或升级后，用 `jth doctor` 检查 Hook 信任；定义变化时运行 `jth upgrade --trust` 或在 `/hooks` 重新审阅，再重新加载 Codex 任务。诊断与实际触发的区别见[接入和升级](local-delivery-monitoring.md#项目接入和升级)。

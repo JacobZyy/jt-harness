@@ -1,6 +1,6 @@
 # jth 本地 CLI 交付验证
 
-本文记录 v1 首轮交付及图形客户端连接验证。当前数据库已升级 v2，已实现更正、补充、未决冲突和历史过滤；后续结果以 [三条规则验证报告](memory-revisions-verification.md) 为准。下方 v1 边界保留为历史记录。
+本文记录 v1 首轮交付及图形客户端连接验证，随后有 [v2 修订](memory-revisions-verification.md)和 [v3 存储](memory-storage-v3-verification.md)交付。当前默认入口、v7 存储及独立 npm 分发见[文档导航](README.md)。下方无 Git、依赖 DSH、尚无 Hook 或分发等限制只属于 v1 历史版本。
 
 日期：2026-09-16。范围：CLI 收件、后台处理、DSH SDK 调用、真实 Embedding、PostgreSQL/pgvector、检索与恢复。既有 Agent 语义评测继续保持收口，本次没有重新运行 42 次语义评测矩阵。
 

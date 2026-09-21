@@ -35,12 +35,19 @@ export function isManagedHook(hook: NativeHook, root: string, workspace: string,
     && Boolean(events[hook.statusMessage ?? '']?.includes(hook.eventName) && hook.command?.startsWith(prefix))
 }
 
-async function ownedRoot(skill: string) {
+async function ownedRoot(skill: string, workspace: string) {
   const target = await readlink(skill).catch(error => { if (error.code === 'ENOENT') return null; throw error })
   if (!target) return null
   const root = resolve(dirname(skill), target, '../../../..')
-  const { name } = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { name: string }
-  if (!ownDistributionName(name)) throw new Error('已有 Skill 不属于 jt-harness；保留原文件')
+  const manifest = await readJson(resolve(root, 'package.json')) as { name: string } | undefined
+  if (manifest) {
+    if (!ownDistributionName(manifest.name)) throw new Error('已有 Skill 不属于 jt-harness；保留原文件')
+  } else {
+    const native = await inspectNativeHooks(workspace)
+    if (!native.hooks.some(hook => isManagedHook(hook, root, workspace, true))) {
+      throw new Error('旧 Skill 安装已移除且缺少匹配的 JTH Hook；无法确认归属，保留原链接')
+    }
+  }
   return root
 }
 
@@ -138,8 +145,9 @@ export async function deliveryMain(root: string, args: string[]) {
       } catch (error) { checks.push({ name: 'database', status: 'error', detail: safeError(error, config) }) }
       try {
         const native = await inspectNativeHooks(workspace), own = native.hooks.filter(h => h.statusMessage?.startsWith('jth '))
-        checks.push({ name: 'hooks', status: own.length && own.every(h => h.enabled && h.trustStatus === 'trusted') ? 'ok' : 'warning',
-          detail: { hooks: own.map(({ statusMessage, eventName, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
+        const skillAvailable = await access(resolve(workspace, '.agents/skills/jth-flow/SKILL.md')).then(() => true, () => false)
+        checks.push({ name: 'hooks', status: skillAvailable && own.length && own.every(h => h.enabled && h.trustStatus === 'trusted') ? 'ok' : 'warning',
+          detail: { skill_available: skillAvailable, hooks: own.map(({ statusMessage, eventName, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
       } catch (error) { checks.push({ name: 'hooks', status: 'warning', detail: safeError(error, config) }) }
       checks.push({ name: 'flow_entry', status: (await readJson(resolve(workspace, '.jth/flow-entry.json'))) ? 'ok' : 'warning', detail: await readJson(resolve(workspace, '.jth/flow-entry.json')) ?? '尚无触发记录；已安装不等于已执行' })
       const monitor = await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined
@@ -148,7 +156,7 @@ export async function deliveryMain(root: string, args: string[]) {
         ...phoenix, enabled: Boolean(monitor?.enabled), lastExport: await readJson(resolve(workspace, '.jth/monitor/last-export.json')) ?? null } })
       output({ workspace, checks }); process.exitCode = checks.some(check => check.status === 'error') ? 1 : 0; return
     }
-    const oldRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-flow'))
+    const oldRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-flow'), workspace)
     if (command === 'uninstall') {
       await configureMonitorHooks(oldRoot ?? root, workspace, false)
       if (await readJson(resolve(workspace, '.jth/monitor.json'))) await writeJson(resolve(workspace, '.jth/monitor.json'), { enabled: false })

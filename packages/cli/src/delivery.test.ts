@@ -76,6 +76,32 @@ test('project install and upgrade are idempotent; uninstall preserves data and o
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
+test('upgrade recovers a removed package installation only with matching managed hooks', { skip: !process.env.JTH_NATIVE_CONFIG_TEST }, async () => {
+  const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-removed-package-')))
+  const execute = promisify(execFile), envFile = resolve(workspace, '.env'), home = resolve(workspace, 'codex-home')
+  const skill = resolve(workspace, '.agents/skills/jth-flow'), hooksPath = resolve(workspace, '.codex/hooks.json'), oldRoot = resolve(workspace, 'removed-package')
+  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace, env: { ...process.env, CODEX_HOME: home } })).stdout)
+  try {
+    await mkdir(home)
+    await writeFile(resolve(home, 'config.toml'), `[features]\nhooks=true\n[projects.${JSON.stringify(workspace)}]\ntrust_level="trusted"\n`)
+    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\n`)
+    await cli('install', '--project', 'fixture', '--env-file', envFile)
+    const installedHooks = await readFile(hooksPath, 'utf8')
+    await rm(skill)
+    await symlink(resolve(oldRoot, 'packages/flow/skills/jth-flow'), skill)
+    await assert.rejects(cli('upgrade'), /无法确认归属/)
+    assert.equal(await readlink(skill), resolve(oldRoot, 'packages/flow/skills/jth-flow'))
+    assert.equal(await readFile(hooksPath, 'utf8'), installedHooks)
+    await writeFile(hooksPath, installedHooks.replaceAll(root, oldRoot))
+    const diagnostic = await cli('doctor').catch(error => JSON.parse(error.stdout))
+    assert.equal(diagnostic.checks.find((check: { name: string }) => check.name === 'hooks').detail.skill_available, false)
+    await cli('upgrade')
+    assert.equal(await readlink(skill), resolve(root, 'packages/flow/skills/jth-flow'))
+    assert.equal(await readFile(hooksPath, 'utf8'), installedHooks)
+    assert.deepEqual((await cli('flow', 'status')).memo_scope.project_ids, ['fixture'])
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
 test('upgrade --summary prints human-readable text while JSON remains the default', async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-summary-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env')

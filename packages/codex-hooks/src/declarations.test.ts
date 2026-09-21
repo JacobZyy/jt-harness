@@ -64,6 +64,28 @@ test('Stop with no declaration is a no-op; source-bound declarations are staged 
   } finally { await f.cleanup() }
 })
 
+test('native WebSearch records retain tool evidence and do not block later declarations', async () => {
+  const f = await fixture()
+  try {
+    const action = { type: 'search', query: '包管理器文档', queries: ['包管理器文档'] }
+    const text = `<!-- jth-memory ${JSON.stringify({ items: [
+      { text: '本轮搜索了包管理器文档。', scope: 'current_task', basis: 'tool_observation', quote: '包管理器文档' },
+      { text: '项目使用 pnpm。', scope: 'project', basis: 'user_statement', quote: '项目使用 pnpm' },
+    ] })} -->`
+    await appendFile(f.source, row('event_msg', { type: 'item_completed', thread_id: 'parent', item: { type: 'WebSearch', id: 'search', query: action.query, action } })
+      + message('user', 'UserMessage', '项目使用 pnpm。') + message('final', 'AgentMessage', text))
+    await f.capture(text)
+    assert.deepEqual(await collectDeclarations(f.config), { received: 1, skipped: 0, errors: [] })
+    const file = (await readdir(resolve(f.config.dataDir, 'codex/records')))[0]
+    const staged = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/records', file), 'utf8'))
+    assert.equal(staged.draft.extraction.memories.length, 2)
+    const evidence = await readEvidence(f.config, staged.evidence_id)
+    const search = evidence.submission.messages.find(item => item.role === 'tool')!
+    assert.deepEqual(JSON.parse(search.text), { tool: 'web_search', query: action.query, action })
+    assert.equal(evidence.submission.messages.find(item => item.role === 'user')!.text, '项目使用 pnpm。')
+  } finally { await f.cleanup() }
+})
+
 test('short approvals bind the preceding proposal and user changes across turns, without promoting other options', async () => {
   const f = await fixture(), target = randomUUID(), version = 'b'.repeat(64)
   try {
