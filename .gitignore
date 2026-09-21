@@ -14,3 +14,4 @@ artifacts/
 /.jth/
 /.agents/skills/jth-flow
 /.codex/hooks.json
+/.build/
