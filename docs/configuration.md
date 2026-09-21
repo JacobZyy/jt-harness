@@ -11,6 +11,10 @@
 
 项目范围继续由现有 Memo 安装记录维护，Flow 不复制第二份范围或任务状态。仓库的 Hook、Skill 路径本来就应指向该仓库；共享 `env_file` 默认指向用户配置。
 
+## Workflow Policy 配置
+
+流程模式与 Memo 凭据分开读取：用户默认在 `~/.jt-harness/workflow.json`，仓库覆盖在 `.jth/workflow.json`。缺省为 adaptive；用 `jth flow config --scope user|project --mode adaptive|strict|inherit` 设置。`flow status/context` 显示最终模式与来源；数据库或凭据不可用不影响策略命令。详见 [Workflow Policy](workflow-policy.md)。
+
 ## 初始化
 
 ```sh

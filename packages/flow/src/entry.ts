@@ -1,7 +1,7 @@
-/** A stable entry reminder; task state remains in the host conversation and native plan. */
+/** A stable entry reminder; classification and task state belong to the current agent and host. */
 export function flowEntryContext(skillPath: string) {
-  return `JTH Flow：普通问答直接回答。实质任务先读取 ${JSON.stringify(skillPath)}（当前上下文已读则复用），按其中的任务与项目验收约定执行。
-建立或接续实际计划后，在对话中简报“JTH Flow｜已进入/已恢复｜当前步骤”；实际 Memo 检索/读取后简报结果。必要回执与阶段反馈不因精简风格省略，不伪报执行。
-沿用当前目标与原生计划；开始或恢复时接续未完成项，补充反馈只调整相关步骤。Goal 和任务列表遵守宿主启用条件，不伪造不可用的工具。
-主 Agent 核对实际产出、范围和测试证据后收口；子 Agent 只完成分派项并回传主 Agent，不另开主流程。`
+  return `JTH Flow：普通问答直接回答。实质任务读取 ${JSON.stringify(skillPath)}（已读则复用），按 Workflow Policy 声明意图和任务关系；默认 adaptive，小改 guarded，多步 planned。
+规划由主 Agent 按模板细化可验收工作项；进度由宿主记录。Codex 使用实际 update_plan；jth flow policy 只准备参数，未调用不报已更新。子 Agent 只交回分派结果。
+guarded 简报当前交付；planned 建立/接续真实计划后简报“JTH Flow｜已进入/已恢复｜当前步骤”。实际 Memo 检索/读取后简报真实结果；必要回执和阶段反馈不省略。
+确认或补充沿用对应目标和进度；上下文不明先恢复，不猜新任务。按项目现有检查和主 Agent 复核收口，不增加模型评审；Goal 遵守宿主启用条件。`
 }

@@ -6,8 +6,11 @@ import { findFlowWorkspace, flowPath, locatorSchema } from '@jt-harness/flow'
 import { captureSettingsSchema, configureFlowHooks, configureHooks, flowEntryHook, flowEntryMarker, flowEntryReceiptPath, installationPath, readJson, writeJson, type CaptureSettings } from '@jt-harness/codex-hooks'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
 import { configurationScope, loadWorkspaceConfig } from './configuration.ts'
+import { resolveWorkflowPolicy } from './workflow-settings.ts'
 
 const help = `jth flow install --project <id> [--business <id>] [--env-file <path>]
+jth flow policy <file.json|->     评估显式意图、返回规划模板与宿主记录参数；不保存任务
+jth flow config                  查看或覆盖 adaptive/strict；运行 jth flow config --help
 jth flow status                  查看入口安装、最近输出记录与 Memo 范围，不连接任务数据库
 jth flow context                 查看原生执行职责，不读取旧任务或缓存记忆
 jth flow prompt                  Hook 入口，读取 UserPromptSubmit JSON stdin，输出短流程提示
@@ -18,13 +21,15 @@ jth flow legacy <command>        显式访问旧任务，例如 status --all、c
 `
 
 export async function installFlow(root: string, workspace: string, config: { dataDir: string, envFile: string, envAliases?: readonly string[] }, scope: CaptureSettings['scope']) {
+  const workflowPolicy = await resolveWorkflowPolicy(workspace)
   const memo = await configureHooks(root, config, workspace, scope, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
   await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
-  return { ...await configureFlowHooks(root, workspace), memo, task_owner: 'Codex', locator: flowPath(workspace) }
+  return { ...await configureFlowHooks(root, workspace), memo, workflow_policy: workflowPolicy, task_owner: 'Codex', locator: flowPath(workspace) }
 }
 
 /** Native mode configures guidance and memory only. It owns no task state or execution loop. */
 export async function flowMain(root: string, args: string[]) {
+  if (args[0] === 'policy' || args[0] === 'config') return (await import('./flow-policy.ts')).flowPolicyMain(args)
   if (args[0] === 'legacy') return (await import('./flow-legacy.ts')).flowLegacyMain(root, args.slice(1))
   // Old hosts and already-started workers may retain these commands until a session reload.
   // Consume their input without opening PG, replaying old events, or refreshing old-task memory.
@@ -79,7 +84,7 @@ export async function flowMain(root: string, args: string[]) {
     const hooks = await readJson(resolve(workspace, '.codex/hooks.json')) as { hooks?: Record<string, { hooks: { statusMessage?: string }[] }[]> } | undefined
     const handlers = Object.values(hooks?.hooks ?? {}).flatMap(groups => groups.flatMap(group => group.hooks))
     const legacyHooks = handlers.filter(handler => handler.statusMessage === 'jth flow context').length
-    output({ mode: 'native', workspace, configuration: await configurationScope(config), skill: { path: skillPath, installed: skillTarget !== null }, memo_scope: memoScope,
+    output({ mode: 'native', workspace, workflow_policy: await resolveWorkflowPolicy(workspace), configuration: await configurationScope(config), skill: { path: skillPath, installed: skillTarget !== null }, memo_scope: memoScope,
       memo_enabled: Boolean(installation && !installation.disabled), legacy_flow_hooks: legacyHooks,
       entry_hook: { installed: handlers.some(handler => handler.statusMessage === flowEntryMarker), event: 'UserPromptSubmit',
         receipt_path: flowEntryReceiptPath(workspace), last_emission: await readJson(flowEntryReceiptPath(workspace)) ?? null },

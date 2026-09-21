@@ -31,7 +31,7 @@ jth flow status
 
 安装保留 Memo Stop 声明入口，链接项目 `jth-flow` Skill，增加 `UserPromptSubmit` 短流程提醒，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 只读取本地安装配置、最近一次入口输出与 Memo 范围，不返回旧目标、阶段或缓存记忆。入口记录位于 `.jth/flow-entry.json`，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
 
-复杂任务由主 Agent 使用实际可用的 Codex 原生计划工具记录待办、进行中和完成；用户反馈进入同一份计划。已选择 Goal 的长任务复用一个原生 Goal，在续轮或恢复后接续未完成步骤。原生计划工具未暴露时明确说明，不伪造原生列表，也不用旧 Flow Task 代替。
+Workflow Policy 默认 adaptive：普通问答直接回答，有界小改直接执行并做聚焦验证，多阶段或明确要求规划时，由主 Agent 按模板细化任务，再用实际可用的 Codex 原生计划工具记录进度。`jth flow policy` 只准备决策和宿主参数，不调用原生工具或保存任务。用户确认和补充进入对应计划。配置覆盖与代码分层见 [Workflow Policy](docs/workflow-policy.md)。已选择 Goal 的长任务复用一个原生 Goal，在续轮或恢复后接续未完成步骤。原生计划工具未暴露时明确说明，不伪造原生列表，也不用旧 Flow Task 代替。
 
 检查点复用原生计划、会话记录、必要的证据文件与 Git 提交。主 Agent 直接运行项目检查并核对产出，通过后更新计划和 Goal；不为每次工具调用复制一份流程日志。权限、会话恢复和压缩使用 Codex 自带机制。
 
