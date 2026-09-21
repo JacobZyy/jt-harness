@@ -1,14 +1,15 @@
 import { execFile } from 'node:child_process'
-import { access, chmod, cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { loadConfig, openDatabase, safeError } from '@jt-harness/memo'
+import { openDatabase, safeError, type Config } from '@jt-harness/memo'
 import { configureFlowHooks, configureHooks, configureMonitorHooks, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
+import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration } from './configuration.ts'
 
 const execute = promisify(execFile)
 const help = `jth init --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
@@ -19,6 +20,7 @@ jth doctor [--workspace <path>] [--env-file <path>]
 jth uninstall [--workspace <path>]
 init 复用项目安装，默认关闭本项目 Codex 原生记忆的读取和生成，并开启 update_plan；inherit 仅移除记忆的两个项目覆盖项，跟随上层配置。
 install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录并同步当前项目。
+用户配置默认保存于 ~/.jt-harness/.env；init 缺项时交互补全，API Key 隐藏输入。--env-file 显式覆盖，JTH_CONFIG_DIR 可改变用户配置目录。
 doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数据库、队列与凭据。
 `
 
@@ -40,7 +42,7 @@ async function ownedRoot(skill: string) {
 }
 
 /** Versioned, relocatable releases; keep credentials outside replaceable release directories. */
-export async function installCli(source: string, prefix: string, envFile?: string) {
+export async function installCli(source: string, prefix: string, envFile?: string, environment: NodeJS.ProcessEnv = process.env) {
   const packageRoot = await realpath(source)
   const manifest = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'))
   const build = manifest.jthDistribution?.build
@@ -55,15 +57,18 @@ export async function installCli(source: string, prefix: string, envFile?: strin
   }
   await mkdir(resolve(home, 'releases'), { recursive: true, mode: 0o700 })
   const sharedEnv = resolve(home, '.env')
-  if (!await access(sharedEnv).then(() => true, () => false)) {
-    if (envFile) await symlink(await realpath(envFile), sharedEnv)
-    else await writeFile(sharedEnv, await readFile(resolve(packageRoot, '.env.example'), 'utf8'), { flag: 'wx', mode: 0o600 })
+  const priorEnv = await realpath(sharedEnv).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+  const userConfig = await ensureUserConfig(packageRoot, envFile ?? priorEnv, environment)
+  if (!priorEnv || userConfig.imported || priorEnv === userConfig.envFile) {
+    const temporary = `${sharedEnv}.${randomUUID()}.tmp`
+    try { await symlink(userConfig.envFile, temporary); await rename(temporary, sharedEnv) }
+    finally { await rm(temporary, { force: true }) }
   }
   if (!await access(target).then(() => true, () => false)) {
     const staging = `${target}.${randomUUID()}.tmp`
     try {
       await cp(packageRoot, staging, { recursive: true, verbatimSymlinks: true, filter: path => path !== resolve(packageRoot, '.env') })
-      await symlink(sharedEnv, resolve(staging, '.env'))
+      await symlink(userConfig.envFile, resolve(staging, '.env'))
       await execute(process.execPath, [resolve(staging, 'bin/jth.mjs'), '--help'], { timeout: 15000 })
       await rename(staging, target)
     } finally { await rm(staging, { recursive: true, force: true }) }
@@ -73,11 +78,11 @@ export async function installCli(source: string, prefix: string, envFile?: strin
   await symlink(resolve(target, 'bin/jth.mjs'), link)
   await rename(link, binary)
   await chmod(resolve(target, 'bin/jth.mjs'), 0o755)
-  return { status: 'installed', version: manifest.version, build, root: target, binary, envFile: sharedEnv }
+  return { status: 'installed', version: manifest.version, build, root: target, binary, envFile: userConfig.envFile }
 }
 
 export async function deliveryMain(root: string, args: string[]) {
-  let config: Awaited<ReturnType<typeof loadConfig>> | undefined
+  let config: Config | undefined
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
       workspace: { type: 'string' }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
@@ -109,12 +114,12 @@ export async function deliveryMain(root: string, args: string[]) {
       output(installed); return
     }
     const locator = await readJson(resolve(workspace, '.jth/flow.json')) as { envFile: string } | undefined
-    config = await loadConfig(root, values['env-file'] ?? locator?.envFile)
+    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     if (command === 'doctor') {
       const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
       const checks: { name: string, status: string, detail?: unknown }[] = []
       checks.push({ name: 'cli', status: 'ok', detail: { version: manifest.version, node: process.version, standalone: Boolean(manifest.jthDistribution) } })
-      checks.push({ name: 'configuration', status: config.databaseUrl ? 'ok' : 'error', detail: { envFile: config.envFile, embeddingConfigured: Boolean(config.embedding.space && config.embedding.apiKey) } })
+      checks.push({ name: 'configuration', status: missingConfiguration(config).length ? 'error' : 'ok', detail: { ...await configurationScope(config), missing: missingConfiguration(config), embeddingConfigured: Boolean(config.embedding.space && config.embedding.apiKey) } })
       try {
         const pool = openDatabase(config, true)
         try {
@@ -147,6 +152,16 @@ export async function deliveryMain(root: string, args: string[]) {
     const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? []
     const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? []
     if (!projects.length && !businesses.length) throw new Error('首次安装需要 --project <id> 或 --business <id>')
+    let userConfig: Awaited<ReturnType<typeof ensureUserConfig>> | undefined
+    if (!values['env-file'] && !process.env.JTH_ENV_FILE) {
+      if (!locator || (await configurationScope(config)).scope === 'user') userConfig = await ensureUserConfig(root)
+      else {
+        const legacyEnv = await realpath(resolve(root, '.env')).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+        if (legacyEnv === config.envFile) userConfig = await ensureUserConfig(root, legacyEnv)
+      }
+    }
+    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
+    if (command === 'init') config = await completeConfiguration(root, config, { reviewDefaults: userConfig?.created && !userConfig.imported })
     if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
     const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
     const codexPreferences = memoryPolicy ? await configureProjectCodex(workspace, memoryPolicy, command === 'init') : {}
@@ -158,6 +173,6 @@ export async function deliveryMain(root: string, args: string[]) {
       if (!hooks.length) throw new Error('Codex 未发现项目 Hook；先信任项目配置层')
       await call('config/batchWrite', { edits: hooks.map(h => ({ keyPath: `hooks.state.${JSON.stringify(h.key)}.trusted_hash`, value: h.currentHash, mergeStrategy: 'replace' })), reloadUserConfig: true })
     })
-    output({ ...installed, ...codexPreferences })
+    output({ ...installed, ...codexPreferences, configuration: await configurationScope(config) })
   } catch (error) { process.stderr.write(JSON.stringify({ error: safeError(error, config) }) + '\n'); process.exitCode = 1 }
 }

@@ -25,6 +25,7 @@ test('trust selection excludes foreign markers, events, commands and ancestor pr
 test('versioned CLI install/upgrade preserves credentials and refuses an unrelated binary', async () => {
   const root = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-delivery-')))
   const prefix = resolve(root, 'prefix'), envFile = resolve(root, 'original.env')
+  const environment = { JTH_CONFIG_DIR: resolve(root, 'user-config') }
   try {
     await writeFile(envFile, 'EMBEDDING_API_KEY=keep-private\nJTH_DATA_DIR=state\n')
     for (const build of ['first-build', 'second-build']) {
@@ -32,20 +33,21 @@ test('versioned CLI install/upgrade preserves credentials and refuses an unrelat
       await mkdir(resolve(source, 'bin'), { recursive: true })
       await writeFile(resolve(source, 'bin/jth.mjs'), '#!/usr/bin/env node\nconsole.log("fixture CLI")\n')
       await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'jt-harness', version: '0.1.0', jthDistribution: { build } }))
-      const installed = await installCli(source, prefix, envFile)
+      const installed = await installCli(source, prefix, envFile, environment)
       assert.equal(await realpath(installed.binary), resolve(installed.root, 'bin/jth.mjs'))
-      assert.equal(await realpath(resolve(installed.root, '.env')), envFile)
+      assert.equal(await realpath(resolve(installed.root, '.env')), resolve(environment.JTH_CONFIG_DIR, '.env'))
+      assert.notEqual(installed.envFile, envFile)
       assert((await readFile(installed.envFile, 'utf8')).includes('keep-private'))
     }
     assert.equal(await readFile(envFile, 'utf8'), 'EMBEDDING_API_KEY=keep-private\nJTH_DATA_DIR=state\n')
     const before = await readFile(resolve(prefix, 'share/jth/.env'), 'utf8')
     const replacement = resolve(root, 'replacement.env')
     await writeFile(replacement, 'EMBEDDING_API_KEY=do-not-replace\n')
-    await installCli(resolve(root, 'second-build'), prefix, replacement)
+    await installCli(resolve(root, 'second-build'), prefix, replacement, environment)
     assert.equal(await readFile(resolve(prefix, 'share/jth/.env'), 'utf8'), before)
     await mkdir(resolve(root, 'unrelated/bin'), { recursive: true })
     await writeFile(resolve(root, 'unrelated/bin/jth'), 'another tool')
-    await assert.rejects(installCli(resolve(root, 'first-build'), resolve(root, 'unrelated'), envFile), /保留已有/)
+    await assert.rejects(installCli(resolve(root, 'first-build'), resolve(root, 'unrelated'), envFile, environment), /保留已有/)
     assert.equal(await readFile(resolve(root, 'unrelated/bin/jth'), 'utf8'), 'another tool')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
@@ -57,7 +59,7 @@ test('project install and upgrade are idempotent; uninstall preserves data and o
   try {
     await mkdir(resolve(workspace, '.codex'), { recursive: true })
     await writeFile(resolve(workspace, '.codex/hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'keep-other-tool' }] }] } }))
-    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\n`)
+    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await cli('install', '--project', 'fixture', '--env-file', envFile)
     await mkdir(resolve(workspace, 'bin'))
     await symlink(resolve(root, 'bin/jth.mjs'), resolve(workspace, 'bin/jth.mjs'))
@@ -132,7 +134,7 @@ test('init enables planning and disables project native memory; install and upgr
   const execute = promisify(execFile), envFile = resolve(workspace, '.env'), path = resolve(workspace, '.codex/config.toml')
   const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })
   try {
-    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\n`)
+    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await assert.rejects(cli('init', '--codex-memory', 'invalid'), /仅支持 off 或 inherit/)
     await assert.rejects(readFile(path), { code: 'ENOENT' })
     const result = JSON.parse((await cli('init', '--project', 'fixture', '--env-file', envFile)).stdout)

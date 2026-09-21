@@ -2,7 +2,8 @@ import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
-import { loadConfig, safeError } from '@jt-harness/memo/config'
+import { safeError } from '@jt-harness/memo/config'
+import { loadWorkspaceConfig } from './configuration.ts'
 import type { Config } from '@jt-harness/memo/config'
 import { captureSettingsSchema, captureDeclaration, captureStatus, configureHooks } from '@jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
@@ -26,8 +27,8 @@ export async function codexMain(root: string, args: string[]) {
     }
     const invalid = Object.keys(values).filter(name => !['env-file', 'help', ...allowed[positionals[0]]].includes(name))
     if (invalid.length) throw new Error(`${positionals[0]} 不支持：${invalid.join(', ')}`)
-    config = await loadConfig(root, values['env-file'])
     const workspace = await realpath(resolve(values.workspace ?? process.cwd()))
+    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     const home = resolve(values['codex-home'] ?? process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
     const scope = { project_ids: values.project ?? [], business_ids: values.business ?? [] }
     if (['capture', 'declare'].includes(positionals[0])) {

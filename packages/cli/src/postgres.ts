@@ -3,7 +3,8 @@ import { promisify, parseArgs } from 'node:util'
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { openDatabase, loadConfig, safeError } from '@jt-harness/memo'
+import { openDatabase, safeError } from '@jt-harness/memo'
+import { loadWorkspaceConfig } from './configuration.ts'
 import type { Config } from '@jt-harness/memo'
 
 const execute = promisify(execFile)
@@ -63,7 +64,7 @@ export async function databaseMain(root: string, args: string[]) {
     if (values.help || !positionals.length) { process.stdout.write('jth db status|start|stop [--env-file <path>]\nstatus 只观察；stop 关闭明确配置的本地实例，数据保留。\n'); return }
     const [command] = positionals
     if (positionals.length !== 1 || !['status', 'start', 'stop'].includes(command)) throw new Error('未知数据库命令')
-    config = await loadConfig(root, values['env-file'])
+    config = await loadWorkspaceConfig(root, values['env-file'])
     if (command === 'start') { process.stdout.write(JSON.stringify(await startPostgres(config)) + '\n'); return }
     const status = await postgresStatus(config)
     if (command === 'stop' && status.status === 'running') {

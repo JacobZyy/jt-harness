@@ -26,10 +26,10 @@ export async function readPrimaryInstallation(primary: string) {
   // Reuse the primary installation's scope and config instead of copying workspace-bound runtime files.
   const status = JSON.parse(execFileSync(process.execPath, [primaryCli, 'flow', 'status', '--workspace', primary], {
     cwd: primary, encoding: 'utf8',
-  })) as { memo_scope: { project_ids: string[], business_ids: string[] } | null }
+  })) as { memo_scope: { project_ids: string[], business_ids: string[] } | null, configuration?: { envFile: string } }
   const locator = JSON.parse(await readFile(resolve(primary, '.jth/flow.json'), 'utf8')) as { envFile: string }
   if (!status.memo_scope) throw new Error('主工作区尚未配置 Memo 范围')
-  const envFile = await realpath(locator.envFile)
+  const envFile = await realpath(status.configuration?.envFile ?? locator.envFile)
   return { envFile, projectIds: status.memo_scope.project_ids, businessIds: status.memo_scope.business_ids }
 }
 

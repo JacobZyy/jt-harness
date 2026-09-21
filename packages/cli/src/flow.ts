@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util'
 import { findFlowWorkspace, flowPath, locatorSchema } from '@jt-harness/flow'
 import { captureSettingsSchema, configureFlowHooks, configureHooks, flowEntryHook, flowEntryMarker, flowEntryReceiptPath, installationPath, readJson, writeJson, type CaptureSettings } from '@jt-harness/codex-hooks'
 import { loadConfig, safeError } from '@jt-harness/memo/config'
+import { configurationScope, loadWorkspaceConfig } from './configuration.ts'
 
 const help = `jth flow install --project <id> [--business <id>] [--env-file <path>]
 jth flow status                  查看入口安装、最近输出记录与 Memo 范围，不连接任务数据库
@@ -16,7 +17,7 @@ jth flow legacy <command>        显式访问旧任务，例如 status --all、c
 目标、任务列表、续跑与恢复由 Codex 原生能力管理；项目测试直接使用原有命令。
 `
 
-export async function installFlow(root: string, workspace: string, config: { dataDir: string, envFile: string }, scope: CaptureSettings['scope']) {
+export async function installFlow(root: string, workspace: string, config: { dataDir: string, envFile: string, envAliases?: readonly string[] }, scope: CaptureSettings['scope']) {
   const memo = await configureHooks(root, config, workspace, scope, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
   await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
   return { ...await configureFlowHooks(root, workspace), memo, task_owner: 'Codex', locator: flowPath(workspace) }
@@ -63,7 +64,7 @@ export async function flowMain(root: string, args: string[]) {
       return
     }
     if (command === 'install') {
-      const config = await loadConfig(root, values['env-file'])
+      const config = await loadWorkspaceConfig(root, values['env-file'], workspace)
       output(await installFlow(root, workspace, config, { project_ids: values.project ?? [], business_ids: values.business ?? [] }))
       return
     }
@@ -78,7 +79,7 @@ export async function flowMain(root: string, args: string[]) {
     const hooks = await readJson(resolve(workspace, '.codex/hooks.json')) as { hooks?: Record<string, { hooks: { statusMessage?: string }[] }[]> } | undefined
     const handlers = Object.values(hooks?.hooks ?? {}).flatMap(groups => groups.flatMap(group => group.hooks))
     const legacyHooks = handlers.filter(handler => handler.statusMessage === 'jth flow context').length
-    output({ mode: 'native', workspace, skill: { path: skillPath, installed: skillTarget !== null }, memo_scope: memoScope,
+    output({ mode: 'native', workspace, configuration: await configurationScope(config), skill: { path: skillPath, installed: skillTarget !== null }, memo_scope: memoScope,
       memo_enabled: Boolean(installation && !installation.disabled), legacy_flow_hooks: legacyHooks,
       entry_hook: { installed: handlers.some(handler => handler.statusMessage === flowEntryMarker), event: 'UserPromptSubmit',
         receipt_path: flowEntryReceiptPath(workspace), last_emission: await readJson(flowEntryReceiptPath(workspace)) ?? null },

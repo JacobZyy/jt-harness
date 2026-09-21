@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { z } from 'zod'
 import { submissionSchema } from '@jt-harness/memo/contracts'
 import type { Submission } from '@jt-harness/memo/contracts'
-import { safeError } from '@jt-harness/memo/config'
+import { matchesConfigFile, safeError } from '@jt-harness/memo/config'
 import { captureSchema, captureSettingsSchema, codexDirectory, hash, installationPath, readJson, retainTranscript, writeJson } from './capture.ts'
 import type { Capture } from './capture.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
@@ -140,7 +140,7 @@ async function discoverTranscripts(stream: Stream) {
 }
 
 /** Also callable with a fake durable recipient for offline crash/replay checks. */
-export async function drainCaptureFiles(config: { dataDir: string, envFile: string }, deliver: Deliver, signal?: AbortSignal) {
+export async function drainCaptureFiles(config: { dataDir: string, envFile: string, envAliases?: readonly string[] }, deliver: Deliver, signal?: AbortSignal) {
   const directory = codexDirectory(config)
   const reports: { stream: string, error: string }[] = []
   let received = 0
@@ -152,7 +152,7 @@ export async function drainCaptureFiles(config: { dataDir: string, envFile: stri
   }
   events.sort((left, right) => left.capture.received_at.localeCompare(right.capture.received_at) || left.capture.id.localeCompare(right.capture.id))
   for (const { path, capture } of events) {
-    if (capture.settings.env_file !== config.envFile) continue
+    if (!matchesConfigFile(config, capture.settings.env_file)) continue
     signal?.throwIfAborted()
     const sessionId = capture.event.agent_id ?? capture.event.session_id
     const key = hash(JSON.stringify([capture.settings, sessionId]))
@@ -184,7 +184,7 @@ export async function drainCaptureFiles(config: { dataDir: string, envFile: stri
     let stream: Stream | undefined
     try {
       stream = streamSchema.parse(await readJson(statePath))
-      if (stream.settings.env_file !== config.envFile) continue
+      if (!matchesConfigFile(config, stream.settings.env_file)) continue
       const installation = await readJson(installationPath(config, stream.settings.workspace)) as { disabled?: boolean, settings?: { enabled_at: string } } | undefined
       const active = !installation?.disabled && (!installation?.settings || installation.settings.enabled_at === stream.settings.enabled_at)
       for (const path of active ? await discoverTranscripts(stream) : []) {
@@ -215,4 +215,3 @@ export async function drainCaptureFiles(config: { dataDir: string, envFile: stri
   }
   return { received, accepted, waiting, failed: reports.length, errors: reports }
 }
-

@@ -6,6 +6,8 @@
 
 本地交付命令：`jth init / install / upgrade / doctor / uninstall`；`jth init --project <id>` 接入项目、开启原生 `update_plan`，并默认关闭本项目的 Codex 原生记忆读写，使用 `--codex-memory inherit` 让记忆配置跟随上层。本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
 
+共享配置与凭据默认存放于 `~/.jt-harness/.env`；仓库只保存自己的接入、范围与开关，默认不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级与仓库级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
+
 ## 模块与运行模式
 
 生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
@@ -145,7 +147,7 @@ jth db stop
 
 Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness` 本地环境。参考已有项目的 setup 模式，创建工作树时执行 `node scripts/setup-worktree.ts`；已经存在或手动创建的工作树运行 `pnpm setup:worktree`。
 
-设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和 `.env`，为当前工作树单独安装依赖、构建，并重新生成 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 链接。不会复制主工作区绑定了绝对路径的 Hook 或任务状态；Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
+设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和已选配置（通常为用户目录 `.env`），为当前工作树单独安装依赖、构建，并重新生成 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 链接。不会复制主工作区绑定了绝对路径的 Hook 或任务状态；Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
 
 工作树 `.env` 链接到主配置，密钥更新立即共享，不提交 Git；相对运行路径以源配置所在目录解析。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 和构建产物保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成下方构建与 `jth flow install`，作为可用的配置来源。
 
@@ -155,10 +157,9 @@ Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness`
 pnpm install --frozen-lockfile
 pnpm build
 node bin/jth.mjs --help
-# 初次配置时复制模板；已有 .env 时不要覆盖。
-cp -n .env.example .env
-chmod 600 .env
-# 配置 PostgreSQL 连接与 Embedding API 后：
+# 首次运行检查用户配置，缺项时在终端补全。
+node bin/jth.mjs init --project jt-harness --trust
+# PostgreSQL 服务就绪后：
 node bin/jth.mjs memo init
 ```
 

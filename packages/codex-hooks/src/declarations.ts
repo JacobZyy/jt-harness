@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { declarationMarker, parseDeclaration, evidenceSchema, recordDraftSchema } from '@jt-harness/memo/contracts'
 import type { Submission } from '@jt-harness/memo/contracts'
+import { matchesConfigFile } from '@jt-harness/memo/config'
 import { captureEvent, captureSchema, codexDirectory, hash, hookEventSchema, readJson, writeJson } from './capture.ts'
 import type { Capture, CaptureSettings } from './capture.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
@@ -109,7 +110,7 @@ export async function collectDeclarations(config: CapturePaths) {
   const errors: { event_id: string, error: string }[] = []
   for (const file of await jsonFiles(resolve(codexDirectory(config), 'declaration-inbox'))) {
     const capture = captureSchema.parse(await readJson(file))
-    if (capture.settings.env_file !== config.envFile) continue
+    if (!matchesConfigFile(config, capture.settings.env_file)) continue
     try {
       const staged = await prepareDeclaration(capture, config)
       await writeJson(resolve(codexDirectory(config), 'declaration-events', `${capture.id}.json`), { capture, result: staged ?? { status: 'skipped' } })

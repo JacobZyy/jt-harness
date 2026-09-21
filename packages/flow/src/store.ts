@@ -11,11 +11,16 @@ import type { z } from 'zod'
 
 export const flowPath = (workspace: string) => resolve(workspace, '.jth/flow.json')
 export const legacyFlowPath = (workspace: string) => resolve(workspace, '.jth/flow.sqlite')
-export function findFlowWorkspace(start: string) {
+export function findFlowWorkspace(start: string): string
+export function findFlowWorkspace(start: string, optional: true): string | undefined
+export function findFlowWorkspace(start: string, optional = false) {
   let path = realpathSync(start)
   while (!existsSync(flowPath(path)) && !existsSync(legacyFlowPath(path))) {
     const parent = dirname(path)
-    if (parent === path) throw new Error('当前项目尚未安装流程控制；运行 jth flow install --project <id>')
+    if (parent === path) {
+      if (optional) return undefined
+      throw new Error('当前项目尚未安装流程控制；运行 jth flow install --project <id>')
+    }
     path = parent
   }
   return path

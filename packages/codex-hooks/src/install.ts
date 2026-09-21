@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
 import { declarationInstructions } from './instructions.ts'
+import { matchesConfigFile } from '@jt-harness/memo/config'
 
 const marker = 'jth memo capture'
 const declarationHookMarker = 'jth memo declaration'
@@ -59,7 +60,7 @@ export async function updateHookConfig(hooksPath: string, backupDirectory: strin
   await writeJson(hooksPath, next)
 }
 
-export async function configureHooks(root: string, config: { dataDir: string, envFile: string }, workspace: string, scope: CaptureSettings['scope'] | undefined, home: string) {
+export async function configureHooks(root: string, config: { dataDir: string, envFile: string, envAliases?: readonly string[] }, workspace: string, scope: CaptureSettings['scope'] | undefined, home: string) {
   const hooksPath = resolve(workspace, '.codex/hooks.json')
   const manifestPath = installationPath(config, workspace)
   const prior = await readJson(manifestPath) as { settings?: CaptureSettings, disabled?: boolean, mode?: string } | undefined
@@ -67,7 +68,7 @@ export async function configureHooks(root: string, config: { dataDir: string, en
     workspace, codex_home: home, env_file: config.envFile, enabled_at: prior?.disabled || prior?.mode !== 'declaration' ? new Date().toISOString() : prior.settings?.enabled_at ?? new Date().toISOString(), scope,
   }) : undefined
   if (settings && prior?.settings && !prior.disabled && (JSON.stringify(prior.settings.scope) !== JSON.stringify(settings.scope)
-    || prior.settings.workspace !== settings.workspace || prior.settings.env_file !== settings.env_file || prior.settings.codex_home !== settings.codex_home)) throw new Error('已有安装的范围不同；请先 uninstall，再重新 install')
+    || prior.settings.workspace !== settings.workspace || !matchesConfigFile(config, prior.settings.env_file) || prior.settings.codex_home !== settings.codex_home)) throw new Error('已有安装的范围不同；请先 uninstall，再重新 install')
   const command = settings ? [process.execPath, resolve(root, 'bin/jth.mjs'), 'memo', 'codex', 'declare',
     '--env-file', config.envFile, '--workspace', settings.workspace, '--codex-home', settings.codex_home,
     '--since', settings.enabled_at, ...settings.scope.project_ids.flatMap(id => ['--project', id]),

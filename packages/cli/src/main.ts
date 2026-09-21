@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { runIndexWorker } from '@jt-harness/memo'
 import { connectDatabase } from './postgres.ts'
+import { loadWorkspaceConfig } from './configuration.ts'
 import type { Pool } from '@jt-harness/memo'
 import { optionsSchema, submissionSchema, timestampSchema } from '@jt-harness/memo/contracts'
 import { executionProfile, loadConfig, safeError } from '@jt-harness/memo/config'
@@ -58,7 +59,7 @@ send 可选：--model <DSH model>、--provider <DSH provider>、--review（先�
 retry 可选：--timeout-ms <毫秒>，显式调整本次及后续重试的 Agent 时间预算
 retry 可选：--provider <id> --model <id>，显式切换失败任务，原执行快照保留在 failure_history
 review list/archives 可选：--limit <1..100>
-通用：--env-file <path>（默认工具目录 .env）、--help
+通用：--env-file <path>（显式覆盖）；默认使用项目已选配置或 ~/.jt-harness/.env；--help
 输出均为 JSON；错误写入 stderr，退出码 1。
 `
 
@@ -132,7 +133,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
     const limit = Number(values.limit ?? (command === 'search' ? 3 : 10))
     if (command === 'search' && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw new Error('--limit 必须为 1..50 的整数')
     const asOf = values['as-of'] ? timestampSchema.parse(values['as-of']) : undefined
-    config = await loadConfig(root, values['env-file'])
+    config = await loadWorkspaceConfig(root, values['env-file'])
     if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
     pool = await connectDatabase(config)
     pool.on('error', error => { process.stderr.write(`${safeError(error, config)}\n`); controller.abort(error) })

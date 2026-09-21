@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { parseArgs } from 'node:util'
-import { loadConfig, safeError } from '@jt-harness/memo/config'
+import { safeError } from '@jt-harness/memo/config'
+import { loadWorkspaceConfig } from './configuration.ts'
 import type { Config } from '@jt-harness/memo/config'
 import { prepareEvidence, readEvidence, stageRecord } from '@jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
@@ -22,7 +23,7 @@ export async function inlineMain(root: string, args: string[]) {
     if (!Object.hasOwn(allowed, command)) throw new Error('未知会话内记忆命令')
     const invalid = Object.keys(values).filter(key => !['env-file', 'help', ...allowed[command]].includes(key))
     if (invalid.length) throw new Error(command + ' 不支持：' + invalid.join(', '))
-    config = await loadConfig(root, values['env-file'])
+    config = await loadWorkspaceConfig(root, values['env-file'])
     let result: unknown
     if (command === 'prepare') {
       if (!values.session || positionals.length !== 1) throw new Error('prepare 需要 --session <id>')

@@ -1,6 +1,6 @@
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { parseEnv } from 'node:util'
 import { z } from 'zod'
 import { optionsSchema } from './contracts.ts'
@@ -11,12 +11,38 @@ const endpoint = z.url().transform(value => new URL(value)).refine(url => (
   ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash
 ), 'Embedding 地址必须为不含凭据、查询参数的 HTTP(S) URL').transform(url => url.href.replace(/\/$/, ''))
 
-export async function loadConfig(root: string, envFile?: string, environment: NodeJS.ProcessEnv = process.env) {
-  const requestedFile = resolve(envFile ?? environment.JTH_ENV_FILE ?? resolve(root, '.env'))
-  const file = await lstat(requestedFile).then(info => info.isSymbolicLink() ? realpath(requestedFile) : requestedFile).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return requestedFile
+export function userConfigPaths(environment: NodeJS.ProcessEnv = process.env) {
+  const directory = resolve(environment.JTH_CONFIG_DIR ?? resolve(homedir(), '.jt-harness'))
+  return { directory, envFile: resolve(directory, '.env'), aliasesFile: resolve(directory, 'config-migrations.json') }
+}
+
+export async function readConfigAliases(environment: NodeJS.ProcessEnv = process.env) {
+  const contents = await readFile(userConfigPaths(environment).aliasesFile, 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return undefined
     throw error
   })
+  if (contents === undefined) return []
+  let value: unknown
+  try { value = JSON.parse(contents) } catch { throw new Error('用户配置迁移记录不是有效 JSON') }
+  return z.strictObject({ version: z.literal(1), sources: z.array(z.string().refine(isAbsolute)) }).parse(value).sources
+}
+
+export async function configLocation(envFile?: string, environment: NodeJS.ProcessEnv = process.env) {
+  const paths = userConfigPaths(environment), aliases = await readConfigAliases(environment)
+  const requested = resolve(envFile ?? environment.JTH_ENV_FILE ?? paths.envFile)
+  const actual = await lstat(requested).then(info => info.isSymbolicLink() ? realpath(requested) : requested)
+    .catch(error => { if (error.code === 'ENOENT') return requested; throw error })
+  const managed = await realpath(paths.envFile).catch(error => { if (error.code === 'ENOENT') return paths.envFile; throw error })
+  const file = requested === paths.envFile || aliases.includes(requested) || aliases.includes(actual) ? managed : actual
+  return { envFile: file, envAliases: file === managed ? aliases : [] }
+}
+
+export function matchesConfigFile(config: { envFile: string, envAliases?: readonly string[] }, file: string | undefined) {
+  return file !== undefined && (config.envFile === file || Boolean(config.envAliases?.includes(file)))
+}
+
+export async function loadConfig(_root: string, envFile?: string, environment: NodeJS.ProcessEnv = process.env) {
+  const location = await configLocation(envFile, environment), file = location.envFile
   let contents = ''
   try { contents = await readFile(file, 'utf8') } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -40,7 +66,7 @@ export async function loadConfig(root: string, envFile?: string, environment: No
   } : undefined
   const space = definition ? spaceSchema.parse({ ...definition, id: `embedding-${sha256(JSON.stringify(definition)).slice(0, 24)}` }) : undefined
   return {
-    envFile: file,
+    ...location,
     databaseUrl: values.JTH_DATABASE_URL,
     dataDir: values.JTH_DATA_DIR ? resolve(dirname(file), values.JTH_DATA_DIR) : resolve(homedir(), '.jth'),
     postgres: values.JTH_PG_DATA_DIR ? {
@@ -50,6 +76,7 @@ export async function loadConfig(root: string, envFile?: string, environment: No
     agent,
     embedding: {
       baseUrl, space, apiKey: values.EMBEDDING_API_KEY,
+      ...(values.EMBEDDING_MODEL ? { model: values.EMBEDDING_MODEL } : {}),
       timeoutMs: positiveInteger.max(2_147_483_647).parse(values.EMBEDDING_TIMEOUT_MS ?? '60000'),
     },
   }

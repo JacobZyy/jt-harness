@@ -8,7 +8,8 @@ import { context, trace, SpanStatusCode } from '@opentelemetry/api'
 import { BasicTracerProvider, SimpleSpanProcessor, InMemorySpanExporter } from '@opentelemetry/sdk-trace-base'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto'
 import { captureMonitor, configureMonitorHooks, monitorMetrics, readJson, writeJson, type MonitorReceipt } from '@jt-harness/codex-hooks'
-import { loadConfig, openDatabase, safeError, type Config } from '@jt-harness/memo'
+import { openDatabase, safeError, type Config } from '@jt-harness/memo'
+import { loadWorkspaceConfig } from './configuration.ts'
 import { phoenixStatus, phoenixUrl, startPhoenix, stopPhoenix } from './phoenix.ts'
 import { startBackground } from './background.ts'
 import { withCodex } from './codex-client.ts'
@@ -104,8 +105,8 @@ export async function monitorMain(root: string, args: string[]) {
     if (values.help || !command) { process.stdout.write(help); return }
     if (positionals.length !== 1 || !['start', 'stop', 'status', 'open', 'capture', 'flush'].includes(command)) throw new Error('未知 monitor 命令')
     const workspace = resolve(values.workspace ?? process.cwd())
-    const locator = await readJson(resolve(workspace, '.jth/flow.json')) as { envFile: string } | undefined
-    config = await loadConfig(root, values['env-file'] ?? locator?.envFile)
+    const locator = await readJson(resolve(workspace, '.jth/flow.json'))
+    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     if (command === 'capture') {
       const chunks: Buffer[] = []; let bytes = 0
       for await (const chunk of process.stdin) { bytes += chunk.length; if (bytes > 512000) throw new Error('监控 Hook 输入过大'); chunks.push(Buffer.from(chunk)) }

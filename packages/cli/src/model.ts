@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import search from '@inquirer/search'
 import { stdin, stdout } from 'node:process'
-import { loadConfig, safeError } from '@jt-harness/memo/config'
+import { safeError } from '@jt-harness/memo/config'
+import { loadWorkspaceConfig } from './configuration.ts'
 import type { Config } from '@jt-harness/memo/config'
 import { envVersion, saveModel, withModelCatalog } from '@jt-harness/memo/models'
 
@@ -12,7 +13,7 @@ export async function modelMain(root: string, args: string[]) {
     const { values } = parseArgs({ args, options: { 'env-file': { type: 'string' }, list: { type: 'boolean' }, provider: { type: 'string' }, model: { type: 'string' }, help: { type: 'boolean', short: 'h' } } })
     if (values.help) { stdout.write('jth memo model                         交互选择 DSH 模型\njth memo model --list                  查询实时列表（JSON）\njth memo model --provider <id> --model <id>\n通用：--env-file <path>\n'); return }
     if (Boolean(values.provider) !== Boolean(values.model) || (values.list && values.provider)) throw new Error('--provider 和 --model 必须一起使用，不能与 --list 混用')
-    config = await loadConfig(root, values['env-file'])
+    config = await loadWorkspaceConfig(root, values['env-file'])
     const current = config
     const version = envVersion(await readFile(current.envFile, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error }))
     await withModelCatalog(current, async (catalog, check) => {

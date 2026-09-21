@@ -2,10 +2,11 @@ import { readdir, stat, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { evidenceSchema, recordDraftSchema, recordId, declarationId, parseExtraction, submissionSchema } from '@jt-harness/memo/contracts'
 import type { Evidence, RecordDraft, Submission } from '@jt-harness/memo/contracts'
+import { matchesConfigFile } from '@jt-harness/memo/config'
 import { captureSchema, codexDirectory, hash, inside, readJson, retainTranscript, writeJson } from './capture.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
 
-export interface CapturePaths { dataDir: string, envFile: string }
+export interface CapturePaths { dataDir: string, envFile: string, envAliases?: readonly string[] }
 async function files(directory: string) {
   try { return (await readdir(directory)).filter(name => name.endsWith('.json')).map(name => resolve(directory, name)) } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
@@ -18,7 +19,7 @@ export async function registerCaptures(config: CapturePaths) {
   let received = 0
   for (const path of await files(resolve(codexDirectory(config), 'inbox'))) {
     const event = captureSchema.parse(await readJson(path))
-    if (event.settings.env_file !== config.envFile) continue
+    if (!matchesConfigFile(config, event.settings.env_file)) continue
     const target = resolve(codexDirectory(config), 'events', `${event.id}.json`)
     await writeJson(target, event)
     const { unlink } = await import('node:fs/promises')
@@ -34,7 +35,7 @@ export async function prepareEvidence(config: CapturePaths, sessionId: string, o
   const captures = []
   for (const directory of ['inbox', 'events']) for (const path of await files(resolve(codexDirectory(config), directory))) {
     const value = captureSchema.parse(await readJson(path))
-    if ((value.event.agent_id ?? value.event.session_id) === sessionId && value.settings.env_file === config.envFile) captures.push(value)
+    if ((value.event.agent_id ?? value.event.session_id) === sessionId && matchesConfigFile(config, value.settings.env_file)) captures.push(value)
   }
   captures.sort((a, b) => a.received_at.localeCompare(b.received_at))
   const latest = captures.at(-1)
@@ -147,7 +148,7 @@ export async function deliverRecords(config: CapturePaths, accept: (draft: Recor
   const accepted: unknown[] = [], errors: { submission_id: string, error: string }[] = []
   for (const path of await files(resolve(codexDirectory(config), 'records'))) {
     const raw = await readJson(path) as { draft: RecordDraft, env_file: string, declaration?: boolean }
-    if (raw?.env_file !== config.envFile) continue
+    if (!matchesConfigFile(config, raw?.env_file)) continue
     const id = path.slice(path.lastIndexOf('/') + 1, -5)
     try {
       const draft = recordDraftSchema.parse(raw.draft)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, appendFile, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, realpath, rename, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Pool } from 'pg'
@@ -8,6 +8,7 @@ import { loadConfig, prepareDatabase, MemoStorage, runIndexWorker, retryJob, enq
 import type { Evidence, RecordDraft } from '@jt-harness/memo/contracts'
 import { captureDeclaration, rememberEntryRead } from '@jt-harness/codex-hooks'
 import { receiveRecords } from '../../packages/cli/src/ingest.ts'
+import { ensureUserConfig } from '../../packages/cli/src/configuration.ts'
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -88,7 +89,9 @@ test('declarations preserve source, deduplicate across turns, apply explicit rev
   const envFile = resolve(directory, '.env'), sourceFile = resolve(home, 'sessions/parent.jsonl')
   await mkdir(resolve(home, 'sessions'), { recursive: true })
   await writeFile(envFile, `JTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nJTH_DATA_DIR=${directory}/data\nEMBEDDING_API_KEY=test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=declaration-test\nEMBEDDING_DIMENSIONS=2\nJTH_DSH_BIN=/must-not-run-dsh\n`)
-  const config = await loadConfig(process.cwd(), envFile, {}), storage = new MemoStorage(pool)
+  const environment = { JTH_CONFIG_DIR: resolve(directory, 'user-config') }
+  let config = await loadConfig(process.cwd(), envFile, environment)
+  const storage = new MemoStorage(pool)
   const settings = { workspace: directory, codex_home: home, env_file: envFile, enabled_at: '2026-01-01T00:00:00Z', scope: { project_ids: ['declaration-test'], business_ids: [] } }
   const row = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: new Date().toISOString(), payload }) + '\n'
   await writeFile(sourceFile, row('session_meta', { id: 'declaration-session' }))
@@ -115,7 +118,7 @@ test('declarations preserve source, deduplicate across turns, apply explicit rev
     assert.deepEqual(result.declaration_errors, [])
     return result.accepted as { declaration_id: string, submission_id: string | null, entry_ids: string[], new_facts: number, linked_sources: number }[]
   }
-  const work = () => runIndexWorker(pool, async () => config)
+  const work = () => runIndexWorker(pool, file => loadConfig(process.cwd(), file, environment))
   try {
     await prepareDatabase(pool, true)
     const beforeJobs = (await pool.query('SELECT count(*)::int AS count FROM jt_memo.jobs')).rows[0].count
@@ -133,6 +136,13 @@ test('declarations preserve source, deduplicate across turns, apply explicit rev
     assert(original.submission.messages.some(message => message.text === '项目使用 pnpm。'))
     const legacyId = 'declaration-legacy-must-not-run'
     await enqueue(pool, { ...original.submission, submission_id: legacyId }, executionProfile(config))
+
+    const oldConfigPath = config.envFile
+    const migrated = await ensureUserConfig(process.cwd(), envFile, environment)
+    await rename(envFile, `${envFile}.retained`)
+    config = await loadConfig(process.cwd(), oldConfigPath, environment)
+    assert.equal(config.envFile, migrated.envFile)
+    assert.equal((await pool.query('SELECT execution FROM jt_memo.jobs WHERE id=$1', [initial.submission_id])).rows[0].execution.envFile, oldConfigPath)
 
     await declare('项目使用 pnpm。')
     const [pendingDuplicate] = await accept()
