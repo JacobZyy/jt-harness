@@ -59,6 +59,8 @@ Memo 继续通过 Stop 保存主会话声明，后台仅执行存储和 Embeddin
 
 原生 Goal 和计划工具由当前宿主提供，不由 `jth` 模拟。Skill 要求实际工具可用时主动创建/更新计划；未暴露工具时明确说明，并继续当前任务，不用 Markdown 清单或旧 Flow Task 冒充原生 UI。
 
+Codex CLI 0.152.0 起计划工具默认关闭。`jth init` 会在项目 `.codex/config.toml` 设置 `tools.update_plan.enabled = true`；`install` 和 `upgrade` 保留已有选择。新配置由重新加载的受信任项目会话读取，是否实际提供工具仍以宿主工具清单为准。
+
 `turn/plan/updated` 是宿主发出的计划通知，不是可以写入的公共计划接口。本版不伪造这些通知、不修改 Codex 私有数据库，也不为适配原生功能添加一个新服务。
 
 本次开发实际使用了原生 `create_goal/get_goal`。当前会话没有暴露原生计划更新工具；另用本机 Codex CLI 0.155.0 执行一次只读、临时会话探测，关闭记忆生成和子 Agent，结果同样明确返回 `原生计划工具 unavailable`。未伪造任务列表，也未将旧 Flow 任务当成原生计划。原生 TaskList 的真实展示仍需要在暴露计划工具的宿主会话验收。

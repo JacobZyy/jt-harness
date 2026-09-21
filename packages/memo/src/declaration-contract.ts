@@ -11,6 +11,7 @@ export const declarationSchema = z.strictObject({
     text: z.string().trim().min(1), scope: fact.scope,
     basis: z.enum(['user_statement', 'user_confirmed', 'tool_observation', 'assistant_proposal', 'agent_inference']),
     quote: z.string().trim().min(1).max(240),
+    confirmation_quote: z.string().trim().min(1).max(240).optional(),
     change: z.strictObject({ kind: z.enum(['correction', 'supplement', 'conflict']), target: z.uuid() }).optional(),
   })).min(1).max(3),
 }).superRefine((value, context) => {
@@ -19,6 +20,9 @@ export const declarationSchema = z.strictObject({
   }
   if (value.items.some(item => item.change && ['assistant_proposal', 'agent_inference'].includes(item.basis))) {
     context.addIssue({ code: 'custom', message: '候选建议不能更正、补充或冲突已发布事实' })
+  }
+  if (value.items.some(item => item.confirmation_quote && item.basis !== 'user_confirmed')) {
+    context.addIssue({ code: 'custom', message: 'confirmation_quote 仅用于 user_confirmed 声明' })
   }
 })
 export type MemoryDeclaration = z.infer<typeof declarationSchema>

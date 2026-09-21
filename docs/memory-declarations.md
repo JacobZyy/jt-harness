@@ -34,6 +34,20 @@ flowchart TD
 
 `scope` 使用已有的 `project / business / user / current_task / unspecified`。事实依据为 `user_statement / user_confirmed / tool_observation`；未确认建议可用 `assistant_proposal / agent_inference`，进入候选集合。`quote` 是此前真实消息中的短连续原文，不用声明自身作为证据。
 
+### 跨轮确认方案
+
+“可以，你做吧”等短确认是新的决策事实。主 Agent 关联用户明确采纳的前文方案、修改及范围，确认后在现有计划或会话中保留简短待声明决策和两段来源引文；执行、上下文压缩及恢复时接续，在最终回复前核对声明。只记录实际采纳的部分；指向不清时不猜测，批准实施不代表已经完成。
+
+此时使用 `user_confirmed`，`quote` 引用助手方案，`confirmation_quote` 引用后续用户确认或修改。每段最多 240 字符，尽量包含具体选项和约束，避免孤立、含糊的引文。例如助手提出方案 A 与“方案 B：每 15 分钟反馈，最多 300 字”，用户回复“采用方案 B，改成 200 字以内，可以，你做吧”，声明为：
+
+```text
+<!-- jth-memory {"items":[{"text":"用户已批准每 15 分钟反馈，最多 200 字；待实施。","scope":"project","basis":"user_confirmed","quote":"方案 B：每 15 分钟反馈，最多 300 字","confirmation_quote":"采用方案 B，改成 200 字以内，可以，你做吧"}]} -->
+```
+
+后台只接受真实用户确认和它之前的助手方案；助手复述确认语不能充当用户确认。两条消息写入已有 `source_message_ids`，`memo read` 可读到两份来源，不新增数据库表或模型调用。来源缺失、角色错误或先后颠倒时保留本地诊断。双方是否在语义上指向同一决策，仍由主 Agent 核对，程序不按“可以”关键词自动批准。
+
+`confirmation_quote` 仅允许用于 `user_confirmed`；普通事实和已有单引文声明继续有效。重复 Stop 沿用原有去重和回执规则。实际保存发生在回合结束后，执行中的摘要只是待声明内容，未取得回执不声称已入库。
+
 主 Agent 要更正、补充或标记冲突时，先读取旧记忆：
 
 ```sh

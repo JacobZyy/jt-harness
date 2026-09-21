@@ -5,8 +5,16 @@ import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { parse, patch } from '@decimalturn/toml-patch'
 
+function configTable(value: unknown, name: string): Record<string, unknown> {
+  if (value === undefined) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) {
+    throw new Error(`Codex 项目的 ${name} 必须是 TOML table；未修改原文件`)
+  }
+  return value as Record<string, unknown>
+}
+
 /** Project preferences stay in Codex's own config; never follow links into a shared user config. */
-export async function configureProjectMemories(workspace: string, policy: 'off' | 'inherit') {
+export async function configureProjectCodex(workspace: string, memoryPolicy: 'off' | 'inherit', enablePlan = false) {
   const directory = resolve(workspace, '.codex'), path = resolve(directory, 'config.toml')
   await mkdir(directory, { recursive: true })
   if (await realpath(directory) !== directory) throw new Error('项目 .codex 是符号链接；未修改共享配置')
@@ -16,14 +24,15 @@ export async function configureProjectMemories(workspace: string, policy: 'off' 
   const original = await read()
   let document: Record<string, unknown>
   try { document = parse(original) } catch { throw new Error('Codex 项目配置不是有效 TOML；未修改原文件') }
-  if (document.memories !== undefined && (!document.memories || typeof document.memories !== 'object' || Array.isArray(document.memories) || document.memories instanceof Date)) {
-    throw new Error('Codex 项目的 memories 必须是 TOML table；未修改原文件')
-  }
-  const memories = { ...document.memories as Record<string, unknown> }
-  if (policy === 'off') { memories.use_memories = false; memories.generate_memories = false }
+  const memories = { ...configTable(document.memories, 'memories') }
+  if (memoryPolicy === 'off') { memories.use_memories = false; memories.generate_memories = false }
   else { delete memories.use_memories; delete memories.generate_memories }
   if (Object.keys(memories).length) document.memories = memories
   else delete document.memories
+  if (enablePlan) {
+    const tools = configTable(document.tools, 'tools')
+    document.tools = { ...tools, update_plan: { ...configTable(tools.update_plan, 'tools.update_plan'), enabled: true } }
+  }
   const next = patch(original, document)
   if (next !== original) {
     const temporary = `${path}.${randomUUID()}.tmp`
@@ -33,8 +42,11 @@ export async function configureProjectMemories(workspace: string, policy: 'off' 
       await rename(temporary, path)
     } finally { await rm(temporary, { force: true }) }
   }
-  return { policy, path, activation: '受信任项目的新会话生效；当前会话可用 /memories 调整',
-    ...(policy === 'off' ? { use_memories: false, generate_memories: false } : {}) }
+  return {
+    codex_memory: { policy: memoryPolicy, path, activation: '受信任项目的新会话生效；当前会话可用 /memories 调整',
+      ...(memoryPolicy === 'off' ? { use_memories: false, generate_memories: false } : {}) },
+    ...(enablePlan ? { codex_plan: { enabled: true, path, activation: '受信任项目的新会话生效；重新加载后核验原生计划工具' } } : {}),
+  }
 }
 
 /** Read native configuration/status without starting a model turn. */

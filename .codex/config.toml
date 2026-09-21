@@ -1,3 +1,6 @@
 [memories]
 use_memories = false
 generate_memories = false
+
+[tools]
+update_plan = { enabled = true }

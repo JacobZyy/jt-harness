@@ -57,15 +57,28 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
   if (event.last_assistant_message !== undefined && event.last_assistant_message !== last.text) throw new Error('Stop 回复与已落盘日志尚不一致；保留事件等待恢复')
   const declaration = parseDeclaration(last.text)
   if (!declaration) return null
-  const matches = new Map<string, Submission['messages'][number]>()
+  const quotes = new Set(declaration.items.flatMap(item => item.confirmation_quote ? [item.quote, item.confirmation_quote] : [item.quote]))
+  const matches = new Map<string, Submission['messages']>()
   for await (const row of readTranscript({ ...options, end: last.start })) {
-    for (const message of row.messages) for (const item of declaration.items) {
-      if (message.text.includes(item.quote)) matches.set(item.quote, { ...message, location: { path: snapshot.original_path, start: row.start, end: row.end } })
+    for (const message of row.messages) for (const quote of quotes) {
+      if (!message.text.includes(quote)) continue
+      const sources = matches.get(quote) ?? []
+      sources.push({ ...message, location: { path: snapshot.original_path, start: row.start, end: row.end } })
+      matches.set(quote, sources)
     }
   }
-  if (declaration.items.some(item => !matches.has(item.quote))) throw new Error('声明引文未出现在本次回复之前的真实来源中；不会用声明自身充当证据')
+  const itemSources = declaration.items.map(item => {
+    const sources = matches.get(item.quote)
+    if (!sources?.length) throw new Error('声明引文未出现在本次回复之前的真实来源中；不会用声明自身充当证据')
+    if (!item.confirmation_quote) return [sources.at(-1)!]
+    const confirmation = matches.get(item.confirmation_quote)?.findLast(message => message.role === 'user')
+    if (!confirmation) throw new Error('确认引文未出现在此前的真实用户消息中')
+    const proposal = sources.findLast(message => message.role === 'assistant' && message.location!.end <= confirmation.location!.start)
+    if (!proposal) throw new Error('方案引文必须来自用户确认之前的助手消息')
+    return [proposal, confirmation]
+  })
   const final = { ...last.messages.at(-1)!, location: { path: snapshot.original_path, start: last.start, end: last.end } }
-  const messages = [...new Map([...matches.values(), final].map(message => [message.message_id, message])).values()]
+  const messages = [...new Map([...itemSources.flat(), final].map(message => [message.message_id, message])).values()]
     .sort((a, b) => a.location!.start - b.location!.start)
   const source = { provider: 'codex' as const, session_id: event.session_id }
   const run = { session_id: event.session_id, provider: 'codex', model: event.model ?? 'unknown' }
@@ -73,17 +86,17 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
   const evidence = evidenceSchema.parse({ id, submission: { schema_version: 1, submission_id: id, source, scope: settings.scope, messages }, run })
   await writeJson(resolve(codexDirectory(config), 'evidence', `${id}.json`), { ...evidence, snapshots: [{ path: snapshot.path, original_path: snapshot.original_path }] })
   const draft = recordDraftSchema.parse({ evidence_id: id, extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, changes: [] })
-  for (const item of declaration.items) {
-    const message = matches.get(item.quote)!
-    const fact = { content: item.text, scope: item.scope, source_message_ids: [message.message_id] }
+  for (const [itemIndex, item] of declaration.items.entries()) {
+    const sourceIds = itemSources[itemIndex].map(message => message.message_id)
+    const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds }
     if (item.basis === 'assistant_proposal' || item.basis === 'agent_inference') draft.extraction.proposals.push({ ...fact, basis: item.basis })
     else {
       const index = draft.extraction.memories.length
       draft.extraction.memories.push({ ...fact, basis: item.basis })
       if (item.change) draft.changes.push({ kind: item.change.kind, previous_entry_id: item.change.target,
         expected_version: await readVersion(config, event.session_id, item.change.target, capture.received_at), current_memory_index: index,
-        revision_index: null, explanation: `主会话声明 ${item.change.kind}：${item.text}`, source_message_ids: [message.message_id],
-        evidence_quote: item.quote, resolved_revision_conflict_ids: [],
+        revision_index: null, explanation: `主会话声明 ${item.change.kind}：${item.text}`, source_message_ids: sourceIds,
+        evidence_quote: item.confirmation_quote ?? item.quote, resolved_revision_conflict_ids: [],
       })
     }
   }

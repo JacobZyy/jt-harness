@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { loadConfig, openDatabase, safeError } from '@jt-harness/memo'
 import { configureFlowHooks, configureHooks, configureMonitorHooks, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
-import { configureProjectMemories, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
+import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
 
 const execute = promisify(execFile)
@@ -17,7 +17,7 @@ jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-fi
 jth upgrade [--from <已解压发行目录>] [--prefix <目录>] [--workspace <项目目录>] [--trust]
 jth doctor [--workspace <path>] [--env-file <path>]
 jth uninstall [--workspace <path>]
-init 复用项目安装，默认将本项目 Codex 原生记忆的读取和生成关闭；inherit 移除这两个项目覆盖项，跟随上层配置。
+init 复用项目安装，默认关闭本项目 Codex 原生记忆的读取和生成，并开启 update_plan；inherit 仅移除记忆的两个项目覆盖项，跟随上层配置。
 install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录并同步当前项目。
 doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数据库、队列与凭据。
 `
@@ -149,7 +149,7 @@ export async function deliveryMain(root: string, args: string[]) {
     if (!projects.length && !businesses.length) throw new Error('首次安装需要 --project <id> 或 --business <id>')
     if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
     const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
-    const codexMemory = memoryPolicy ? await configureProjectMemories(workspace, memoryPolicy) : undefined
+    const codexPreferences = memoryPolicy ? await configureProjectCodex(workspace, memoryPolicy, command === 'init') : {}
     const monitoring = Boolean((await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined)?.enabled)
     if (monitoring) await configureMonitorHooks(root, workspace, true)
     if (values.trust) await withCodex(async call => {
@@ -158,6 +158,6 @@ export async function deliveryMain(root: string, args: string[]) {
       if (!hooks.length) throw new Error('Codex 未发现项目 Hook；先信任项目配置层')
       await call('config/batchWrite', { edits: hooks.map(h => ({ keyPath: `hooks.state.${JSON.stringify(h.key)}.trusted_hash`, value: h.currentHash, mergeStrategy: 'replace' })), reloadUserConfig: true })
     })
-    output({ ...installed, ...(codexMemory ? { codex_memory: codexMemory } : {}) })
+    output({ ...installed, ...codexPreferences })
   } catch (error) { process.stderr.write(JSON.stringify({ error: safeError(error, config) }) + '\n'); process.exitCode = 1 }
 }

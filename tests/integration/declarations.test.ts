@@ -14,7 +14,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-test('installed declaration CLI is nonblocking, defaults to index-only, and records read versions without model fields', { skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 20000 }, async () => {
+test('installed declaration CLI persists a cross-turn approval with both sources, defaults to index-only and stays idempotent', { skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 20000 }, async () => {
   const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-declaration-cli-')))
   const home = resolve(directory, 'codex'), source = resolve(home, 'sessions/cli.jsonl'), envFile = resolve(directory, '.env')
   const root = fileURLToPath(new URL('../../', import.meta.url)), execute = promisify(execFile)
@@ -23,7 +23,7 @@ test('installed declaration CLI is nonblocking, defaults to index-only, and reco
     let raw = ''; for await (const chunk of request) raw += chunk
     const body = JSON.parse(raw)
     assert.equal(request.url, '/v1/embeddings')
-    assert.deepEqual(body.input, ['项目使用 pnpm。'])
+    assert.deepEqual(body.input, ['项目已决定使用 pnpm，待实施。'])
     calls++
     response.setHeader('Content-Type', 'application/json')
     response.end(JSON.stringify({ model: 'declaration-cli', data: [{ index: 0, embedding: [1, 0] }] }))
@@ -50,9 +50,10 @@ test('installed declaration CLI is nonblocking, defaults to index-only, and reco
     hookCommand = hooks.Stop.flatMap((group: { hooks: { command: string, statusMessage: string }[] }) => group.hooks)
       .find((handler: { statusMessage: string }) => handler.statusMessage === 'jth memo declaration').command
     const row = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: new Date().toISOString(), payload }) + '\n'
-    const text = '<!-- jth-memory {"items":[{"text":"项目使用 pnpm。","scope":"project","basis":"user_statement","quote":"项目使用 pnpm"}]} -->'
+    const text = '<!-- jth-memory {"items":[{"text":"项目已决定使用 pnpm，待实施。","scope":"project","basis":"user_confirmed","quote":"建议项目使用 pnpm。","confirmation_quote":"可以，你做吧。"}]} -->'
     await writeFile(source, row('session_meta', { id: 'declaration-cli-session' })
-      + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'u', type: 'UserMessage', content: [{ type: 'text', text: '项目使用 pnpm。' }] } })
+      + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'proposal', type: 'AgentMessage', content: [{ type: 'text', text: '建议项目使用 pnpm。' }] } })
+      + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'u', type: 'UserMessage', content: [{ type: 'text', text: '可以，你做吧。' }] } })
       + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'a', type: 'AgentMessage', content: [{ type: 'text', text }] } }))
     await hook('普通回复。')
     assert.equal(calls, 0)
@@ -65,6 +66,9 @@ test('installed declaration CLI is nonblocking, defaults to index-only, and reco
     }
     assert(entryId, 'The detached worker must publish the declared fact')
     assert.equal(calls, 1)
+    const entry = await new MemoStorage(pool).getEntry(entryId)
+    assert.equal(entry.basis, 'user_confirmed')
+    assert.deepEqual(entry.messages.map(message => [message.role, message.text]), [['assistant', '建议项目使用 pnpm。'], ['user', '可以，你做吧。']])
     await hook(text)
     await cli('work')
     assert.equal(calls, 1)

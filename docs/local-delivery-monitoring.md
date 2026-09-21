@@ -33,11 +33,16 @@ jth uninstall
 [memories]
 use_memories = false
 generate_memories = false
+
+[tools.update_plan]
+enabled = true
 ```
 
 这两个 [Codex 原生配置项](https://learn.chatgpt.com/docs/customization/memories) 关闭本项目的原生记忆读取和生成，由 JTH 管理跨会话记忆。只修改项目文件，保留其他配置和注释；不修改全局记忆、模型、Goal 或上下文压缩配置。[项目配置需要受信任](https://learn.chatgpt.com/docs/config-file/config-basic)，新会话读取；当前会话可通过 `/memories` 调整。
 
-`jth init --codex-memory inherit` 移除这两个项目覆盖项，恢复跟随上层配置；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置，升级也不会重置用户选择。
+`update_plan` 在 [Codex CLI 0.152.0](https://learn.chatgpt.com/docs/changelog) 起默认关闭，`init` 显式开启当前项目的原生计划工具。只修改这一配置项，保留其他工具配置；重新加载后需核验宿主确实提供了计划工具，写入配置本身不等于已有任务已拆步。
+
+`jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，仍开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`install`、`upgrade` 和 `uninstall` 均保留用户已有的计划工具开关；再次执行 `init` 会将其设为开启。
 
 `--trust` 只信任刚生成且属于本安装的 JTH Hook；Codex 项目配置层仍需受信任。省略该选项时，在 Codex `/hooks` 审阅定义。
 

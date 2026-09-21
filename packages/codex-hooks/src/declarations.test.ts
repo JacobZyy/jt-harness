@@ -31,6 +31,9 @@ test('declaration parser ignores normal replies and fenced examples, and bounds 
   assert.equal(parseDeclaration('任务完成。\n' + declaration())!.items[0].text, '项目使用 pnpm。')
   assert.throws(() => parseDeclaration('<!-- jth-memory {} -->'))
   assert.throws(() => parseDeclaration(declaration({ text: '长'.repeat(501) })), /500/)
+  assert.equal(parseDeclaration(declaration({ basis: 'user_confirmed', confirmation_quote: '可以，按这个做' }))!.items[0].confirmation_quote, '可以，按这个做')
+  assert.throws(() => parseDeclaration(declaration({ confirmation_quote: '可以，按这个做' })), /仅用于 user_confirmed/)
+  assert.throws(() => parseDeclaration(declaration({ basis: 'user_confirmed', confirmation_quote: '长'.repeat(241) })), /240/)
 })
 
 test('Stop with no declaration is a no-op; source-bound declarations are staged once and malformed ones stay diagnostic', async () => {
@@ -59,6 +62,59 @@ test('Stop with no declaration is a no-op; source-bound declarations are staged 
     assert.equal((await collectDeclarations(f.config)).errors.length, 0)
     assert.equal((await readdir(resolve(f.config.dataDir, 'codex/declaration-errors'))).length, 1)
   } finally { await f.cleanup() }
+})
+
+test('short approvals bind the preceding proposal and user changes across turns, without promoting other options', async () => {
+  const f = await fixture(), target = randomUUID(), version = 'b'.repeat(64)
+  try {
+    await rememberEntryRead(f.config, 'parent', target, version)
+    const proposal = '方案 A：每分钟反馈。方案 B：每 15 分钟反馈，最多 300 字。'
+    const confirmation = '采用方案 B，改成 200 字以内，可以，你做吧。'
+    const approved = '用户已批准每 15 分钟反馈，最多 200 字；待实施。'
+    const text = declaration({ text: approved, basis: 'user_confirmed', quote: '方案 B：每 15 分钟反馈，最多 300 字。', confirmation_quote: confirmation,
+      change: { kind: 'correction', target } })
+    await appendFile(f.source, message('older-approval', 'UserMessage', confirmation)
+      + message('proposal', 'AgentMessage', proposal) + message('approval', 'UserMessage', confirmation)
+      + row('compacted', { message: '继续已确认的方案，保留待声明决策及两段来源引文。' })
+      + message('progress', 'AgentMessage', `执行中，重述确认：${confirmation}`)
+      + message('final', 'AgentMessage', text))
+    await f.capture(text)
+    await f.capture(text)
+    assert.deepEqual(await collectDeclarations(f.config), { received: 2, skipped: 0, errors: [] })
+    const files = await readdir(resolve(f.config.dataDir, 'codex/records'))
+    assert.equal(files.length, 1)
+    const staged = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/records', files[0]), 'utf8'))
+    const evidence = await readEvidence(f.config, staged.evidence_id)
+    assert.equal(staged.draft.extraction.memories.length, 1)
+    assert.deepEqual(staged.draft.extraction.proposals, [])
+    const fact = staged.draft.extraction.memories[0]
+    assert.equal(fact.content, approved)
+    assert.equal(fact.basis, 'user_confirmed')
+    const sources = fact.source_message_ids.map((id: string) => evidence.submission.messages.find(message => message.message_id === id))
+    assert.deepEqual(sources.map((message: { role: string, text: string }) => [message.role, message.text]), [['assistant', proposal], ['user', confirmation]])
+    assert.equal(evidence.submission.messages.length, 3)
+    assert.deepEqual(staged.draft.changes[0].source_message_ids, fact.source_message_ids)
+    assert.equal(staged.draft.changes[0].evidence_quote, confirmation)
+    assert.equal(staged.draft.changes[0].expected_version, version)
+  } finally { await f.cleanup() }
+})
+
+test('approval evidence rejects missing user confirmation and reversed source order', async () => {
+  for (const preceding of [
+    message('proposal', 'AgentMessage', '采用方案 B。') + message('echo', 'AgentMessage', '可以，你做吧。'),
+    message('approval', 'UserMessage', '可以，你做吧。') + message('proposal', 'AgentMessage', '采用方案 B。'),
+  ]) {
+    const f = await fixture()
+    try {
+      const text = declaration({ text: '方案 B 已获批准。', basis: 'user_confirmed', quote: '采用方案 B。', confirmation_quote: '可以，你做吧。' })
+      await appendFile(f.source, preceding + message('final', 'AgentMessage', text))
+      await f.capture(text)
+      const result = await collectDeclarations(f.config)
+      assert.equal(result.received, 0)
+      assert.match(result.errors[0].error, /真实用户消息|确认之前的助手消息/)
+      await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/records')), { code: 'ENOENT' })
+    } finally { await f.cleanup() }
+  }
 })
 
 test('correction versions come from a prior read receipt and statements cannot cite themselves', async () => {
@@ -92,6 +148,9 @@ test('installation replaces old six-event capture with one Stop and one static i
     } }))
     await configureHooks(f.directory, f.config, f.directory, f.settings.scope, f.home)
     const instructions = await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8')
+    assert(instructions.includes('短回复明确采纳前文方案'))
+    assert(instructions.includes('confirmation_quote'))
+    assert(instructions.includes('上下文压缩和恢复时接续'))
     await configureHooks(f.directory, f.config, f.directory, f.settings.scope, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), instructions)
     const hooks = JSON.parse(await readFile(resolve(f.directory, '.codex/hooks.json'), 'utf8')).hooks

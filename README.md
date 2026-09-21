@@ -4,13 +4,15 @@
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
-本地交付命令：`jth init / install / upgrade / doctor / uninstall`；`jth init --project <id>` 接入项目并默认关闭本项目的 Codex 原生记忆读写，使用 `--codex-memory inherit` 跟随上层配置。本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
+本地交付命令：`jth init / install / upgrade / doctor / uninstall`；`jth init --project <id>` 接入项目、开启原生 `update_plan`，并默认关闭本项目的 Codex 原生记忆读写，使用 `--codex-memory inherit` 让记忆配置跟随上层。本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
 
 ## 模块与运行模式
 
 生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
 
 默认使用主会话声明：安装时在项目 `AGENTS.md` 写入一段固定说明，Agent 在有值得保留的结论时输出最多三条短声明。Stop Hook 保存事件，后台 `memo work` 绑定原始证据、精确去重并生成向量。没有声明就不调用 Embedding；Hook 不等待后台处理。
+
+用户以“可以，你做吧”等短回复采纳前文方案时，主会话保留已确认决策，并在收口时用 `user_confirmed` 声明；`quote` 与 `confirmation_quote` 分别绑定助手方案和后续用户确认。后台校验来源角色及顺序，语义关联仍由主会话核对。未确认方案可作为候选保存，批准实施不代表已经完成。详见 [声明契约](docs/memory-declarations.md)。
 
 数据库使用 schema v7，新增声明回执和来源关联，保留所有历史记录。`memo work` 与 `memo work --index` 处理声明和索引队列；只有显式 `memo work --legacy` 才处理旧 DSH 队列。失败任务仍需显式 retry，不自动重跑旧失败记录。
 
