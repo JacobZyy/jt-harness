@@ -13,8 +13,11 @@ export const declarationSchema = z.strictObject({
     quote: z.string().trim().min(1).max(240),
     confirmation_quote: z.string().trim().min(1).max(240).optional(),
     change: z.strictObject({ kind: z.enum(['correction', 'supplement', 'conflict']), target: z.uuid() }).optional(),
-  })).min(1).max(3),
+  })).max(3),
+  used: z.array(z.uuid()).max(10).optional(),
 }).superRefine((value, context) => {
+  if (!value.items.length && !value.used?.length) context.addIssue({ code: 'custom', message: '声明需要新事实或实际采用的记忆 ID' })
+  if (value.used && new Set(value.used).size !== value.used.length) context.addIssue({ code: 'custom', message: '采用的记忆 ID 不得重复' })
   if (value.items.reduce((count, item) => count + Array.from(item.text).length, 0) > 500) {
     context.addIssue({ code: 'custom', message: '记忆正文合计超过 500 字符；保留原声明，不自动重写' })
   }

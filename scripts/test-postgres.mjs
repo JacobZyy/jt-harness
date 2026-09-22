@@ -26,7 +26,7 @@ try {
   started = true
   pg('createdb', ['-h', socket, 'jth_test'])
   const args = live ? [values['declaration-live'] ? 'scripts/test-memory-declarations.ts' : 'scripts/test-memory-inputs.ts', '--env-file', resolve(values['env-file'])]
-    : ['--test', '--test-concurrency=1', 'tests/integration/database.test.ts', 'tests/integration/inline.test.ts', 'tests/integration/intake.test.ts', 'tests/integration/declarations.test.ts', 'packages/flow/src/flow.test.ts', 'packages/codex-hooks/src/flow.test.ts', 'tests/integration/runtime.test.ts']
+    : ['--test', '--test-concurrency=1', 'tests/integration/database.test.ts', 'tests/integration/inline.test.ts', 'tests/integration/intake.test.ts', 'tests/integration/declarations.test.ts', 'tests/integration/retrieval.test.ts', 'packages/flow/src/flow.test.ts', 'packages/codex-hooks/src/flow.test.ts', 'tests/integration/runtime.test.ts']
   const child = spawn(process.execPath, args, {
     cwd: root, stdio: 'inherit',
     env: { ...process.env, JTH_TEST_DATABASE_URL: `postgresql:///jth_test?host=${encodeURIComponent(socket)}`, JTH_TEST_PG_DATA_DIR: data, JTH_TEST_PG_BIN_DIR: binary },

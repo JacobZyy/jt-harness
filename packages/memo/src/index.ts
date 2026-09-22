@@ -29,3 +29,5 @@ export { listManagedEntries, manageEntry, storageStats } from './storage/managem
 export { storageDoctor } from './storage/doctor.ts'
 export { recordMemories, recordDeclaration } from './record.ts'
 export { runIndexWorker, processIndexJob } from './index-worker.ts'
+export { readMemory } from './reading.ts'
+export { memoryUses } from './usage.ts'

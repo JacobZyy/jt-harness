@@ -264,7 +264,7 @@ test('native PostgreSQL + pgvector: durable queue, atomic publication, scope iso
     await t.test('v1 migration preserves existing source, vector bytes and receipts', async () => {
       const before = await pool.query('SELECT entry_id,embedding::text AS vector FROM jt_memo.embeddings ORDER BY entry_id')
       await pool.query(`DROP VIEW jt_memo.entry_states; DROP FUNCTION jt_memo.entry_facts_at(timestamptz);
-        DROP TABLE jt_memo.entry_actions; DROP TABLE jt_memo.entry_relations;
+        DROP TABLE jt_memo.memory_uses; DROP TABLE jt_memo.entry_actions; DROP TABLE jt_memo.entry_relations;
         ALTER TABLE jt_memo.entries DROP COLUMN entities, DROP COLUMN source_occurred_at, DROP COLUMN valid_from, DROP COLUMN valid_until;
         ALTER TABLE jt_memo.submissions DROP COLUMN received_at;
         ALTER TABLE jt_memo.index_commits DROP COLUMN relation_decisions, DROP COLUMN reconciliation_run, DROP COLUMN publication_notes;

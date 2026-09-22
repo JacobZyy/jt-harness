@@ -56,8 +56,8 @@ test('explicit legacy flow hooks preserve memory handlers, restore old goals and
     const preserved = await store.task(task.id)
     await configureFlowHooks(root, workspace)
     const nativeHooks = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'))
-    assert.equal(nativeHooks.hooks.UserPromptSubmit[0].hooks[0].statusMessage, 'jth flow entry')
-    delete nativeHooks.hooks.UserPromptSubmit
+    assert(nativeHooks.hooks.UserPromptSubmit.some((group: { hooks: { statusMessage: string }[] }) => group.hooks.some(handler => handler.statusMessage === 'jth flow entry')))
+    nativeHooks.hooks.UserPromptSubmit = nativeHooks.hooks.UserPromptSubmit.filter((group: { hooks: { statusMessage: string }[] }) => group.hooks.some(handler => handler.statusMessage !== 'jth flow entry'))
     assert.deepEqual(nativeHooks, memoHooks)
     assert.deepEqual(await store.task(task.id), preserved, 'Native installation must not rewrite historical tasks')
     await configureFlowHooks(root, workspace, false)

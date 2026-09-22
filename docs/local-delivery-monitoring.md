@@ -36,7 +36,7 @@ jth upgrade --from /absolute/path/to/new-release/jt-harness --trust
 jth uninstall
 ```
 
-`init` 复用 `install` 安装 Flow Skill、短入口 Hook 和 Memo Stop，并默认向项目 `.codex/config.toml` 写入：
+`init` 复用 `install` 安装 Flow Skill、短入口 Hook、Memo Stop 及有限线索 Hook，并默认向项目 `.codex/config.toml` 写入：
 
 ```toml
 [memories]

@@ -27,20 +27,21 @@ export async function captureDeclaration(input: unknown, settings: CaptureSettin
   return captureEvent(event, settings, config, 'declaration-inbox')
 }
 
-const readReceiptSchema = z.strictObject({ session_id: z.string().min(1), entry_id: z.uuid(), version: z.string().regex(/^[0-9a-f]{64}$/), read_at: z.iso.datetime() })
-export async function rememberEntryRead(config: CapturePaths, sessionId: string, entryId: string, version: string) {
-  const receipt = readReceiptSchema.parse({ session_id: sessionId, entry_id: entryId, version, read_at: new Date().toISOString() })
+const readReceiptSchema = z.strictObject({ session_id: z.string().min(1), entry_id: z.uuid(), version: z.string().regex(/^[0-9a-f]{64}$/), read_at: z.iso.datetime(), level: z.enum(['summary', 'evidence', 'full']).optional() })
+export async function rememberEntryRead(config: CapturePaths, sessionId: string, entryId: string, version: string, level = 'full') {
+  const receipt = readReceiptSchema.parse({ session_id: sessionId, entry_id: entryId, version, read_at: new Date().toISOString(), level })
   await writeJson(resolve(codexDirectory(config), 'reads', hash(sessionId), `${entryId}-${randomUUID()}.json`), receipt)
 }
 
-async function readVersion(config: CapturePaths, sessionId: string, target: string, before: string) {
+async function readVersion(config: CapturePaths, sessionId: string, target: string, before: string, requireFull = true) {
   const receipts = []
   for (const file of await jsonFiles(resolve(codexDirectory(config), 'reads', hash(sessionId)))) {
     const receipt = readReceiptSchema.parse(await readJson(file))
-    if (receipt.session_id === sessionId && receipt.entry_id === target && receipt.read_at <= before) receipts.push(receipt)
+    if (receipt.session_id === sessionId && receipt.entry_id === target && receipt.read_at <= before
+      && (!requireFull || !receipt.level || receipt.level === 'full')) receipts.push(receipt)
   }
   const latest = receipts.sort((a, b) => a.read_at.localeCompare(b.read_at)).at(-1)
-  if (!latest) throw new Error('更正目标尚无本会话的读取回执；原声明保留，先 read 旧记忆并在后续回复重新声明')
+  if (!latest) throw new Error('记忆尚无本会话所需的读取回执；先 read，更正关系需要 --level full')
   return latest.version
 }
 
@@ -87,6 +88,9 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
   const evidence = evidenceSchema.parse({ id, submission: { schema_version: 1, submission_id: id, source, scope: settings.scope, messages }, run })
   await writeJson(resolve(codexDirectory(config), 'evidence', `${id}.json`), { ...evidence, snapshots: [{ path: snapshot.path, original_path: snapshot.original_path }] })
   const draft = recordDraftSchema.parse({ evidence_id: id, extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, changes: [] })
+  if (declaration.used?.length) draft.used = await Promise.all(declaration.used.map(async entry_id => ({
+    entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, false),
+  })))
   for (const [itemIndex, item] of declaration.items.entries()) {
     const sourceIds = itemSources[itemIndex].map(message => message.message_id)
     const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds }

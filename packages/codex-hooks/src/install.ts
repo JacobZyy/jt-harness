@@ -4,6 +4,7 @@ import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
 import { declarationInstructions } from './instructions.ts'
 import { matchesConfigFile } from '@jt-harness/memo/config'
+import { cueMarker } from './cues.ts'
 
 const marker = 'jth memo capture'
 const declarationHookMarker = 'jth memo declaration'
@@ -69,18 +70,18 @@ export async function configureHooks(root: string, config: { dataDir: string, en
   }) : undefined
   if (settings && prior?.settings && !prior.disabled && (JSON.stringify(prior.settings.scope) !== JSON.stringify(settings.scope)
     || prior.settings.workspace !== settings.workspace || !matchesConfigFile(config, prior.settings.env_file) || prior.settings.codex_home !== settings.codex_home)) throw new Error('已有安装的范围不同；请先 uninstall，再重新 install')
-  const command = settings ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'memo', 'codex', 'declare',
+  const command = (action: string) => settings ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'memo', 'codex', action,
     '--env-file', config.envFile, '--workspace', settings.workspace, '--codex-home', settings.codex_home,
     '--since', settings.enabled_at, ...settings.scope.project_ids.flatMap(id => ['--project', id]),
     ...settings.scope.business_ids.flatMap(id => ['--business', id]),
   ].map(quote).join(' ') : undefined
   const backups = resolve(codexDirectory(config), 'backups')
   await updateDeclarationInstructions(workspace, Boolean(settings), backups)
-  await updateHookConfig(hooksPath, backups, document => mergeHooks(
-    mergeHooks(mergeHooks(document), undefined, { marker: declarationHookMarker }), command, { marker: declarationHookMarker, events: ['Stop'] },
-  ))
+  await updateHookConfig(hooksPath, backups, document => mergeHooks(mergeHooks(
+    mergeHooks(document), command('declare'), { marker: declarationHookMarker, events: ['Stop'] },
+  ), command('cue'), { marker: cueMarker, events: ['SessionStart', 'UserPromptSubmit'], additionalContextLimit: 1600 }))
   if (settings) await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: false, mode: 'declaration' })
   else await writeJson(manifestPath, { hooks_path: hooksPath, settings: prior?.settings, disabled: true, mode: prior?.mode })
-  return { status: settings ? 'installed' : 'uninstalled', mode: 'declaration', hooks_path: hooksPath, events: settings ? ['Stop'] : [],
+  return { status: settings ? 'installed' : 'uninstalled', mode: 'declaration', hooks_path: hooksPath, events: settings ? ['Stop', 'SessionStart', 'UserPromptSubmit'] : [],
     settings, ...(settings ? { activation: '在 Codex /hooks 中审阅并信任新增定义；新会话或恢复后生效' } : {}) }
 }

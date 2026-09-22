@@ -11,6 +11,7 @@ export const recordDraftSchema = z.strictObject({
     current_memory_index: z.number().int().nonnegative().nullable(),
     expected_version: z.string().regex(/^[0-9a-f]{64}$/),
   })).max(160).default([]),
+  used: z.array(z.strictObject({ entry_id: z.uuid(), read_version: z.string().regex(/^[0-9a-f]{64}$/) })).max(10).optional(),
 })
 export type RecordDraft = z.input<typeof recordDraftSchema>
 export const evidenceSchema = z.strictObject({
@@ -20,4 +21,3 @@ export const evidenceSchema = z.strictObject({
 })
 export type Evidence = z.infer<typeof evidenceSchema>
 export const recordId = (draft: RecordDraft) => `record-${sha256(JSON.stringify(recordDraftSchema.parse(draft)))}`
-

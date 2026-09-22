@@ -18,6 +18,7 @@ import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jt-harness/memo'
 import { rememberEntryRead } from '@jt-harness/codex-hooks'
+import { readMemory, memoryUses, retrievalInputSchema } from '@jt-harness/memo'
 
 const help = `jth init --project <id>  初始化项目；开启 update_plan，默认关闭本项目 Codex 原生记忆，--codex-memory inherit 跟随全局
 jth install|upgrade|doctor|uninstall  项目接入、独立安装升级和运行诊断；运行 jth install --help
@@ -38,8 +39,10 @@ jth memo <command>
   work [--index]               接收声明并生成向量；--legacy 才处理历史 DSH 队列
   retry <submission-id>        重试失败任务，复用已保存提炼
   recover <id> [file.json|-]   查看未接收条目；按路径提交 replace/dismiss 修正和原因
-  search <query> <scope>       返回候选摘要，默认排除助手建议
+  recall <query> <scope>       本地关键词线索，不调用 Embedding
+  search <query> <scope>       默认关键词＋向量混合召回，返回命中依据
   read <entry-id>              读取正文与来源证据
+  usage <scope>               查看主 Agent 声明的采用反馈，不是评分
   read --submission <id>       读取批次、修订证据和提交回执
   doctor                      只读体检：来源、向量、回执和关系一致性
   stats                       容量与生命周期统计
@@ -54,7 +57,10 @@ jth memo <command>
 scope 必须选一种：--project <id>（可重复）、--business <id>（可重复）、
   --session <id>、--user、--submission <id>
 search 可选：--limit <1..50>、--candidates（或 --proposals）、--history、--archived
-search/read 可选：--as-of <带时区 ISO 时间>，查看当时已知且已生效的状态
+search/read/recall 可选：--as-of <带时区 ISO 时间>，查看当时已知且已生效的状态
+search 可选：--mode hybrid|keyword|semantic、--min-similarity <0..1>（默认 0.6，仅向量通道）
+read 可选：--level summary|evidence|full；默认 full 保持原 JSON 契约，Agent 优先 evidence
+recall 可选：--limit <1..50>；usage 可用 --session <会话ID> 或其他显式 scope
 send 可选：--model <DSH model>、--provider <DSH provider>、--review（先入候选区）
 retry 可选：--timeout-ms <毫秒>，显式调整本次及后续重试的 Agent 时间预算
 retry 可选：--provider <id> --model <id>，显式切换失败任务，原执行快照保留在 failure_history
@@ -73,12 +79,15 @@ const optionTypes = {
   'as-of': { type: 'string' }, candidates: { type: 'boolean' }, archived: { type: 'boolean' }, review: { type: 'boolean' },
   reason: { type: 'string' }, evidence: { type: 'string' },
   'timeout-ms': { type: 'string' }, legacy: { type: 'boolean' }, index: { type: 'boolean' }, 'source-session': { type: 'string' },
+  mode: { type: 'string' }, 'min-similarity': { type: 'string' }, level: { type: 'string' },
 } as const
 
 const commandOptions: Record<string, string[]> = {
   init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: ['summary'], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy', 'provider', 'model'],
-  search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of'],
-  read: ['submission', 'as-of', 'source-session'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
+  search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of', 'mode', 'min-similarity'],
+  recall: ['project', 'business', 'session', 'user', 'submission', 'limit', 'as-of'],
+  usage: ['project', 'business', 'session', 'user', 'submission', 'limit'],
+  read: ['submission', 'as-of', 'source-session', 'level'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
   outputs: [], recover: [],
 }
@@ -114,7 +123,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
     if (invalidOptions.length) throw new Error(`${command} 不支持：${invalidOptions.join(', ')}`)
     const count = command === 'status' ? operands.length <= 1
       : command === 'recover' ? operands.length >= 1 && operands.length <= 2
-      : ['send', 'retry', 'search', 'outputs'].includes(command) ? operands.length === 1
+      : ['send', 'retry', 'search', 'recall', 'outputs'].includes(command) ? operands.length === 1
       : command === 'read' ? operands.length + Number(Boolean(values.submission)) === 1
       : command === 'review' ? (operands[0] === 'list' ? operands.length === 1 : ['approve', 'reject'].includes(operands[0]) && operands.length === 2)
       : command === 'archive' ? operands.length + Number(Boolean(values.session)) === 1
@@ -129,9 +138,10 @@ export async function main(root: string, args = process.argv.slice(2)) {
       ...(values.user ? [{ kind: 'user' }] : []),
       ...(values.submission ? [{ kind: 'unspecified', submission_id: values.submission }] : []),
     ]
-    if (command === 'search' && scopes.length !== 1) throw new Error('search 必须明确指定一种范围；不会默认搜索全部记忆')
-    const limit = Number(values.limit ?? (command === 'search' ? 3 : 10))
-    if (command === 'search' && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw new Error('--limit 必须为 1..50 的整数')
+    if (['search', 'recall', 'usage'].includes(command) && scopes.length !== 1) throw new Error(`${command} 必须明确指定一种范围；不会默认搜索全部记忆`)
+    const limit = Number(values.limit ?? (['search', 'recall'].includes(command) ? 3 : 10))
+    if (['search', 'recall'].includes(command) && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw new Error('--limit 必须为 1..50 的整数')
+    if (values.level && (!['summary', 'evidence', 'full'].includes(values.level) || values.submission)) throw new Error('--level 仅用于单条记忆，取 summary、evidence 或 full')
     const asOf = values['as-of'] ? timestampSchema.parse(values['as-of']) : undefined
     config = await loadWorkspaceConfig(root, values['env-file'])
     if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
@@ -200,20 +210,29 @@ export async function main(root: string, args = process.argv.slice(2)) {
         else {
           const entry = await storage.getEntry(operands[0], asOf)
           const sessionId = values['source-session'] ?? process.env.CODEX_THREAD_ID
-          if (sessionId && entry.version) await rememberEntryRead(config, sessionId, entry.id, entry.version)
-          result = entry
+          if (sessionId && entry.version) await rememberEntryRead(config, sessionId, entry.id, entry.version, values.level ?? 'full')
+          result = readMemory(entry, values.level)
         }
         break
       }
+      case 'usage': result = await memoryUses(pool, scopeFilterSchema.parse(scopes[0]), limit); break
+      case 'recall':
       case 'search': {
         const scope = scopeFilterSchema.parse(scopes[0])
-        const profile = executionProfile(config)
-        const [vector] = await embedTexts([operands[0]], config.embedding, controller.signal)
-        const found = await storage.search({ space_id: profile.space.id, vector, scope, include_proposals: values.proposals,
-          include_history: values.history, include_candidates: values.candidates, include_archived: values.archived, as_of: asOf, limit })
-        result = { space: found.space, entries: found.entries.map(entry => ({
+        const mode = retrievalInputSchema.shape.mode.parse(command === 'recall' ? 'keyword' : values.mode)
+        const queryText = retrievalInputSchema.shape.query.parse(operands[0])
+        const minSimilarity = retrievalInputSchema.shape.min_similarity.parse(values['min-similarity'] === undefined ? undefined : Number(values['min-similarity']))
+        const vectors = mode === 'keyword' ? {} : {
+          space_id: executionProfile(config).space.id,
+          vector: (await embedTexts([queryText], config.embedding, controller.signal))[0],
+        }
+        const query = retrievalInputSchema.parse({ query: queryText, mode, ...vectors, scope, min_similarity: minSimilarity,
+          include_history: values.history, include_candidates: values.candidates || values.proposals, include_archived: values.archived, as_of: asOf, limit })
+        const found = await storage.retrieve(query)
+        result = { space: found.space, mode: found.mode, query: query.query, min_similarity: mode === 'keyword' ? null : query.min_similarity,
+          notice: '分数表示检索匹配，不是正确性或采用评分；候选不够相关时可为空。', entries: found.entries.map(entry => ({
           id: entry.id, submission_id: entry.submission_id, collection: entry.collection, scope: entry.scope,
-          preview: entry.content.slice(0, 400), distance: entry.distance,
+          preview: entry.content.slice(0, 400), distance: entry.distance, match: entry.match,
           state: entry.state,
           claim_status: entry.claim_status, archived: entry.archived, entities: entry.entities,
           source_occurred_at: entry.source_occurred_at, valid_from: entry.valid_from, valid_until: entry.valid_until,

@@ -46,7 +46,7 @@ test('installed declaration CLI persists a cross-turn approval with both sources
   try {
     await prepareDatabase(pool, true)
     const installed = JSON.parse((await cli('codex', 'install', '--workspace', directory, '--codex-home', home, '--project', 'declaration-cli')).stdout)
-    assert.deepEqual(installed.events, ['Stop'])
+    assert.deepEqual(installed.events, ['Stop', 'SessionStart', 'UserPromptSubmit'])
     const hooks = JSON.parse(await readFile(resolve(directory, '.codex/hooks.json'), 'utf8')).hooks
     hookCommand = hooks.Stop.flatMap((group: { hooks: { command: string, statusMessage: string }[] }) => group.hooks)
       .find((handler: { statusMessage: string }) => handler.statusMessage === 'jth memo declaration').command

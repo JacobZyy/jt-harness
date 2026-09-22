@@ -5,7 +5,8 @@ import { storageManagementSchema } from './schema-v3.ts'
 import { intakeSchema } from './schema-v5.ts'
 import { recoverySchema } from './schema-v6.ts'
 import { declarationStorageSchema } from './schema-v7.ts'
-export const schemaVersion = 7
+import { memoryUseSchema } from './schema-v8.ts'
+export const schemaVersion = 8
 
 /** All transaction statements use one checked-out connection. */
 const transactionDepth = new WeakMap<PoolClient, number>()
@@ -165,7 +166,7 @@ export async function prepareDatabase(pool: Pool, initializeSchema: boolean): Pr
         await client.query(schema)
         await client.query('INSERT INTO jt_memo.schema_version VALUES (true, 1)')
         version = 1
-      } else if (![1, 2, 3, 4, 5, 6, 7].includes(version)) {
+      } else if (![1, 2, 3, 4, 5, 6, 7, 8].includes(version)) {
         throw new MemoStorageError('SCHEMA_NOT_READY', '记忆库版本未知；拒绝升级或降级')
       }
       if (version === 1) {
@@ -184,7 +185,8 @@ export async function prepareDatabase(pool: Pool, initializeSchema: boolean): Pr
       }
       if (version === 4) { await client.query(intakeSchema); version = 5 }
       if (version === 5) { await client.query(recoverySchema); version = 6 }
-      if (version === 6) await client.query(declarationStorageSchema)
+      if (version === 6) { await client.query(declarationStorageSchema); version = 7 }
+      if (version === 7) await client.query(memoryUseSchema)
       await client.query('UPDATE jt_memo.schema_version SET version = $1 WHERE singleton = true', [schemaVersion])
     })
   }

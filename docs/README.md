@@ -11,6 +11,7 @@
 | 用户配置、项目覆盖、旧配置迁移 | [配置说明](configuration.md) |
 | Goal、计划、恢复及项目验收 | [原生 Flow](flow-control.md)、[Workflow Policy](workflow-policy.md) |
 | 声明、读取、更正与过期知识治理 | [主会话记忆声明](memory-declarations.md) |
+| 主动线索、混合检索、证据分层和采用反馈 | [记忆读取](memory-retrieval.md) |
 | 已实现能力和保留的后续事项 | [Rex 参考的状态对照](rex-memory-reference.md#已落地与保留的后续事项) |
 
 Flow 不保存第二份任务进度；Memo 默认不调用 DSH。历史 Flow 只能通过 `jth flow legacy ...` 使用，历史 DSH 队列只在显式 `--legacy` 路径处理。

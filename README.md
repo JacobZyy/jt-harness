@@ -10,6 +10,8 @@
 
 当前操作说明与历史设计的入口见[文档导航](docs/README.md)。历史报告中的“当前”“默认”和未完成项只描述报告当时的版本，不作为今天的安装或执行指令。
 
+记忆读取现支持启动/恢复后的有限关键词线索、`memo recall` 本地召回、`memo search` 混合检索、`memo read --level summary|evidence|full` 分层证据，以及末尾声明 `used` 采用反馈。反馈只记录实际采用，不是质量评分；Phoenix 评分接入后置。操作、预算和升级边界见[记忆读取](docs/memory-retrieval.md)。
+
 ## 模块与运行模式
 
 生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
@@ -18,7 +20,7 @@
 
 用户以“可以，你做吧”等短回复采纳前文方案时，主会话保留已确认决策，并在收口时用 `user_confirmed` 声明；`quote` 与 `confirmation_quote` 分别绑定助手方案和后续用户确认。后台校验来源角色及顺序，语义关联仍由主会话核对。未确认方案可作为候选保存，批准实施不代表已经完成。详见 [声明契约](docs/memory-declarations.md)。
 
-数据库使用 schema v7，新增声明回执和来源关联，保留所有历史记录。`memo work` 与 `memo work --index` 处理声明和索引队列；只有显式 `memo work --legacy` 才处理旧 DSH 队列。失败任务仍需显式 retry，不自动重跑旧失败记录。
+数据库使用 schema v8，在 v7 声明回执和来源关联之上增加采用记录，保留所有历史数据。`memo work` 与 `memo work --index` 处理声明和索引队列；只有显式 `memo work --legacy` 才处理旧 DSH 队列。失败任务仍需显式 retry，不自动重跑旧失败记录。
 
 会话内 `prepare / evidence / record` 保留为手动工具，默认声明流程不需要调用。`record` 只启动 index worker。协议、流程图与实测见 [主会话记忆声明](docs/memory-declarations.md)。
 
@@ -37,7 +39,7 @@ Workflow Policy 默认 adaptive：普通问答直接回答，有界小改直接�
 
 检查点复用原生计划、会话记录、必要的证据文件与 Git 提交。主 Agent 直接运行项目检查并核对产出，通过后更新计划和 Goal；不为每次工具调用复制一份流程日志。权限、会话恢复和压缩使用 Codex 自带机制。
 
-Memo 按实际需要查询。通过 `flow status` 查看 `memo_scope`，再用 `jth memo search <问题> --project <ID>` 或 `jth memo read <ID>` 获取历史依据。默认不再于每条用户消息后启动 Flow 召回，也不注入已完成任务的旧记忆。主会话末尾短声明的后台存储与 Embedding 保持独立。
+通过 `flow status` 查看 `memo_scope`。Memo 在启动/恢复后的首次输入提供有限关键词线索；同一会话的新任务由主 Agent 主动 `recall`，需要时 `search` 深查、`read --level evidence` 展开。Flow 不运行旧自动召回循环；线索不读取旧任务或调用模型。主会话末尾短声明的后台存储与 Embedding 保持独立。
 
 历史 PostgreSQL 任务、绑定、回执和 SQLite 迁移材料不删除；显式使用：
 
@@ -165,7 +167,7 @@ node bin/jth.mjs init --project jt-harness --trust
 node bin/jth.mjs memo init
 ```
 
-`memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v7，保留原材料、条目、向量与回执。v7 增加 `declaration_receipts`、`declaration_sources` 和精确内容索引，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
+`memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v8，保留原材料、条目、向量与回执。v7 的声明回执、来源关联及内容索引继续保留；v8 只增加 `memory_uses`，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
 
 仓库公开托管于 [JacobZyy/jt-harness](https://github.com/JacobZyy/jt-harness)，npm 包为 `@jacob-z/jt-harness`。`.gitignore` 忽略 `.env` 和 `.env.*`，仅允许无凭据的 `.env.example`。用户凭据独立于仓库和发行目录；打包白名单不包含凭据、数据库、运行记录或本地备份。
 
@@ -220,13 +222,13 @@ jth memo work
 jth memo codex uninstall
 ```
 
-`--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo Stop Hook，以及 `AGENTS.md` 中 `JTH_MEMORY_START/END` 标记包围的短说明。其他 Hook 与说明保持原样，更新前备份到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除这两个托管部分。Codex 的 Hook 信任机制保持不变。
+`--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo 声明和线索 Hook，以及 `AGENTS.md` 中 `JTH_MEMORY_START/END` 标记包围的短说明。其他 Hook 与说明保持原样，更新前备份到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除这两个托管部分。Codex 的 Hook 信任机制保持不变。
 
-Memo 只安装 `Stop`，调用 `jth memo codex declare`。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短入口提示，不恢复旧任务生命周期 Hook。
+Memo 安装 `Stop` 声明入口，以及 `SessionStart` / `UserPromptSubmit` 有限线索入口。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短流程提示，不恢复旧任务生命周期 Hook。
 
 Hook 检查本轮最终回复，只保存含声明的本地交接记录并启动独立 worker，超时为 3 秒。Hook 内不连接数据库、不调用模型、不等待 Embedding。来源以硬链接保留，文件边界和原始位置一并记录；声明解析和引文匹配在后台本地执行。只有新记忆正文发送到 Embedding API。
 
-Agent 在正常回复末尾按固定格式输出最多三条声明，正文合计最多 500 字符，每条附最多 240 字符的原文短引文。来源 ID、时间、存储字段与已读取的旧条目版本由程序补齐。没有新结论就不输出声明。代码块中的格式示例不会被当成记忆执行。
+Agent 在正常回复末尾按固定格式输出最多三条事实声明，正文合计最多 500 字符，每条附最多 240 字符的原文短引文。来源 ID、时间、存储字段与已读取的旧条目版本由程序补齐。实际采用的已读 ID 可放入 `used`；没有新结论时允许 `items: []` 只提交反馈，反馈本身不生成向量。没有新事实或采用反馈就不输出声明。代码块中的格式示例不会被当成记忆执行。
 
 `~/.jth/codex/` 保存交接记录、来源硬链接、证据、声明回执、读取版本和安装备份。JSON 文件权限为 0600，目录为 0700；硬链接继承原文件权限。解析异常保存在 `declaration-errors/`，通过 `memo codex status` 查看，不阻塞回复，不调用模型修复。数据库尚未接收的有效声明留在 `records/`，恢复数据库后用 `memo work` 继续投递。
 
@@ -240,7 +242,7 @@ Agent 模型、向量空间和原材料在接收时固定；重复提交不会�
 
 `status` 列出状态计数与最近 20 个任务；指定 ID 后显示尝试次数、错误、提炼和比较两个阶段的 DSH session ID、索引提交回执及直接修订数量。`read --submission` 可以查看完整提炼结果和修订证据。
 
-`search` 必须显式指定一种范围，默认 3 条、最多 50 条；只输出 400 字符以内的正文预览，不返回向量。完整正文和引用原文通过 `read` 获取。
+`search` 必须显式指定一种范围，默认混合检索，3 条、最多 50 条；只输出 400 字符以内的正文预览及匹配依据，不返回向量。`recall` 只用本地关键词。`read --level evidence` 给出有界证据片段，`--level full` 保留完整原文；默认 full 兼容旧输出。
 
 默认搜索只返回已入库、当前有效、未归档且具有可用来源资格的条目。`state` 区分 `pending/active/conflicted/superseded/scheduled/expired`，`claim_status` 区分来源和审核资格，`archived` 单独表示归档。`--history` 包含被更正、过期、未生效的条目；`--candidates` 包含待审条目（兼容原 `--proposals`）；`--archived` 包含归档。被拒绝的条目仍可按 ID 读取，不进入默认或候选搜索。
 

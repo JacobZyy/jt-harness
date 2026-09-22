@@ -20,7 +20,7 @@ flowchart TD
     L --> J
 ```
 
-安装只写入一段固定项目说明。每轮最多三条声明，记忆正文合计最多 500 个 Unicode 字符，每条原文引文最多 240 字符。来源 ID、时间和版本由程序补齐。没有新记忆时不输出声明，也不产生记忆写入的 API 调用。
+安装写入一段固定项目说明。每轮最多三条事实声明，记忆正文合计最多 500 个 Unicode 字符，每条原文引文最多 240 字符。来源 ID、时间和版本由程序补齐。实际采用的已读记忆可通过顶层 `used` 数组反馈，最多 10 个 ID；仅有反馈时使用 `items: []`，不新增向量任务。两类内容都没有时不输出声明。
 
 后台在本机读取来源日志；发送给 Embedding 的只有新记忆正文。聊天记录、引文、工具输出和存储字段不会重新发送给提炼模型。检索继续调用查询 Embedding：普通 `memo search` 默认返回三条摘要，详情按需 `memo read`。原生 Flow 按需调用这些工具；五分钟缓存和自动召回只保留在显式旧 Flow 路径。
 
@@ -66,7 +66,7 @@ CLI 在当前 Codex 会话下保存读取版本。随后给对应声明加 `"cha
 - 语义变化由主 Agent 声明明确关系。更正沿用读取版本检查与发布事务，旧正文保留；补充保留双方；冲突保留双方证据。程序不按相似度覆盖记忆。
 - 已归档、拒绝或被更正的旧条目不会被精确去重重新激活。项目和业务范围集合必须一致；任务记忆还要求同一来源会话。
 
-schema v7 只新增声明回执、来源关联与内容索引。旧会话、DSH 队列、条目、向量和回执保持原样。
+schema v8 在 v7 声明回执、来源关联与内容索引之上增加 `memory_uses`。采用反馈绑定声明和实际读取版本，不改事实、审核资格或排序，不执行正确性评分；`jth memo usage --project <ID>` 可查询。分层读取、线索及反馈示例见[记忆读取](memory-retrieval.md)。旧会话、DSH 队列、条目、向量和回执保持原样。
 
 ## 历史方案的适用范围
 
@@ -94,7 +94,7 @@ jth memo status --summary
 jth memo work
 ```
 
-安装管理项目 `AGENTS.md` 的 `JTH_MEMORY_START/END` 区间，以及一个 Memo Stop Hook。重新安装替换旧 Memo 六阶段捕获，保留 Flow 和其他工具的 Hook。主 Agent 核对子 Agent 结果后统一声明。卸载使用 `jth memo codex uninstall`，不删除已保存的数据。
+安装管理项目 `AGENTS.md` 的 `JTH_MEMORY_START/END` 区间、一个 Memo Stop Hook，以及启动/恢复线索所需的 `SessionStart` 和 `UserPromptSubmit` Hook。重新安装替换旧 Memo 六阶段捕获，保留 Flow 和其他工具的 Hook。主 Agent 核对子 Agent 结果后统一声明。卸载使用 `jth memo codex uninstall`，不删除已保存的数据。
 
 Hook 只保存本地事件与来源指针，后台负责解析、数据库和 Embedding。来源暂存继续使用已有硬链接机制，来源文件与数据目录应在同一文件系统。异常处理沿用以下边界：
 

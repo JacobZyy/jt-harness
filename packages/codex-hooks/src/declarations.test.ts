@@ -158,7 +158,25 @@ test('correction versions come from a prior read receipt and statements cannot c
   } finally { await f.cleanup() }
 })
 
-test('installation replaces old six-event capture with one Stop and one static instruction block', async () => {
+test('usage-only declarations require a prior read and do not create memory facts', async () => {
+  const f = await fixture(), id = randomUUID(), version = 'c'.repeat(64)
+  const text = `<!-- jth-memory ${JSON.stringify({ items: [], used: [id] })} -->`
+  try {
+    await appendFile(f.source, message('final', 'AgentMessage', text))
+    await f.capture(text)
+    assert.match((await collectDeclarations(f.config)).errors[0].error, /读取回执/)
+    await rememberEntryRead(f.config, 'parent', id, version, 'evidence')
+    await f.capture(text)
+    assert.equal((await collectDeclarations(f.config)).received, 1)
+    const file = (await readdir(resolve(f.config.dataDir, 'codex/records')))[0]
+    const staged = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/records', file), 'utf8'))
+    assert.deepEqual(staged.draft.extraction.memories, [])
+    assert.deepEqual(staged.draft.used, [{ entry_id: id, read_version: version }])
+    assert.throws(() => parseDeclaration('<!-- jth-memory {"items":[]} -->'))
+  } finally { await f.cleanup() }
+})
+
+test('installation replaces legacy capture with declaration and bounded cue hooks', async () => {
   const f = await fixture()
   try {
     await mkdir(resolve(f.directory, '.codex'))
@@ -176,7 +194,7 @@ test('installation replaces old six-event capture with one Stop and one static i
     await configureHooks(f.directory, f.config, f.directory, f.settings.scope, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), instructions)
     const hooks = JSON.parse(await readFile(resolve(f.directory, '.codex/hooks.json'), 'utf8')).hooks
-    assert.deepEqual(Object.keys(hooks), ['Stop'])
+    assert.deepEqual(Object.keys(hooks).sort(), ['SessionStart', 'Stop', 'UserPromptSubmit'])
     assert(hooks.Stop.flatMap((group: { hooks: { command: string }[] }) => group.hooks).some((hook: { command: string }) => hook.command.includes("'declare'")))
     await configureHooks(f.directory, f.config, f.directory, undefined, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)

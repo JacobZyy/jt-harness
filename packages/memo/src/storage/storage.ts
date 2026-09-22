@@ -12,6 +12,7 @@ import { entryMetadata, entrySnapshot } from './metadata.ts'
 import { readActions } from './management.ts'
 import { entryVersion, versionExpression } from '../version.ts'
 import type { IntakeIssue } from '../intake.ts'
+import { rankMemories, retrievalInputSchema, type RetrievalInput } from '../retrieval.ts'
 
 interface SubmissionRow {
   id: string
@@ -204,19 +205,34 @@ export class MemoStorage {
   /** Exact cosine search in one named vector space and one explicit scope. */
   async search(input: SearchInput) {
     const query = searchInputSchema.parse(input)
-    const space = await this.pool.query<{ definition: EmbeddingSpace }>('SELECT definition FROM jt_memo.embedding_spaces WHERE id = $1', [query.space_id])
-    if (!space.rows[0]) throw new MemoStorageError('NOT_FOUND', '向量空间尚未建立')
-    if (space.rows[0].definition.dimensions !== query.vector.length) throw new MemoStorageError('INVALID_EMBEDDINGS', '查询向量维度不匹配')
+    const found = await this.candidates({ ...query, include_candidates: query.include_candidates || query.include_proposals }, false)
+    // The vector-only SQL path requires a matching embedding, so distance is non-null.
+    return { space: found.space!, entries: found.entries.map(entry => ({ ...entry, distance: entry.distance! })) }
+  }
+
+  async retrieve(input: RetrievalInput) {
+    const query = retrievalInputSchema.parse(input)
+    const found = await this.candidates(query, true)
+    return { space: found.space, mode: query.mode, entries: rankMemories(found.entries, query) }
+  }
+
+  private async candidates(query: Pick<z.infer<typeof retrievalInputSchema>, 'scope' | 'space_id' | 'vector' | 'limit' | 'include_candidates' | 'include_history' | 'include_archived' | 'as_of'>, all: boolean) {
+    let space: EmbeddingSpace | null = null
+    if (query.vector) {
+      const found = await this.pool.query<{ definition: EmbeddingSpace }>('SELECT definition FROM jt_memo.embedding_spaces WHERE id = $1', [query.space_id])
+      if (!found.rows[0]) throw new MemoStorageError('NOT_FOUND', '向量空间尚未建立')
+      space = found.rows[0].definition
+      if (space.dimensions !== query.vector.length) throw new MemoStorageError('INVALID_EMBEDDINGS', '查询向量维度不匹配')
+    }
     const scope = query.scope
     const scopeIds = scope.kind === 'project' ? scope.project_ids : scope.kind === 'business' ? scope.business_ids : []
     const sourceId = scope.kind === 'current_task' ? scope.source_session_id : scope.kind === 'unspecified' ? scope.submission_id : ''
-    // ponytail: exact scan is sufficient for the initial personal store; add ANN
-    // only when measured volume/latency requires it. Scope filtering stays first.
-    const matches = await this.pool.query<StateEntry & { distance: number }>(`
+    // ponytail: scan the authorized personal corpus; add indexed lexical/ANN retrieval when measured volume requires it.
+    const matches = await this.pool.query<StateEntry & { distance: number | null }>(`
       WITH snapshot AS (${entrySnapshot('$9')})
       SELECT e.*, v.embedding OPERATOR(public.<=>) $2::public.vector AS distance
-      FROM jt_memo.embeddings v JOIN snapshot e ON e.id = v.entry_id
-      WHERE v.space_id = $1 AND e.scope = $3
+      FROM snapshot e LEFT JOIN jt_memo.embeddings v ON e.id = v.entry_id AND v.space_id = $1
+      WHERE ($11::boolean OR v.space_id IS NOT NULL) AND e.scope = $3
         AND (e.claim_status IN ('asserted','observed','verified') OR ($6::boolean AND e.claim_status='candidate'))
         AND ($8::boolean OR e.state IN ('active','conflicted')) AND e.state<>'pending'
         AND ($10::boolean OR NOT e.archived)
@@ -225,9 +241,9 @@ export class MemoStorage {
           OR ($3 = 'current_task' AND e.source_session_id = $5)
           OR ($3 = 'unspecified' AND e.submission_id = $5)
           OR $3 = 'user')
-      ORDER BY distance, e.id LIMIT $7
-    `, [query.space_id, JSON.stringify(query.vector), scope.kind, scopeIds, sourceId, query.include_proposals || query.include_candidates, query.limit, query.include_history, query.as_of ?? null, query.include_archived])
-    return { space: space.rows[0].definition, entries: matches.rows }
+      ORDER BY distance NULLS LAST, e.id LIMIT CASE WHEN $11 THEN NULL ELSE $7::int END
+    `, [query.space_id ?? null, query.vector ? JSON.stringify(query.vector) : null, scope.kind, scopeIds, sourceId, query.include_candidates, query.limit, query.include_history, query.as_of ?? null, query.include_archived, all])
+    return { space, entries: matches.rows }
   }
 
   private async submission(client: PoolClient, id: string, lock = false, asOf?: string): Promise<SubmissionRow> {

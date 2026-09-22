@@ -42,7 +42,7 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     const configured = await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')
     const document = JSON.parse(configured) as { hooks: Record<string, { hooks: { command: string, statusMessage?: string }[] }[]> }
     const handlers = Object.values(document.hooks).flatMap(groups => groups.flatMap(group => group.hooks))
-    assert.equal(handlers.length, 3)
+    assert.equal(handlers.length, 5)
     assert(handlers.some(handler => handler.command === 'other-tool'))
     assert(handlers.some(handler => handler.statusMessage === 'jth memo declaration'))
     assert(handlers.some(handler => handler.statusMessage === 'jth flow entry' && handler.command.includes("'prompt'")))
@@ -96,7 +96,7 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     await cli('uninstall')
     const remaining = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'))
     const expected = structuredClone(document)
-    delete expected.hooks.UserPromptSubmit
+    expected.hooks.UserPromptSubmit = expected.hooks.UserPromptSubmit.filter(group => group.hooks.some(handler => handler.statusMessage !== 'jth flow entry'))
     assert.deepEqual(remaining, expected)
     assert.equal(JSON.parse((await cli('status')).stdout).entry_hook.installed, false)
     assert.deepEqual(JSON.parse((await hook('prompt')).stdout), {}, 'Cached host commands must stop injecting after uninstall')

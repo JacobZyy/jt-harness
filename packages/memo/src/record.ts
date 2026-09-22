@@ -17,6 +17,7 @@ type Fact = Extraction['memories'][number] | Extraction['proposals'][number]
 export interface DeclarationReceipt {
   status: 'accepted', declaration_id: string, submission_id: string | null, entry_ids: string[],
   new_facts: number, linked_sources: number, index_status: 'queued' | 'reused', duplicate: boolean,
+  used_memory_ids?: string[],
 }
 
 /** Only exact, equally scoped and equally qualified assertions are coalesced. Semantic changes stay explicit. */
@@ -24,7 +25,9 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
   const draft = recordDraftSchema.parse(input), evidence = evidenceSchema.parse(rawEvidence)
   if (draft.evidence_id !== evidence.id) throw new Error('声明与证据回执不一致')
   parseExtraction(JSON.stringify(draft.extraction), evidence.submission)
-  if (!config.embedding.space) throw new Error('声明已保留；需要配置 Embedding 向量空间后投递')
+  if ((draft.extraction.memories.length || draft.extraction.proposals.length || draft.extraction.revisions.length) && !config.embedding.space) {
+    throw new Error('声明已保留；需要配置 Embedding 向量空间后投递')
+  }
   const id = declarationId(draft)
   return transaction(database, async client => {
     // ponytail: declarations contain at most three facts; serialize this local write boundary before considering per-fingerprint locks.
@@ -68,7 +71,8 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
     let jobId: string | null = null
     let entryIds: string[] = []
     if (fresh.memories.length || fresh.proposals.length || fresh.revisions.length) {
-      const reduced: RecordDraft = { ...draft, extraction: fresh, changes: draft.changes.map(change => ({ ...change,
+      const { used: _used, ...factDraft } = draft
+      const reduced: RecordDraft = { ...factDraft, extraction: fresh, changes: draft.changes.map(change => ({ ...change,
         current_memory_index: change.current_memory_index === null ? null : memoryIndexes.get(change.current_memory_index)!,
       })) }
       await recordMemories(client, reduced, evidence, config)
@@ -77,9 +81,11 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
     }
     const entries = targets.map(target => target.entryId ?? entryIds[target.index + (target.collection === 'proposals' ? fresh.memories.length : 0)])
     const result: DeclarationReceipt = { status: 'accepted', declaration_id: id, submission_id: jobId, entry_ids: entries,
-      new_facts: entryIds.length, linked_sources: entries.length - entryIds.length, index_status: jobId ? 'queued' : 'reused', duplicate: false }
+      new_facts: entryIds.length, linked_sources: entries.length - entryIds.length, index_status: jobId ? 'queued' : 'reused', duplicate: false,
+      ...(draft.used?.length ? { used_memory_ids: draft.used.map(item => item.entry_id) } : {}) }
     await client.query('INSERT INTO jt_memo.declaration_receipts(id,draft,evidence,result) VALUES ($1,$2,$3,$4)', [id, draft, evidence, result])
     for (const [position, entryId] of entries.entries()) await client.query('INSERT INTO jt_memo.declaration_sources(declaration_id,position,entry_id,source_message_ids) VALUES ($1,$2,$3,$4)', [id, position, entryId, facts[position].fact.source_message_ids])
+    for (const used of draft.used ?? []) await client.query('INSERT INTO jt_memo.memory_uses(declaration_id,entry_id,read_version) VALUES ($1,$2,$3)', [id, used.entry_id, used.read_version])
     return result
   })
 }
@@ -87,6 +93,7 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
 /** One transaction commits the immutable candidate and its index-only outbox job. */
 export async function recordMemories(database: Pool | PoolClient, input: RecordDraft, rawEvidence: Evidence, config: Config) {
   const draft = recordDraftSchema.parse(input)
+  if (draft.used?.length) throw new Error('采用反馈只通过主会话末尾声明提交')
   const evidence = evidenceSchema.parse(rawEvidence)
   if (draft.evidence_id !== evidence.id) throw new Error('候选引用的证据回执不一致')
   const submission = submissionSchema.parse({ ...evidence.submission, submission_id: recordId(draft) })

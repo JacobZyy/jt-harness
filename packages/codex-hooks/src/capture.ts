@@ -120,6 +120,7 @@ export async function captureStatus(config: { dataDir: string }) {
   const declarationPending = await list('declaration-inbox'), declarationErrors = await list('declaration-errors')
   return { streams, directory, mode: 'declaration', legacy_pending_events: inbox.length, pending_events: inbox.length, pending_records: records.length, evidence_count: evidence.length,
     pending_declarations: declarationPending.length,
+    cues: await Promise.all((await list('cues')).map(file => readJson(resolve(directory, 'cues', file)))),
     declaration_errors: await Promise.all(declarationErrors.map(async file => {
       const value = await readJson(resolve(directory, 'declaration-errors', file)) as { capture: Capture, error: string }
       return { event_id: value.capture.id, session_id: value.capture.event.session_id, error: value.error }

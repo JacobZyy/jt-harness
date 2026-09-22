@@ -55,7 +55,7 @@ jth flow uninstall
 
 `status/context` 只读本地配置，不连接 PostgreSQL，不读取旧任务、旧阶段和缓存记忆，也不声称读取了原生 Goal/计划的实时状态。原生状态在 Codex 中查看。安装、状态和退役 Hook 入口在数据库离线时也可运行。
 
-Memo 继续通过 Stop 保存主会话声明，后台仅执行存储和 Embedding。语义搜索只在需要历史依据时进行；原有每轮自动召回与五分钟缓存仅属于显式旧 Flow 路径。数据库启动、向量空间、来源、版本和冲突规则不因流程模式改变。
+Memo 通过 Stop 保存主会话声明及采用反馈，后台处理存储与新事实 Embedding。Memo 自己的启动/恢复 Hook 提供有限关键词线索；同会话新任务由主 Agent 主动 recall，再按需混合 search 和分层 read。原有每轮自动召回与五分钟缓存仅属于显式旧 Flow 路径。Flow 入口本身仍不访问数据库或读取旧任务。详见[记忆读取](memory-retrieval.md)。
 
 ## 原生工具边界
 

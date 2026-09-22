@@ -53,18 +53,18 @@ test('partial intake publishes independent memories and preserves rejected and u
         FROM jt_memo.submissions s JOIN jt_memo.entries e ON e.submission_id=s.id
         JOIN jt_memo.embeddings v ON v.entry_id=e.id JOIN jt_memo.index_commits c ON c.submission_id=s.id WHERE s.id=$1`, [submission.submission_id])).rows
       const before = await snapshot()
-      await pool.query(`DROP TABLE jt_memo.agent_outputs;
+      await pool.query(`DROP TABLE jt_memo.memory_uses; DROP TABLE jt_memo.agent_outputs;
         ALTER TABLE jt_memo.submissions DROP COLUMN intake_issues;
         ALTER TABLE jt_memo.index_commits DROP COLUMN intake_issues;
         ALTER TABLE jt_memo.jobs DROP CONSTRAINT jobs_status_check;
         ALTER TABLE jt_memo.jobs ADD CONSTRAINT jobs_status_check CHECK(status IN ('queued','running','complete','failed'));
         UPDATE jt_memo.schema_version SET version=4;`)
-      await assert.rejects(prepareDatabase(pool, false), /v7/)
+      await assert.rejects(prepareDatabase(pool, false), /v8/)
       await prepareDatabase(pool, true)
       assert.deepEqual(await snapshot(), before)
       assert.deepEqual((await storage.getSubmission(submission.submission_id)).intake_issues, [])
       assert.equal((await readAgentOutputs(pool, submission.submission_id)).length, 0)
-      await pool.query('DROP TABLE jt_memo.intake_recoveries; UPDATE jt_memo.schema_version SET version=5')
+      await pool.query('DROP TABLE jt_memo.memory_uses; DROP TABLE jt_memo.intake_recoveries; UPDATE jt_memo.schema_version SET version=5')
       await prepareDatabase(pool, true)
       assert.deepEqual(await snapshot(), before, 'v5 recovery migration must not rewrite published data')
     })

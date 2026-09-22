@@ -180,7 +180,7 @@ test('init enables planning and disables project native memory; install and upgr
     await assert.rejects(cli('init', '--codex-memory', 'invalid'), /仅支持 off 或 inherit/)
     await assert.rejects(readFile(path), { code: 'ENOENT' })
     const result = JSON.parse((await cli('init', '--project', 'fixture', '--env-file', envFile)).stdout)
-    assert.deepEqual(result.memo.events, ['Stop'])
+    assert.deepEqual(result.memo.events, ['Stop', 'SessionStart', 'UserPromptSubmit'])
     assert.equal(result.codex_memory.policy, 'off')
     assert.equal(result.codex_memory.path, path)
     assert.equal(result.codex_plan.enabled, true)
