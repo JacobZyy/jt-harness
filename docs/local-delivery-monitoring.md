@@ -30,13 +30,16 @@ jth --version
 ## 项目接入和升级
 
 ```sh
-jth init --project my-project --trust
-jth doctor
+jth init
 jth upgrade --from /absolute/path/to/new-release/jt-harness --trust
 jth uninstall
 ```
 
-`init` 复用 `install` 安装 Flow Skill、短入口 Hook、Memo Stop 及有限线索 Hook，并默认向项目 `.codex/config.toml` 写入：
+`init` 面向人使用：默认项目名来自当前文件夹，已有项目复用原范围；全局连接和 Embedding 配置完整时直接复用，只有缺项才弹出问答。API Key 和数据库连接隐藏输入，保存到用户级 `.env`，项目只记录引用。问卷还会确认是否信任当前 Codex 项目并启用 JTH 自动入口，默认是。
+
+回答完成后，命令自动连接数据库、初始化或升级 Memo 表、安装 Flow Skill、Memo 说明与 Hooks，并执行接入检查。数据库错误可以在同一问卷内修改连接重试。成功输出简短摘要，不需要再执行 `memo init` 或 `doctor`；只有新回合的实际触发仍需重新打开 Codex 任务后验证。
+
+`init` 默认向项目 `.codex/config.toml` 写入：
 
 ```toml
 [memories]
@@ -53,7 +56,7 @@ enabled = true
 
 `jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，仍开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`install`、`upgrade` 和 `uninstall` 均保留用户已有的计划工具开关；再次执行 `init` 会将其设为开启。
 
-`--trust` 只信任刚生成且属于本安装的 JTH Hook；Codex 项目配置层仍需受信任。省略该选项时，在 Codex `/hooks` 审阅定义。
+交互 `init` 的问卷会明确确认项目目录和 JTH Hook 信任。AI 或脚本使用非交互 JSON 模式时，仍可显式传入 `--project`、`--env-file`、`--trust`；其中 `--trust` 只信任本次安装的 JTH Hooks，项目配置层需要已受信任。`install`、`upgrade` 的信任语义保持不变。
 
 Codex 将信任绑定到 Hook 定义的哈希；更换 CLI 路径或更新定义后可能出现 `trustStatus: modified`，这些 Hook 会被跳过。按 [OpenAI 官方 Hook 说明](https://learn.chatgpt.com/docs/hooks)重新审阅，或在确认本次 JTH 更新后运行：
 

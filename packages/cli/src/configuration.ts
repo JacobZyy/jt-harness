@@ -104,7 +104,7 @@ export function promptConfigValue(label: string, options: { value?: string, secr
   const output = new Writable({ write(chunk, _encoding, done) { if (!muted) destination.write(chunk); done() } })
   const reader = createInterface({ input, output, terminal: true })
   return new Promise<string>((done, reject) => {
-    reader.once('close', () => { if (!answered) reject(new Error('已取消初始化，配置未保存')) })
+    reader.once('close', () => { if (!answered) reject(new Error('已取消初始化')) })
     reader.once('SIGINT', () => reader.close())
     reader.question(`${label}${!options.secret && options.value ? ` [${options.value}]` : ''}: `, value => {
       answered = true
@@ -121,11 +121,20 @@ export function missingConfiguration(config: Config) {
     !config.embedding.model?.trim() && 'EMBEDDING_MODEL', !config.embedding.apiKey?.trim() && 'EMBEDDING_API_KEY'].filter((value): value is string => Boolean(value))
 }
 
+export async function promptConfirmation(label: string) {
+  for (;;) {
+    const answer = (await promptConfigValue(`${label}（Y/n）`, { value: 'y' })).toLowerCase()
+    if (['y', 'yes', '是'].includes(answer)) return true
+    if (['n', 'no', '否'].includes(answer)) return false
+    stderr.write('请输入 y 或 n。\n')
+  }
+}
+
 export async function completeConfiguration(root: string, config: Config, options: {
-  environment?: NodeJS.ProcessEnv, reviewDefaults?: boolean, interactive?: boolean, ask?: typeof promptConfigValue,
+  environment?: NodeJS.ProcessEnv, reviewDefaults?: boolean, editDatabase?: boolean, interactive?: boolean, ask?: typeof promptConfigValue,
 } = {}) {
   const missing = missingConfiguration(config)
-  if (!missing.length) return config
+  if (!missing.length && !options.editDatabase) return config
   if (!(options.interactive ?? (stdin.isTTY && stderr.isTTY))) {
     throw new Error(`配置不完整：缺少 ${missing.join('、')}。请在交互终端运行 jth init，或填写 ${config.envFile}；非交互模式也可使用 --env-file 或环境变量`)
   }
@@ -140,9 +149,16 @@ export async function completeConfiguration(root: string, config: Config, option
     { name: 'EMBEDDING_API_KEY', label: 'Embedding API Key（隐藏输入）', fallback: '', secret: true },
   ]
   for (const field of fields) {
-    if (values[field.name]?.trim() && (!options.reviewDefaults || field.name === 'EMBEDDING_API_KEY')) continue
+    if (values[field.name]?.trim() && !(options.editDatabase && field.name === 'JTH_DATABASE_URL')
+      && (!options.reviewDefaults || field.name === 'EMBEDDING_API_KEY')) continue
     while (true) {
-      const label = field.name === 'EMBEDDING_API_KEY' ? `Embedding API Key（${new URL(updates.EMBEDDING_BASE_URL ?? config.embedding.baseUrl!).host}，隐藏输入）` : field.label
+      let label = field.label
+      if (field.name === 'EMBEDDING_API_KEY') label = `Embedding API Key（${new URL(updates.EMBEDDING_BASE_URL ?? config.embedding.baseUrl!).host}，隐藏输入）`
+      const existingValue = values[field.name]
+      if (field.name === 'JTH_DATABASE_URL' && existingValue && URL.canParse(existingValue)) {
+        const url = new URL(existingValue)
+        label = `PostgreSQL 连接地址（默认 ${url.hostname || '本地套接字'}${url.port ? `:${url.port}` : ''}${url.pathname}，隐藏输入）`
+      }
       const value = (await ask(label, { value: field.name === 'EMBEDDING_API_KEY' ? undefined : values[field.name] ?? field.fallback, secret: field.secret })).trim()
       let valid = Boolean(value)
       if (field.name === 'EMBEDDING_DIMENSIONS') valid = Number.isInteger(Number(value)) && Number(value) > 0 && Number(value) <= 16000

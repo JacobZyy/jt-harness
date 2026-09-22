@@ -1,26 +1,30 @@
 import { execFile } from 'node:child_process'
 import { access, chmod, cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { openDatabase, safeError, type Config } from '@jt-harness/memo'
-import { configureFlowHooks, configureHooks, configureMonitorHooks, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
+import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jt-harness/memo'
+import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
-import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration } from './configuration.ts'
+import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration, promptConfigValue, promptConfirmation } from './configuration.ts'
+import { connectDatabase } from './postgres.ts'
 
 const execute = promisify(execFile)
-const help = `jth init --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
+const help = `jth init [--project <id>] [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
 jth install --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
 jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-file <path>]
 jth upgrade [--from <已解压发行目录>] [--prefix <目录>] [--workspace <项目目录>] [--trust] [--summary]
 jth doctor [--workspace <path>] [--env-file <path>]
 jth uninstall [--workspace <path>]
-init 复用项目安装，默认关闭本项目 Codex 原生记忆的读取和生成，并开启 update_plan；inherit 仅移除记忆的两个项目覆盖项，跟随上层配置。
+init 是交互初始化问卷：项目名默认当前文件夹，已有项目复用原范围；全局配置完整时跳过，缺项才询问并保存。
+问卷确认后自动准备记忆表、接入项目并检查，终端输出完成摘要；无需再执行 memo init 或 doctor。
+init 默认关闭本项目 Codex 原生记忆并开启 update_plan；inherit 跟随上层记忆设置。
 install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录并同步当前项目。
-用户配置默认保存于 ~/.jt-harness/.env；init 缺项时交互补全，API Key 隐藏输入。--env-file 显式覆盖，JTH_CONFIG_DIR 可改变用户配置目录。
+用户配置默认保存于 ~/.jt-harness/.env，项目只保存范围、偏好和配置引用；API Key 隐藏输入。--env-file 显式覆盖。
+非交互 init 使用配置和默认项目名，输出 JSON；--trust 只信任 JTH Hooks，项目配置层需已受信任。
 doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数据库、队列与凭据。
 `
 
@@ -92,8 +96,35 @@ export async function installCli(source: string, prefix: string, envFile?: strin
   return { status: 'installed', version: manifest.version, build, root: target, binary, envFile: userConfig.envFile }
 }
 
+async function inspectProject(root: string, workspace: string, config: Config) {
+  const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+  const checks: { name: string, status: string, detail?: unknown }[] = []
+  checks.push({ name: 'cli', status: 'ok', detail: { version: manifest.version, node: process.version, standalone: Boolean(manifest.jthDistribution) } })
+  checks.push({ name: 'configuration', status: missingConfiguration(config).length ? 'error' : 'ok', detail: { ...await configurationScope(config), missing: missingConfiguration(config), embeddingConfigured: Boolean(config.embedding.space && config.embedding.apiKey) } })
+  try {
+    const pool = openDatabase(config, true)
+    try {
+      const result = await pool.query("SELECT kind,status,count(*)::int AS count FROM jt_memo.jobs GROUP BY kind,status")
+      checks.push({ name: 'database', status: 'ok', detail: result.rows })
+    } finally { await pool.end() }
+  } catch (error) { checks.push({ name: 'database', status: 'error', detail: safeError(error, config) }) }
+  try {
+    const native = await inspectNativeHooks(workspace), own = native.hooks.filter(h => h.statusMessage?.startsWith('jth '))
+    const skillAvailable = await access(resolve(workspace, '.agents/skills/jth-flow/SKILL.md')).then(() => true, () => false)
+    checks.push({ name: 'hooks', status: skillAvailable && own.length && own.every(h => h.enabled && h.trustStatus === 'trusted') ? 'ok' : 'warning',
+      detail: { skill_available: skillAvailable, hooks: own.map(({ statusMessage, eventName, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
+  } catch (error) { checks.push({ name: 'hooks', status: 'warning', detail: safeError(error, config) }) }
+  checks.push({ name: 'flow_entry', status: (await readJson(resolve(workspace, '.jth/flow-entry.json'))) ? 'ok' : 'warning', detail: await readJson(resolve(workspace, '.jth/flow-entry.json')) ?? '尚无触发记录；已安装不等于已执行' })
+  const monitor = await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined
+  const phoenix = await phoenixStatus(config)
+  checks.push({ name: 'monitor', status: !monitor?.enabled ? 'disabled' : phoenix.reachable ? 'ok' : 'warning', detail: {
+    ...phoenix, enabled: Boolean(monitor?.enabled), lastExport: await readJson(resolve(workspace, '.jth/monitor/last-export.json')) ?? null } })
+  return { workspace, checks }
+}
+
 export async function deliveryMain(root: string, args: string[]) {
   let config: Config | undefined
+  let interactive = false
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
       workspace: { type: 'string' }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
@@ -102,6 +133,7 @@ export async function deliveryMain(root: string, args: string[]) {
     } })
     const [command] = positionals
     if (values.help) { process.stdout.write(help); return }
+    interactive = command === 'init' && Boolean(process.stdin.isTTY && process.stderr.isTTY)
     if (positionals.length !== 1) throw new Error('参数数量不符；运行 jth install --help')
     const allowed: Record<string, string[]> = {
       init: ['workspace', 'env-file', 'project', 'business', 'trust', 'codex-memory'],
@@ -133,29 +165,8 @@ export async function deliveryMain(root: string, args: string[]) {
     const locator = await readJson(resolve(workspace, '.jth/flow.json')) as { envFile: string } | undefined
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     if (command === 'doctor') {
-      const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-      const checks: { name: string, status: string, detail?: unknown }[] = []
-      checks.push({ name: 'cli', status: 'ok', detail: { version: manifest.version, node: process.version, standalone: Boolean(manifest.jthDistribution) } })
-      checks.push({ name: 'configuration', status: missingConfiguration(config).length ? 'error' : 'ok', detail: { ...await configurationScope(config), missing: missingConfiguration(config), embeddingConfigured: Boolean(config.embedding.space && config.embedding.apiKey) } })
-      try {
-        const pool = openDatabase(config, true)
-        try {
-          const result = await pool.query("SELECT kind,status,count(*)::int AS count FROM jt_memo.jobs GROUP BY kind,status")
-          checks.push({ name: 'database', status: 'ok', detail: result.rows })
-        } finally { await pool.end() }
-      } catch (error) { checks.push({ name: 'database', status: 'error', detail: safeError(error, config) }) }
-      try {
-        const native = await inspectNativeHooks(workspace), own = native.hooks.filter(h => h.statusMessage?.startsWith('jth '))
-        const skillAvailable = await access(resolve(workspace, '.agents/skills/jth-flow/SKILL.md')).then(() => true, () => false)
-        checks.push({ name: 'hooks', status: skillAvailable && own.length && own.every(h => h.enabled && h.trustStatus === 'trusted') ? 'ok' : 'warning',
-          detail: { skill_available: skillAvailable, hooks: own.map(({ statusMessage, eventName, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
-      } catch (error) { checks.push({ name: 'hooks', status: 'warning', detail: safeError(error, config) }) }
-      checks.push({ name: 'flow_entry', status: (await readJson(resolve(workspace, '.jth/flow-entry.json'))) ? 'ok' : 'warning', detail: await readJson(resolve(workspace, '.jth/flow-entry.json')) ?? '尚无触发记录；已安装不等于已执行' })
-      const monitor = await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined
-      const phoenix = await phoenixStatus(config)
-      checks.push({ name: 'monitor', status: !monitor?.enabled ? 'disabled' : phoenix.reachable ? 'ok' : 'warning', detail: {
-        ...phoenix, enabled: Boolean(monitor?.enabled), lastExport: await readJson(resolve(workspace, '.jth/monitor/last-export.json')) ?? null } })
-      output({ workspace, checks }); process.exitCode = checks.some(check => check.status === 'error') ? 1 : 0; return
+      const report = await inspectProject(root, workspace, config)
+      output(report); process.exitCode = report.checks.some(check => check.status === 'error') ? 1 : 0; return
     }
     const oldRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-flow'), workspace)
     if (command === 'uninstall') {
@@ -169,7 +180,17 @@ export async function deliveryMain(root: string, args: string[]) {
     const status = locator ? JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.mjs'), 'flow', 'status', '--workspace', workspace])).stdout) : null
     const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? []
     const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? []
+    if (interactive) process.stderr.write(`JTH 初始化\n准备：可连接的 PostgreSQL（已安装 pgvector）及 Embedding 服务配置。\n已有全局配置会复用，回车采用默认值，Ctrl+C 取消。\n\n项目配置\n目录：${workspace}\n`)
+    if (command === 'init' && !projects.length) {
+      projects.push(interactive ? await promptConfigValue('项目名称', { value: basename(workspace) }) : basename(workspace))
+    } else if (interactive) process.stderr.write(`项目：${projects.join('、')}（复用已给定范围）\n`)
     if (!projects.length && !businesses.length) throw new Error('首次安装需要 --project <id> 或 --business <id>')
+    if (command === 'init') captureSettingsSchema.shape.scope.parse({ project_ids: projects, business_ids: businesses })
+    let trust = Boolean(values.trust), trustProject = false
+    if (interactive && !values.trust) {
+      trust = await promptConfirmation('信任当前 Codex 项目并启用 JTH 自动流程与记忆？')
+      trustProject = trust
+    }
     let userConfig: Awaited<ReturnType<typeof ensureUserConfig>> | undefined
     if (!values['env-file'] && !process.env.JTH_ENV_FILE) {
       if (!locator || (await configurationScope(config)).scope === 'user') userConfig = await ensureUserConfig(root)
@@ -179,19 +200,56 @@ export async function deliveryMain(root: string, args: string[]) {
       }
     }
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
-    if (command === 'init') config = await completeConfiguration(root, config, { reviewDefaults: userConfig?.created && !userConfig.imported })
+    if (command === 'init') {
+      if (interactive) {
+        const configuration = await configurationScope(config)
+        process.stderr.write(`\n${configuration.scope === 'user' ? '全局共享配置' : '项目指定配置'}：${config.envFile}\n${missingConfiguration(config).length ? '仅补齐缺项；首次配置可回车保留默认值。' : '配置完整，直接复用，不重复询问凭据。'}\n`)
+      }
+      config = await completeConfiguration(root, config, { reviewDefaults: userConfig?.created && !userConfig.imported })
+      for (;;) {
+        try {
+          if (interactive) process.stderr.write('\n正在连接数据库并准备记忆表…\n')
+          const pool = await connectDatabase(config)
+          try { await prepareDatabase(pool, true) } finally { await pool.end() }
+          break
+        } catch (error) {
+          if (!interactive || process.env.JTH_DATABASE_URL) throw error
+          process.stderr.write(`数据库尚未就绪：${safeError(error, config)}\n`)
+          if (!await promptConfirmation('重新输入数据库连接并重试？')) throw error
+          config = await completeConfiguration(root, config, { editDatabase: true })
+        }
+      }
+    }
     if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
     const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
     const codexPreferences = memoryPolicy ? await configureProjectCodex(workspace, memoryPolicy, command === 'init') : {}
     const monitoring = Boolean((await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined)?.enabled)
     if (monitoring) await configureMonitorHooks(root, workspace, true)
-    if (values.trust) await withCodex(async call => {
+    if (trust) await withCodex(async call => {
+      if (trustProject) await call('config/batchWrite', { edits: [{ keyPath: `projects.${JSON.stringify(workspace)}.trust_level`, value: 'trusted', mergeStrategy: 'replace' }], reloadUserConfig: true })
       const result = await call('hooks/list', { cwds: [workspace] }) as NativeHookList
       const hooks = result.data[0].hooks.filter(h => isManagedHook(h, root, workspace, monitoring))
       if (!hooks.length) throw new Error('Codex 未发现项目 Hook；先信任项目配置层')
       await call('config/batchWrite', { edits: hooks.map(h => ({ keyPath: `hooks.state.${JSON.stringify(h.key)}.trusted_hash`, value: h.currentHash, mergeStrategy: 'replace' })), reloadUserConfig: true })
     })
-    const result = { ...installed, ...codexPreferences, configuration: await configurationScope(config) }
+    const verification = command === 'init' ? await inspectProject(root, workspace, config) : undefined
+    const result = { ...installed, ...codexPreferences, configuration: await configurationScope(config),
+      ...(verification ? { database: { status: 'ready', schema_version: schemaVersion }, verification } : {}) }
+    if (verification) {
+      process.exitCode = verification.checks.some(check => check.status === 'error') ? 1 : 0
+      if (interactive) {
+        const labels: Record<string, string> = { configuration: '连接配置', database: '记忆库', hooks: '自动入口' }
+        const attention = verification.checks.filter(check => check.name in labels && check.status !== 'ok')
+        process.stdout.write([attention.length ? '项目已接入，仍有待处理项' : '初始化完成',
+          `项目：${projects.join('、')}`, `配置：${shortPath(config.envFile)}（${result.configuration.scope === 'user' ? '全局共享' : '显式指定'}）`,
+          `记忆表：已初始化（v${schemaVersion}）`,
+          ...attention.map(check => `${labels[check.name]}：${typeof check.detail === 'string' ? check.detail : '检查未通过，可用 jth doctor 查看详情'}`),
+          ...(attention.length ? ['未信任或禁用的 Hook 可在 Codex /hooks 中处理。'] : []),
+          '下一步：重新打开 Codex 任务，直接描述要做的工作。',
+          '首次运行回执会在任务输入和回复后产生。',
+        ].join('\n') + '\n'); return
+      }
+    }
     if (command === 'upgrade' && values.summary) {
       const settings = (result as { memo?: { settings?: { env_file?: string, scope?: unknown, enabled_at?: string } } }).memo?.settings
       process.stdout.write([
@@ -203,5 +261,8 @@ export async function deliveryMain(root: string, args: string[]) {
       ].join('\n') + '\n'); return
     }
     output(result)
-  } catch (error) { process.stderr.write(JSON.stringify({ error: safeError(error, config) }) + '\n'); process.exitCode = 1 }
+  } catch (error) {
+    process.stderr.write(interactive ? `初始化未完成：${safeError(error, config)}\n修正后重新运行 jth init。\n` : JSON.stringify({ error: safeError(error, config) }) + '\n')
+    process.exitCode = 1
+  }
 }

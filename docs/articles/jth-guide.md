@@ -2,7 +2,7 @@
 
 - **适用读者**：会使用终端和 Codex，第一次接触 JTH 的开发者。
 - **核对日期**：2026-09-22。
-- **实现基准**：jt-harness 仓库提交 `f7410a2`；本文涉及的增强记忆读取属于该提交对应的构建。
+- **实现基准**：2026-09-22 的问答式初始化与增强记忆实现，属于尚未公开发布的新构建。
 - **使用环境**：命令示例采用 macOS / Linux Shell，宿主使用支持项目 Hooks 的 Codex。
 
 ---
@@ -11,7 +11,7 @@
 
 - [一、先把一个项目接进来](#一先把一个项目接进来)
 - [二、准备环境并安装工具](#二准备环境并安装工具)
-- [三、初始化项目和记忆库](#三初始化项目和记忆库)
+- [三、一个问卷完成项目初始化](#三一个问卷完成项目初始化)
 - [四、在 Codex 中完成一次任务](#四在-codex-中完成一次任务)
 - [五、让确认过的结论留下来](#五让确认过的结论留下来)
 - [六、查找记忆并展开证据](#六查找记忆并展开证据)
@@ -64,7 +64,7 @@ command -v jth
 
 第一条安装工具本体，第二条查看版本，第三条确认当前终端究竟使用哪个入口。
 
-> **版本说明：** 核对时，npm 最新版是 `0.3.3`，发布来源为 `8ac0952`；本文核对的本地提交是 `f7410a2`。主动线索、`recall`、混合检索、分层读取和 `usage` 等增强能力，尚未随这次 npm 发布交付。仅看到版本号 `0.3.3`，不能证明具备本文全部能力。
+> **版本说明：** 核对时，npm 最新版是 `0.3.3`，发布来源为 `8ac0952`。本文的单入口初始化、主动线索、`recall`、混合检索、分层读取和 `usage` 尚未随该次 npm 发布交付。仅看到版本号 `0.3.3`，不能证明具备本文全部能力。
 
 ### 使用包含当前能力的独立发行包
 
@@ -85,53 +85,83 @@ jth memo --help
 
 ---
 
-## 三、初始化项目和记忆库
+## 三、一个问卷完成项目初始化
 
-先在 Codex 中打开并信任目标项目，再进入同一个项目目录。为项目选一个稳定的标识，下面统一使用 `my-project`。它是记忆的项目范围标识，不是新数据库的名字；后续查询要使用同一个标识。
+先准备好数据库连接和 Embedding 服务资料。工具安装后，在目标项目目录只运行一条命令：
 
 ```sh
 cd /path/to/my-project
-jth init --project my-project --trust
+jth init
 ```
 
-把示例路径替换为你的项目路径。几个参数分别表示：
+**全局配置保存连接和凭据，项目配置保存范围和偏好。** 不需要在每个项目重复填写同一套 Embedding 参数，也不需要手动拼接项目名和信任参数。
 
-- `init`：补齐配置并接入当前项目，安装 Flow 指引、Memo 声明及相关 Hooks。
-- `--project my-project`：把这个项目的记忆归入指定范围。
-- `--trust`：信任本次生成、属于当前安装的 JTH Hooks。它不代替 Codex 对整个项目配置层的信任。
+### 第一层：项目配置
 
-首次使用时，`init` 会在交互终端询问数据库连接、Embedding 服务地址、模型、向量维度和 API Key，凭据输入会隐藏。配置默认保存在用户目录 `~/.jt-harness/.env`，后续项目复用这一份配置。若已经准备好独立配置文件，可以显式指定：
+首次接入时，项目名称默认取当前文件夹名。回车接受，也可以填写另一个稳定名称；已经接入的项目直接复用原范围，不会因为目录改名而自动换掉记忆范围。
+
+随后问卷会确认是否信任当前 Codex 项目并启用 JTH 自动流程与记忆，默认是。这个确认包含当前目录的项目配置和本次 JTH Hooks；选择否时，程序保留未信任状态，并在完成摘要中提示待处理。
+
+### 第二层：全局共享配置
+
+默认配置文件为 `~/.jt-harness/.env`：
+
+- 已有完整配置：直接复用，不重复询问 API Key、模型或数据库连接。
+- 首次或存在缺项：按提示填写 Embedding 服务地址、模型、向量维度、数据库连接和 API Key；有默认值时回车保留。
+- API Key 和数据库连接隐藏输入，程序写入对应 `.env`，不需要手工编辑文件。项目只保存配置引用，不复制凭据。
+
+首次使用时，问答大致如下；示例中的描述需要按你实际使用的服务填写：
+
+```text
+项目名称 [my-project]: 回车接受
+信任当前 Codex 项目并启用 JTH 自动流程与记忆？（Y/n）[y]: 回车接受
+Embedding 服务地址 [预置默认值]: 填写或回车
+Embedding 模型 [预置默认值]: 填写或回车
+向量维度 [1024]: 填写或回车
+PostgreSQL 连接地址（隐藏输入）: 输入已准备的连接地址
+Embedding API Key（隐藏输入）: 输入密钥
+```
+
+### 回答完之后，程序自动处理
+
+```mermaid
+flowchart TD
+    A["在项目目录执行 jth init"] --> B["项目名默认当前文件夹，确认项目自动入口"]
+    B --> C{"全局配置是否完整"}
+    C -->|是| D["直接复用"]
+    C -->|否| E["问答补齐并保存全局 .env"]
+    D --> F["连接数据库并准备记忆表"]
+    E --> F
+    F --> G["安装项目指引与 Hooks，按回答处理信任"]
+    G --> H["自动检查并显示完成摘要"]
+    H --> I["重新打开 Codex 任务，开始工作"]
+
+    style A fill:#7B1FA2,color:#fff,stroke:#4A148C
+    style B fill:#E3F2FD,stroke:#1565C0
+    style C fill:#FFF3E0,stroke:#FF9800
+    style D fill:#E3F2FD,stroke:#1565C0
+    style E fill:#E3F2FD,stroke:#1565C0
+    style F fill:#E3F2FD,stroke:#1565C0
+    style G fill:#E3F2FD,stroke:#1565C0
+    style H fill:#C8E6C9,stroke:#2E7D32
+    style I fill:#C8E6C9,stroke:#2E7D32
+```
+
+不需要再执行 `jth memo init` 或 `jth doctor` 才能完成接入。数据库连接失败时，可以留在同一问卷中重新输入并重试。JTH 负责表结构，数据库软件、目标数据库和 pgvector 仍需提前准备。
+
+默认会开启本项目的原生计划工具，并关闭本项目 Codex 原生记忆读写，让跨会话记忆使用 JTH。需要跟随上层原生记忆设置时，可用高级选项 `--codex-memory inherit`；它不强制开启全局记忆。
+
+初始化完成后，重新打开 Codex 任务，让新入口和指引生效。首次运行回执要在后续输入、回复和声明处理后产生，不会在安装时伪造。
+
+### AI 和脚本仍可显式传参
+
+非交互模式使用同一配置和项目默认值，输出 JSON；缺项时明确报错。需要覆盖默认名称或使用独立配置时：
 
 ```sh
-jth init --project my-project --env-file /absolute/path/to/private.env --trust
+jth init --project team-project --env-file /absolute/path/to/private.env --trust
 ```
 
-这里选择的是配置文件路径，不需要把 API Key 写进命令参数、文章示例或项目仓库。在非交互环境中，缺少必要配置会报错，不会假装初始化成功。
-
-### 项目接入之后，还要初始化记忆表
-
-`jth init` 负责项目接入，**`jth memo init` 才负责记忆库表结构的初始化或升级**。首次使用这套数据库时，继续执行：
-
-```sh
-jth memo init
-jth doctor
-```
-
-`memo init` 在已配置的数据库中启用 `vector` 扩展并建立 Memo schema；不会安装数据库软件，也不会替你创建连接目标中的数据库。当前增强构建的 schema 版本为 v8。多个项目共享同一数据库时，不需要为每个项目新建一套表。
-
-`doctor` 检查 CLI、配置、数据库、Hook 信任、最近入口触发和观测状态。检查重点是数据库可用、Skill 可加载、JTH Hooks 已启用且受信任。刚安装还没有输入和回复时，“尚无触发记录”只表示没有运行证据。
-
-### 初始化会调整哪些 Codex 设置
-
-当前 `init` 默认开启项目的原生计划工具，并关闭本项目 Codex 原生记忆的读取与生成，让跨会话记忆使用 JTH。若希望原生记忆继续跟随上层设置，在初始化时改用：
-
-```sh
-jth init --project my-project --trust --codex-memory inherit
-```
-
-`inherit` 移除项目级记忆覆盖，不是强制开启全局记忆。这些设置只作用于项目配置；任务目标、模型和上下文压缩仍使用 Codex 自身设置。
-
-接入会更新项目中的 `AGENTS.md` 记忆说明、`.agents/skills/jth-flow` Skill 入口，以及 `.codex/`、`.jth/` 下相关配置。完成后重新加载 Codex 任务，让新 Hook 和指引生效。
+非交互 `--trust` 只信任 JTH Hooks，项目配置层需要已受信任；显式 `--env-file` 继续使用指定文件，不覆盖全局配置。
 
 ---
 
@@ -332,15 +362,14 @@ jth memo restore MEMORY_ID --reason '重新纳入活跃检索'
 
 ### 同一套配置，多个项目范围
 
-换到第二个项目后，先在 Codex 中打开并信任它，再用另一个稳定的项目标识接入：
+换到第二个项目后，仍然运行同一个问卷：
 
 ```sh
 cd /path/to/another-project
-jth init --project another-project --trust
-jth doctor
+jth init
 ```
 
-用户级数据库与 Embedding 配置会复用，不需要重新填一遍凭据。各项目使用自己的范围标识，手动搜索时明确选择范围。如果确实需要查询两个项目共有的材料，可以重复传入项目参数：
+项目名默认是 `another-project`，用户级数据库与 Embedding 配置直接复用，不需要重新填写。各项目使用自己的范围标识，手动搜索时明确选择范围。如果确实需要查询两个项目共有的材料，可以重复传入项目参数：
 
 ```sh
 jth memo search '共同接口约定' --project my-project --project another-project
@@ -425,11 +454,11 @@ jth monitor stop
 
 ## 十、常用命令和排查顺序
 
-第一次使用，主线只需要记住：安装正确构建，在目标项目中 `init`，首次初始化记忆表，再用 `doctor` 检查并重新加载 Codex。后续仍然通过自然语言布置任务。
+第一次使用，先准备依赖和服务资料，在项目目录执行 `jth init`，按问卷填写，完成后重新打开 Codex。后续项目同样只运行这一条命令，完整的全局配置自动复用。
 
 需要查命令时，按目的选择：
 
-- **首次接入项目**：`jth init --project my-project --trust`。补齐配置，安装项目指引与 Hooks。
+- **首次接入项目**：`jth init`。问卷补齐配置，自动准备记忆表、安装入口并检查。
 - **安装独立工具本体**：`jth install --cli`。与项目接入是两件事；从独立发行目录执行。
 - **同步项目接入**：`jth install --trust`。未传原生记忆选项时保留已有偏好，不替代首次 `init` 的配置向导。
 - **升级项目入口**：`jth upgrade --trust --summary`。同步当前 CLI 对应的 Hook 和 Skill，不下载 npm 新版本。
@@ -472,6 +501,6 @@ jth monitor stop
 
 ## 核对依据
 
-本文依据 [jt-harness 项目](https://github.com/JacobZyy/jt-harness) 的本地提交 `f7410a2`、当前 CLI 帮助与实现核对，主要材料为 `README.md`、`docs/configuration.md`、`docs/local-delivery-monitoring.md`、`docs/flow-control.md`、`docs/memory-declarations.md` 和 `docs/memory-retrieval.md`。公开仓库和 npm 的可用内容应以各自发布状态为准，不能仅凭本地版本号推定已经发布。
+本文依据 [jt-harness 项目](https://github.com/JacobZyy/jt-harness) 的当前 CLI 帮助、初始化实现及终端交互验证核对，主要材料为 `README.md`、`docs/configuration.md`、`docs/local-delivery-monitoring.md`、`docs/flow-control.md`、`docs/memory-declarations.md` 和 `docs/memory-retrieval.md`。公开仓库和 npm 的可用内容应以各自发布状态为准，不能仅凭本地版本号推定已经发布。
 
 *JTH 项目使用指南 · 2026-09-22*

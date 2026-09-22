@@ -4,7 +4,11 @@
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
-本地交付命令：`jth init / install / upgrade / doctor / uninstall`；`jth init --project <id>` 接入项目、开启原生 `update_plan`，并默认关闭本项目的 Codex 原生记忆读写，使用 `--codex-memory inherit` 让记忆配置跟随上层。本机观测命令：`jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。安装、升级与观测说明见 [本地交付](docs/local-delivery-monitoring.md)。
+项目接入只需运行 `jth init`：问卷默认用当前文件夹名，复用完整的全局配置，缺项才询问。确认后自动准备记忆表、安装项目指引和 Hooks、处理信任并检查接入。默认开启原生 `update_plan`、关闭本项目 Codex 原生记忆读写；高级参数 `--codex-memory inherit` 可改为跟随上层记忆设置。
+
+开始前准备 Node.js 24.21.0 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后，进入项目目录运行 `jth init`，按问卷填写并重新打开 Codex 任务即可。后续项目仍运行同一命令，不重复配置全局凭据。
+
+其他交付命令为 `jth install / upgrade / doctor / uninstall`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
 
 共享配置与凭据默认存放于 `~/.jt-harness/.env`；仓库只保存自己的接入、范围与开关，默认不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级与仓库级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
 
@@ -161,13 +165,11 @@ Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness`
 pnpm install --frozen-lockfile
 pnpm build
 node bin/jth.mjs --help
-# 首次运行检查用户配置，缺项时在终端补全。
-node bin/jth.mjs init --project jt-harness --trust
-# PostgreSQL 服务就绪后：
-node bin/jth.mjs memo init
+# 问卷补齐共享配置，自动建表并接入当前项目。
+node -- bin/jth.mjs init
 ```
 
-`memo init` 创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v8，保留原材料、条目、向量与回执。v7 的声明回执、来源关联及内容索引继续保留；v8 只增加 `memory_uses`，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
+`init` 自动调用现有建表与迁移逻辑，创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v8，保留原材料、条目、向量与回执。高级手动入口 `memo init` 继续保留。v8 只在 v7 上增加采用记录，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL 或创建数据库实例；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
 
 仓库公开托管于 [JacobZyy/jt-harness](https://github.com/JacobZyy/jt-harness)，npm 包为 `@jacob-z/jt-harness`。`.gitignore` 忽略 `.env` 和 `.env.*`，仅允许无凭据的 `.env.example`。用户凭据独立于仓库和发行目录；打包白名单不包含凭据、数据库、运行记录或本地备份。
 

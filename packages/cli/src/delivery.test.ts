@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, readFile, readlink, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readlink, realpath, rm, symlink, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { existsSync } from 'node:fs'
+import { parseEnv, promisify } from 'node:util'
+import { Pool } from 'pg'
 import { createServer } from 'node:http'
 import { setTimeout as delay } from 'node:timers/promises'
 import { installCli, isManagedHook } from './delivery.ts'
@@ -171,12 +173,12 @@ test('project preferences preserve TOML comments and unrelated values; inherit r
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
-test('init enables planning and disables project native memory; install and upgrade preserve user choices', async () => {
+test('init enables planning and disables project native memory; install and upgrade preserve user choices', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-init-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env'), path = resolve(workspace, '.codex/config.toml')
   const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })
   try {
-    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
+    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await assert.rejects(cli('init', '--codex-memory', 'invalid'), /仅支持 off 或 inherit/)
     await assert.rejects(readFile(path), { code: 'ENOENT' })
     const result = JSON.parse((await cli('init', '--project', 'fixture', '--env-file', envFile)).stdout)
@@ -185,6 +187,8 @@ test('init enables planning and disables project native memory; install and upgr
     assert.equal(result.codex_memory.path, path)
     assert.equal(result.codex_plan.enabled, true)
     assert.equal(result.codex_plan.path, path)
+    assert.equal(result.database.schema_version, 8)
+    assert.equal(result.verification.checks.find((check: { name: string }) => check.name === 'database').status, 'ok')
     assert.deepEqual({ ...parse(await readFile(path, 'utf8')).memories }, { use_memories: false, generate_memories: false })
     assert.equal(parse(await readFile(path, 'utf8')).tools.update_plan.enabled, true)
     // An explicit project preference remains owned by the user through upgrades and uninstall.
@@ -203,6 +207,74 @@ test('init enables planning and disables project native memory; install and upgr
     await cli('uninstall')
     assert.equal(await readFile(path, 'utf8'), configured)
   } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+test('bare init completes a real terminal questionnaire and reuses global configuration across projects', {
+  skip: !process.env.JTH_TEST_DATABASE_URL || !existsSync('/usr/bin/expect'), timeout: 60000,
+}, async () => {
+  const root = resolve(import.meta.dirname, '../../..'), fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-init-wizard-')))
+  const workspace = resolve(fixture, 'first-project'), sibling = resolve(fixture, 'second-project'), declined = resolve(fixture, 'declined-project'), home = resolve(fixture, 'codex-home')
+  const userConfig = resolve(fixture, 'user-config'), envFile = resolve(userConfig, '.env'), binary = resolve(root, 'bin/jth.mjs')
+  const environment: NodeJS.ProcessEnv = { ...process.env, JTH_CONFIG_DIR: userConfig, CODEX_HOME: home, TERM: 'dumb' }
+  for (const key of ['JTH_ENV_FILE', 'JTH_DATABASE_URL', 'JTH_DATA_DIR', 'JTH_PG_DATA_DIR', 'JTH_PG_BIN_DIR', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'EMBEDDING_DIMENSIONS', 'EMBEDDING_API_KEY']) delete environment[key]
+  const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
+  let requests = 0
+  const server = createServer((_request, response) => { requests++; response.writeHead(500).end() })
+  await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
+  const address = server.address(); assert(address && typeof address !== 'string')
+  const cli = async (cwd: string, ...args: string[]) => JSON.parse((await promisify(execFile)(process.execPath, ['--', binary, ...args], { cwd, env: environment })).stdout)
+  const questionnaire = (cwd: string, answers: [string, string][]) => new Promise<string>((done, reject) => {
+    const child = execFile('/usr/bin/expect', ['-f', '-', process.execPath, '--', binary, 'init', ...answers.flat()],
+      { cwd, env: environment, timeout: 25000 }, (error, stdout, stderr) => {
+        if (error) { reject(new Error(`初始化问卷失败 (${error.code}/${error.signal})：${(stdout + stderr).slice(-1800)}`)); return }
+        const output = stdout + stderr
+        for (const [question] of answers) if (!output.includes(question)) { reject(new Error(`问卷缺少问题：${question}`)); return }
+        done(output)
+      })
+    // macOS's bundled Expect crashes matching mixed-width prompt patterns; the ASCII suffix is stable.
+    child.stdin!.end('set timeout 20\nlog_user 1\nspawn -noecho {*}[lrange $argv 0 3]\nexpect_before timeout {exit 124}\nforeach {question answer} [lrange $argv 4 end] {\n  expect -exact {: }\n  send -- "$answer\\r"\n}\nexpect eof\ncatch wait result\nexit [lindex $result 3]\n')
+  })
+  try {
+    for (const path of [workspace, sibling, declined, home, userConfig]) await mkdir(path)
+    await writeFile(resolve(home, 'config.toml'), '[features]\nhooks=true\n[memories]\nuse_memories=true\ngenerate_memories=true\n')
+    await writeFile(envFile, `JTH_DATA_DIR=${fixture}/data\n`)
+    // Only the temporary database owned by scripts/test-postgres.mjs is used here.
+    await pool.query('DROP SCHEMA IF EXISTS jt_memo CASCADE')
+    const first = await questionnaire(workspace, [
+      ['项目名称', ''], ['信任当前 Codex 项目', ''], ['Embedding 服务地址', `http://127.0.0.1:${address.port}/v1`],
+      ['Embedding 模型', 'wizard-fixture'], ['向量维度', '2'], ['PostgreSQL 连接地址', 'postgresql://127.0.0.1:1/test'],
+      ['Embedding API Key', 'private-wizard-key'], ['重新输入数据库连接并重试', ''], ['PostgreSQL 连接地址', process.env.JTH_TEST_DATABASE_URL!],
+    ])
+    assert(first.includes('初始化完成'), first.slice(-1500))
+    assert(first.includes('项目：first-project'))
+    assert(!first.includes('private-wizard-key'))
+    assert.equal((await pool.query('SELECT version FROM jt_memo.schema_version')).rows[0].version, 8)
+    const saved = await readFile(envFile, 'utf8')
+    assert.equal(parseEnv(saved).EMBEDDING_API_KEY, 'private-wizard-key')
+    assert.equal((await stat(envFile)).mode & 0o777, 0o600)
+    assert.deepEqual((await cli(workspace, 'flow', 'status')).memo_scope.project_ids, ['first-project'])
+    const second = await questionnaire(sibling, [['项目名称', ''], ['信任当前 Codex 项目', '']])
+    assert(second.includes('初始化完成')); assert(second.includes('直接复用，不重复询问凭据'))
+    assert(!second.includes('Embedding API Key'))
+    assert.equal(await readFile(envFile, 'utf8'), saved)
+    assert.equal((await cli(sibling, 'flow', 'status')).configuration.envFile, envFile)
+    // Existing scope wins over the directory name, including noninteractive reruns.
+    const installed = await cli(sibling, 'init', '--trust')
+    assert.deepEqual(installed.memo.settings.scope.project_ids, ['second-project'])
+    assert.equal(installed.verification.checks.find((check: { name: string }) => check.name === 'hooks').status, 'ok')
+    assert.equal(await readFile(envFile, 'utf8'), saved)
+    assert.equal(parse(await readFile(resolve(home, 'config.toml'), 'utf8')).memories.use_memories, true)
+    assert.equal(parse(await readFile(resolve(workspace, '.codex/config.toml'), 'utf8')).memories.use_memories, false)
+    const nativeBefore = await readFile(resolve(home, 'config.toml'), 'utf8')
+    const declinedResult = await questionnaire(declined, [['项目名称', ''], ['信任当前 Codex 项目', 'n']])
+    assert(declinedResult.includes('仍有待处理项'))
+    assert.equal(await readFile(resolve(home, 'config.toml'), 'utf8'), nativeBefore, 'Declining must not grant project or Hook trust')
+    assert.equal(requests, 0, 'Initialization must not call Embedding or a generation model')
+  } finally {
+    await pool.end()
+    await new Promise<void>(done => server.close(() => done()))
+    await rm(fixture, { recursive: true, force: true })
+  }
 })
 
 test('Codex resolves project memory and planning overrides without changing user or sibling configuration', { skip: !process.env.JTH_NATIVE_CONFIG_TEST }, async () => {
