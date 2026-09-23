@@ -1,9 +1,9 @@
-import { mkdir, readFile, readlink, symlink, unlink, realpath, appendFile, readdir } from 'node:fs/promises'
+import { readFile, unlink, realpath, appendFile, readdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { dirname, relative, resolve, isAbsolute } from 'node:path'
+import { relative, resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { FlowStore, renderFlowContext } from '@jt-harness/flow'
-import { mergeHooks, quote, updateHookConfig } from './install.ts'
+import { configureSkill, mergeHooks, quote, updateHookConfig } from './install.ts'
 import { writeJson, readJson } from './capture.ts'
 import { flowEntryMarker } from './flow-entry.ts'
 
@@ -53,17 +53,11 @@ export async function flowHook(input: unknown, store: FlowStore) {
 }
 
 export async function configureFlowHooks(root: string, workspace: string, enabled = true, mode: 'native' | 'legacy' = 'native') {
-  const source = resolve(root, 'packages/flow/skills/jth-flow')
-  const target = resolve(workspace, '.agents/skills/jth-flow')
-  const prior = await readlink(target).catch(error => { if (error.code === 'ENOENT') return null; throw new Error('已有 jth-flow Skill 不是本工具的链接；保留原文件') })
-  if (prior && resolve(dirname(target), prior) !== source) throw new Error('已有 jth-flow Skill 指向其他安装；保留原链接')
+  const target = await configureSkill(root, workspace, 'flow', enabled)
   if (enabled) {
-    await readFile(resolve(source, 'SKILL.md'), 'utf8')
-    await mkdir(dirname(target), { recursive: true })
-    if (!prior) await symlink(source, target)
     const ignorePath = resolve(workspace, '.gitignore')
     const ignore = await readFile(ignorePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
-    const missing = ['/.jth/', '/.agents/skills/jth-flow', '/.codex/hooks.json'].filter(line => !ignore.split(/\r?\n/).includes(line))
+    const missing = ['/.jth/', '/.codex/hooks.json'].filter(line => !ignore.split(/\r?\n/).includes(line))
     if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
   }
   const command = enabled && mode === 'legacy' ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'hook', '--workspace', workspace].map(quote).join(' ') : undefined
@@ -72,7 +66,6 @@ export async function configureFlowHooks(root: string, workspace: string, enable
   await updateHookConfig(hooksPath, resolve(workspace, '.jth/backups'), document => mergeHooks(mergeHooks(document, command, {
     marker: 'jth flow context', events: flowEvents, additionalContextLimit: 6000,
   }), entry, { marker: flowEntryMarker, events: ['UserPromptSubmit'], additionalContextLimit: 512 }))
-  if (!enabled && prior) await unlink(target)
   const activation = !enabled ? '任务数据和 Memo Hooks 均保留'
     : mode === 'native' ? '在 Codex /hooks 审阅并信任入口定义；恢复会话后，UserPromptSubmit 注入短 Flow 提示，原生目标与任务列表仍由 Codex 管理'
       : '在 Codex /hooks 审阅并信任历史 Flow 定义'

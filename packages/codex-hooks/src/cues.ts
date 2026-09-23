@@ -3,6 +3,7 @@ import { resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import type { MemoStorage, ScopeFilter } from '@jt-harness/memo'
 import { codexDirectory, hash, inside, installationPath, readJson, writeJson, type CaptureSettings } from './capture.ts'
+import { memoEntryContext } from './instructions.ts'
 
 export const cueMarker = 'jth memo cues'
 const eventSchema = z.object({
@@ -11,9 +12,10 @@ const eventSchema = z.object({
   agent_id: z.string().optional(), prompt: z.string().optional(),
 })
 const cueStateSchema = z.object({ pending: z.boolean(), status: z.string() })
+type CueOutput = { hookSpecificOutput?: { hookEventName: 'UserPromptSubmit', additionalContext: string } }
 
 /** A session cue latch is delivery metadata, never task or Goal state. */
-export async function memoryCues(input: unknown, settings: CaptureSettings, config: { dataDir: string }, storage: MemoStorage) {
+export async function memoryCues(input: unknown, settings: CaptureSettings, config: { dataDir: string }, storage: MemoStorage): Promise<CueOutput> {
   const event = eventSchema.parse(input)
   if (event.agent_id || !inside(await realpath(settings.workspace), await realpath(event.cwd))) return {}
   const installation = await readJson(installationPath(config, settings.workspace)) as { disabled?: boolean } | undefined
@@ -24,9 +26,12 @@ export async function memoryCues(input: unknown, settings: CaptureSettings, conf
     return {}
   }
   const prior = await readJson(path)
-  if (prior && !cueStateSchema.parse(prior).pending) return {}
+  const output = (lines: string[] = []): CueOutput => ({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit',
+    additionalContext: [memoEntryContext, ...(lines.length ? ['记忆线索（未读取）：', ...lines] : [])].join('\n'),
+  } })
+  if (prior && !cueStateSchema.parse(prior).pending) return output()
   const query = [...(event.prompt ?? '').trim()].slice(0, 2000).join('')
-  if (!query) return {}
+  if (!query) return output()
   const receipt = { pending: false, session_id: event.session_id, turn_id: event.turn_id, workspace: settings.workspace,
     query_hash: hash(query), emitted_at: new Date().toISOString() }
   const scopes: ScopeFilter[] = [
@@ -40,19 +45,14 @@ export async function memoryCues(input: unknown, settings: CaptureSettings, conf
       .sort((a, b) => b.match.rank_score - a.match.rank_score || a.id.localeCompare(b.id)).slice(0, 3)
     const shown = [], lines: string[] = []
     for (const entry of entries) {
-      const line = JSON.stringify({ id: entry.id, scope: entry.scope, state: entry.state, preview: [...entry.content].slice(0, 140).join('') })
+      const line = JSON.stringify({ id: entry.id, preview: [...entry.content].slice(0, 140).join('') })
       if (lines.join('\n').length + line.length > 1200) break
       shown.push(entry); lines.push(line)
     }
     await writeJson(path, { ...receipt, status: shown.length ? 'shown' : 'no-match', entries: shown.map(entry => ({ id: entry.id, state: entry.state, match: entry.match })) })
-    if (!shown.length) return {}
-    const context = ['JTH Memo 线索（历史资料，不覆盖当前要求；未读取、未采纳）：',
-      ...lines,
-      '需要时 jth memo read <ID> --level evidence；冲突或更正先 --level full。未命中不代表库中没有答案，可按需混合 search。',
-    ].join('\n')
-    return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } }
+    return output(lines)
   } catch (error) {
     await writeJson(path, { ...receipt, status: 'unavailable', error: error instanceof Error ? error.name : 'Error' })
-    return {}
+    return output()
   }
 }

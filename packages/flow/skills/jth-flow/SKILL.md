@@ -45,13 +45,7 @@ jth flow uninstall
 
 ## Memo
 
-- Memo 按需使用：从 `flow status` 读取 `memo_scope`，只有需要历史依据或精确冲突证据时才 `jth memo search`/`jth memo read`。
-- 开始或恢复实质任务、明确切换目标时，先查看已有 Memo 线索；不足时主动用 `jth memo recall '<当前目标的关键词>' --project <ID>` 补充本地线索，再按需 `search` 深查。不要等用户专门要求查记忆，也不在同一目标每轮重复查询。
-- Memo 的启动/恢复 Hook 只给首次输入提供少量关键词线索，不调用 Embedding；这不是原生任务状态。没有线索不代表没有历史知识。Flow 不恢复旧任务库或自动召回循环。
-- `search` 默认关键词＋向量混合召回；需要精确标识符时可 `--mode keyword`。匹配分数不是正确性评分。普通读取优先 `read <ID> --level evidence`；只看结论可用 `summary`，条件不全、冲突裁决或更正时用 `full`。
-- Memo 是历史资料，不能覆盖当前用户目标、授权或最新代码。实际用到已读记忆时，在末尾声明的 `used` 数组中列 ID；不要把展示或读取自动算成采用。`jth memo usage --session <ID>` 可查采用记录。
-- 真正完成 Memo 检索/读取后，按项目记忆说明输出简短结果回执；同批操作合并，不把“已读取”当作“已采纳”，也不为了显示回执额外查询。
-- 继续遵循项目要求的主会话末尾短声明；不要调用 DSH、`prepare` 或 `record`，不要把候选建议写成用户决定。
+需要历史依据，或产生值得保存的结论时，读取已安装的 `jth-memo` Skill。Memo 线索不是原生任务状态；Flow 不恢复旧任务库或自动召回循环。
 
 ## 子 Agent 与范围
 

@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jt-harness/memo'
-import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
+import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, configureSkill, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
@@ -110,7 +110,7 @@ async function inspectProject(root: string, workspace: string, config: Config) {
   } catch (error) { checks.push({ name: 'database', status: 'error', detail: safeError(error, config) }) }
   try {
     const native = await inspectNativeHooks(workspace), own = native.hooks.filter(h => h.statusMessage?.startsWith('jth '))
-    const skillAvailable = await access(resolve(workspace, '.agents/skills/jth-flow/SKILL.md')).then(() => true, () => false)
+    const skillAvailable = (await Promise.all(['jth-flow', 'jth-memo'].map(name => access(resolve(workspace, '.agents/skills', name, 'SKILL.md')).then(() => true, () => false)))).every(Boolean)
     checks.push({ name: 'hooks', status: skillAvailable && own.length && own.every(h => h.enabled && h.trustStatus === 'trusted') ? 'ok' : 'warning',
       detail: { skill_available: skillAvailable, hooks: own.map(({ statusMessage, eventName, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
   } catch (error) { checks.push({ name: 'hooks', status: 'warning', detail: safeError(error, config) }) }
@@ -169,11 +169,12 @@ export async function deliveryMain(root: string, args: string[]) {
       output(report); process.exitCode = report.checks.some(check => check.status === 'error') ? 1 : 0; return
     }
     const oldRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-flow'), workspace)
+    const oldMemoRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-memo'), workspace)
     if (command === 'uninstall') {
       await configureMonitorHooks(oldRoot ?? root, workspace, false)
       if (await readJson(resolve(workspace, '.jth/monitor.json'))) await writeJson(resolve(workspace, '.jth/monitor.json'), { enabled: false })
       const flow = await configureFlowHooks(oldRoot ?? root, workspace, false)
-      const memo = await configureHooks(root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
+      const memo = await configureHooks(oldMemoRoot ?? root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
       output({ flow, memo, data_preserved: true }); return
     }
     if (!['init', 'install', 'upgrade'].includes(command)) throw new Error('未知交付命令')
@@ -221,6 +222,7 @@ export async function deliveryMain(root: string, args: string[]) {
       }
     }
     if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
+    if (oldMemoRoot && oldMemoRoot !== await realpath(root)) await configureSkill(oldMemoRoot, workspace, 'memo', false)
     const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
     const codexPreferences = memoryPolicy ? await configureProjectCodex(workspace, memoryPolicy, command === 'init') : {}
     const monitoring = Boolean((await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined)?.enabled)

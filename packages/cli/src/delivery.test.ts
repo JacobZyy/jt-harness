@@ -74,6 +74,7 @@ test('project install and upgrade are idempotent; uninstall preserves data and o
     assert.equal(await readFile(resolve(workspace, '.jth/keep-data'), 'utf8'), 'keep')
     assert((await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')).includes('keep-other-tool'))
     await assert.rejects(readlink(resolve(workspace, '.agents/skills/jth-flow')), { code: 'ENOENT' })
+    await assert.rejects(readlink(resolve(workspace, '.agents/skills/jth-memo')), { code: 'ENOENT' })
     assert((await readFile(envFile, 'utf8')).includes('JTH_DATABASE_URL'))
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })

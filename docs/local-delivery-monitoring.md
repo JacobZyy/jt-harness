@@ -18,7 +18,7 @@ jth --version
 解压后安装：
 
 ```sh
-tar -xzf jt-harness-0.3.3.tar.gz
+tar -xzf jt-harness-0.3.4.tar.gz
 node -- jt-harness/bin/jth.mjs install --cli --env-file /absolute/path/to/.env
 jth --version
 ```
@@ -37,7 +37,7 @@ jth uninstall
 
 `init` 面向人使用：默认项目名来自当前文件夹，已有项目复用原范围；全局连接和 Embedding 配置完整时直接复用，只有缺项才弹出问答。API Key 和数据库连接隐藏输入，保存到用户级 `.env`，项目只记录引用。问卷还会确认是否信任当前 Codex 项目并启用 JTH 自动入口，默认是。
 
-回答完成后，命令自动连接数据库、初始化或升级 Memo 表、安装 Flow Skill、Memo 说明与 Hooks，并执行接入检查。数据库错误可以在同一问卷内修改连接重试。成功输出简短摘要，不需要再执行 `memo init` 或 `doctor`；只有新回合的实际触发仍需重新打开 Codex 任务后验证。
+回答完成后，命令自动连接数据库、初始化或升级 Memo 表、安装 Flow 与 Memo Skill 和 Hooks，并执行接入检查。数据库错误可以在同一问卷内修改连接重试。成功输出简短摘要，不需要再执行 `memo init` 或 `doctor`；只有新回合的实际触发仍需重新打开 Codex 任务后验证。
 
 `init` 默认向项目 `.codex/config.toml` 写入：
 
@@ -71,7 +71,7 @@ jth doctor
 
 `upgrade --from` 安装指定已解压发行目录，验证可执行后切换命令链接，并同步当前已接入项目；其他项目随后运行 `jth upgrade` 同步。无 `--from` 时只同步当前项目。项目/业务范围和原 `.env` 引用继续使用已有安装配置。
 
-`uninstall` 移除当前项目的 JTH Skill、Memo 说明和 JTH Hooks，保留其他工具配置、凭据、数据库、历史队列及观测数据，不卸载共享 Phoenix 服务。Codex 项目记忆偏好作为用户配置保留；希望恢复跟随全局时，先运行 `jth install --codex-memory inherit`，再卸载。
+`uninstall` 移除当前项目的 JTH Skill 和 Hooks，保留其他工具配置、凭据、数据库、历史队列及观测数据，不卸载共享 Phoenix 服务。Codex 项目记忆偏好作为用户配置保留；希望恢复跟随全局时，先运行 `jth install --codex-memory inherit`，再卸载。
 
 `doctor` 输出 CLI/Node、配置完整性、数据库队列、原生 Hook 信任状态、入口最近触发和 Phoenix 状态。它不调用模型，不触发 Embedding，也不将“已安装”当成“已执行”。完整记忆一致性检查仍使用 `jth memo doctor`。
 

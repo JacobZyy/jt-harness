@@ -47,6 +47,9 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert(handlers.some(handler => handler.statusMessage === 'jth memo declaration'))
     assert(handlers.some(handler => handler.statusMessage === 'jth flow entry' && handler.command.includes("'prompt'")))
     assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-flow')), resolve(root, 'packages/flow/skills/jth-flow'))
+    assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
+    assert((await readFile(resolve(workspace, '.agents/skills/jth-memo/SKILL.md'), 'utf8')).includes('references/declarations.md'))
+    assert.equal(await readFile(resolve(workspace, 'AGENTS.md'), 'utf8'), originalAgent)
     await cli('install', '--env-file', envFile, '--project', 'fixture')
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), configured)
     const status = JSON.parse((await cli('status')).stdout)
@@ -66,7 +69,7 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert.equal(injected.stderr, '')
     const context = JSON.parse(injected.stdout).hookSpecificOutput
     assert.equal(context.hookEventName, 'UserPromptSubmit')
-    assert(context.additionalContext.includes(resolve(workspace, '.agents/skills/jth-flow/SKILL.md')))
+    assert(context.additionalContext.includes('jth-flow Skill'))
     assert(Buffer.byteLength(context.additionalContext) < 2000)
     const receipt = await readFile(resolve(workspace, '.jth/flow-entry.json'), 'utf8')
     assert.equal(JSON.parse(receipt).turn_id, 'turn-one')
@@ -104,6 +107,7 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert.equal(await readFile(resolve(workspace, '.jth/flow-events/pending.json'), 'utf8'), pending)
     assert.equal(await readFile(resolve(workspace, '.jth/flow.sqlite'), 'utf8'), sqlite)
     assert((await readFile(resolve(workspace, 'AGENTS.md'), 'utf8')).startsWith(originalAgent))
+    assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
     assert.equal(connections, 0, 'Native setup, status and retired hooks must not connect to PG or a model endpoint')
   } finally { await new Promise<void>(done => server.close(() => done())); await rm(workspace, { recursive: true, force: true }) }
 })

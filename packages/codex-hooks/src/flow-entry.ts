@@ -20,7 +20,7 @@ export async function flowEntryHook(input: unknown, workspace: string) {
   if (path === '..' || path.startsWith('../') || isAbsolute(path)) return {}
   const skill = resolve(root, '.agents/skills/jth-flow/SKILL.md')
   await access(skill)
-  const context = flowEntryContext(skill)
+  const context = flowEntryContext()
   // Keep only the latest emission metadata. A receipt proves hook output, not model compliance.
   await writeJson(flowEntryReceiptPath(root), {
     event: event.hook_event_name, session_id: event.session_id, turn_id: event.turn_id,

@@ -1,21 +1,35 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { appendFile, mkdir, readFile, readlink, symlink, unlink, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
-import { declarationInstructions } from './instructions.ts'
 import { matchesConfigFile } from '@jt-harness/memo/config'
 import { cueMarker } from './cues.ts'
 
 const marker = 'jth memo capture'
 const declarationHookMarker = 'jth memo declaration'
 
-async function updateDeclarationInstructions(workspace: string, enabled: boolean, backupDirectory: string) {
+export async function configureSkill(root: string, workspace: string, kind: 'flow' | 'memo', enabled = true) {
+  const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`)
+  const target = resolve(workspace, '.agents/skills', name)
+  const prior = await readlink(target).catch(error => { if (error.code === 'ENOENT') return null; throw new Error(`已有 ${name} Skill 不是本工具的链接；保留原文件`) })
+  if (prior && resolve(dirname(target), prior) !== source) throw new Error(`已有 ${name} Skill 指向其他安装；保留原链接`)
+  if (enabled) {
+    await readFile(resolve(source, 'SKILL.md'), 'utf8')
+    await mkdir(dirname(target), { recursive: true })
+    if (!prior) await symlink(source, target)
+    const ignorePath = resolve(workspace, '.gitignore'), line = `/.agents/skills/${name}`
+    const ignore = await readFile(ignorePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
+    if (!ignore.split(/\r?\n/).includes(line)) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${line}\n`)
+  } else if (prior) await unlink(target)
+  return target
+}
+
+async function removeDeclarationInstructions(workspace: string, backupDirectory: string) {
   const path = resolve(workspace, 'AGENTS.md')
   const original = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
   const start = '<!-- JTH_MEMORY_START -->', end = '<!-- JTH_MEMORY_END -->'
   if (original.includes(start) !== original.includes(end)) throw new Error('已有 JTH 记忆说明区间不完整；未覆盖 AGENTS.md')
-  const cleaned = original.replace(/\n?<!-- JTH_MEMORY_START -->[\s\S]*?<!-- JTH_MEMORY_END -->\n?/u, '')
-  const next = enabled ? `${cleaned}${cleaned && !cleaned.endsWith('\n') ? '\n' : ''}\n${start}\n${declarationInstructions}\n${end}\n` : cleaned
+  const next = original.replace(/\n?<!-- JTH_MEMORY_START -->[\s\S]*?<!-- JTH_MEMORY_END -->\n?/u, '')
   if (original === next) return
   if (original) await writeJson(resolve(backupDirectory, `${hash(path)}-${Date.now()}.json`), { path, content: original })
   const current = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
@@ -76,12 +90,13 @@ export async function configureHooks(root: string, config: { dataDir: string, en
     ...settings.scope.business_ids.flatMap(id => ['--business', id]),
   ].map(quote).join(' ') : undefined
   const backups = resolve(codexDirectory(config), 'backups')
-  await updateDeclarationInstructions(workspace, Boolean(settings), backups)
+  const skill = await configureSkill(root, workspace, 'memo', Boolean(settings))
+  await removeDeclarationInstructions(workspace, backups)
   await updateHookConfig(hooksPath, backups, document => mergeHooks(mergeHooks(
     mergeHooks(document), command('declare'), { marker: declarationHookMarker, events: ['Stop'] },
   ), command('cue'), { marker: cueMarker, events: ['SessionStart', 'UserPromptSubmit'], additionalContextLimit: 1600 }))
   if (settings) await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: false, mode: 'declaration' })
   else await writeJson(manifestPath, { hooks_path: hooksPath, settings: prior?.settings, disabled: true, mode: prior?.mode })
   return { status: settings ? 'installed' : 'uninstalled', mode: 'declaration', hooks_path: hooksPath, events: settings ? ['Stop', 'SessionStart', 'UserPromptSubmit'] : [],
-    settings, ...(settings ? { activation: '在 Codex /hooks 中审阅并信任新增定义；新会话或恢复后生效' } : {}) }
+    skill, settings, ...(settings ? { activation: '在 Codex /hooks 中审阅并信任新增定义；新会话或恢复后生效' } : {}) }
 }

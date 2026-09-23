@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, appendFile, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, readlink, readdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -178,25 +178,26 @@ test('usage-only declarations require a prior read and do not create memory fact
 
 test('installation replaces legacy capture with declaration and bounded cue hooks', async () => {
   const f = await fixture()
+  const root = resolve(import.meta.dirname, '../../..')
   try {
     await mkdir(resolve(f.directory, '.codex'))
     const original = '# Project\nKeep existing rules.\n'
-    await writeFile(resolve(f.directory, 'AGENTS.md'), original)
+    await writeFile(resolve(f.directory, 'AGENTS.md'), `${original}\n<!-- JTH_MEMORY_START -->\nOld memory instructions.\n<!-- JTH_MEMORY_END -->\n`)
     await writeFile(resolve(f.directory, '.codex/hooks.json'), JSON.stringify({ hooks: {
       SessionStart: [{ hooks: [{ command: 'old', statusMessage: 'jth memo capture' }] }],
       Stop: [{ hooks: [{ command: 'keep-other' }] }],
     } }))
-    await configureHooks(f.directory, f.config, f.directory, f.settings.scope, f.home)
-    const instructions = await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8')
-    assert(instructions.includes('短回复明确采纳前文方案'))
-    assert(instructions.includes('confirmation_quote'))
-    assert(instructions.includes('上下文压缩和恢复时接续'))
-    await configureHooks(f.directory, f.config, f.directory, f.settings.scope, f.home)
-    assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), instructions)
+    await configureHooks(root, f.config, f.directory, f.settings.scope, f.home)
+    assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
+    assert.equal(await readlink(resolve(f.directory, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
+    assert((await readFile(resolve(f.directory, '.agents/skills/jth-memo/references/declarations.md'), 'utf8')).includes('confirmation_quote'))
+    await configureHooks(root, f.config, f.directory, f.settings.scope, f.home)
+    assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
     const hooks = JSON.parse(await readFile(resolve(f.directory, '.codex/hooks.json'), 'utf8')).hooks
     assert.deepEqual(Object.keys(hooks).sort(), ['SessionStart', 'Stop', 'UserPromptSubmit'])
     assert(hooks.Stop.flatMap((group: { hooks: { command: string }[] }) => group.hooks).some((hook: { command: string }) => hook.command.includes("'declare'")))
-    await configureHooks(f.directory, f.config, f.directory, undefined, f.home)
+    await configureHooks(root, f.config, f.directory, undefined, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
+    await assert.rejects(readlink(resolve(f.directory, '.agents/skills/jth-memo')), { code: 'ENOENT' })
   } finally { await f.cleanup() }
 })

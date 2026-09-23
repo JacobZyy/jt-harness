@@ -13,5 +13,6 @@ artifacts/
 .DS_Store
 /.jth/
 /.agents/skills/jth-flow
+/.agents/skills/jth-memo
 /.codex/hooks.json
 /.build/

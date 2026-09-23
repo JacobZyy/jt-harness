@@ -1,6 +1,6 @@
 export { captureEvent, captureSettingsSchema, captureStatus, hookEvents, hash, readJson, writeJson, codexDirectory, installationPath } from './capture.ts'
 export type { CaptureSettings, Capture } from './capture.ts'
-export { configureHooks, mergeHooks, quote } from './install.ts'
+export { configureHooks, configureSkill, mergeHooks, quote } from './install.ts'
 export { prepareEvidence, readEvidence, stageRecord, registerCaptures, deliverRecords } from './evidence.ts'
 export { drainCaptureFiles } from './dsh-ingest.ts'
 export { configureFlowHooks, flowHook, flowEvents, stageFlowEvent, drainFlowEvents } from './flow.ts'
