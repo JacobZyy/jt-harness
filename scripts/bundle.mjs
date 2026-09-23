@@ -38,6 +38,7 @@ async function inspect(directory) {
 await inspect(target)
 const manifest = JSON.parse(await readFile(resolve(target, 'package.json'), 'utf8'))
 manifest.jthDistribution = { format: 1, build: `${manifest.version.replaceAll('.', '-')}-${digest.digest('hex').slice(0, 16)}` }
+manifest.private = false
 delete manifest.scripts
 delete manifest.dependencies
 // npm excludes node_modules; ship a self-contained bundled entry instead.

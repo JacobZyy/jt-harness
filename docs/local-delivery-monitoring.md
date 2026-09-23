@@ -15,10 +15,12 @@ jth --version
 
 开发者也可运行 `pnpm bundle`，得到当前版本的 `artifacts/distribution/jt-harness-<版本>.tar.gz` 及 SHA-256 文件。构建复用 pnpm deploy，包含生产依赖、编译结果和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
 
+发布 npm 时从 `artifacts/distribution/jt-harness` 目录发布构建产物；仓库根目录包含 `workspace:*` 开发依赖，不可直接发布。根包设为 private，防止误发源码包。
+
 解压后安装：
 
 ```sh
-tar -xzf jt-harness-0.3.4.tar.gz
+tar -xzf jt-harness-0.3.5.tar.gz
 node -- jt-harness/bin/jth.mjs install --cli --env-file /absolute/path/to/.env
 jth --version
 ```
