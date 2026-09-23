@@ -31,7 +31,9 @@ JSON
 
 只有实际工具列表中存在 `update_plan` 才传 `--plan-tool available`；未提供为 unknown。工具不可用时保留会话步骤，并说明不能更新原生 UI。子 Agent 使用 `--role delegate`，只交回分派结果，由主 Agent 整合。
 
-策略返回 `decision`、`template`、`recording`。template 是规划维度；主 Agent 应按结果细化、增删或合并工作项，不把模板条目机械注册成步骤。每个任务写清：稳定 id、outcome、dependsOn、doneWhen、verifyWith。准备、配置、文档和检查动作属于对应交付任务。不要把按文件列出的动作当作交付结果。
+策略返回 `decision`、`template`、`recording`。template 是规划维度；主 Agent 先列用户要求的可交付结果，再按能独立验收的结果细化、增删或合并工作项。每个任务写清：稳定 id、outcome、dependsOn、doneWhen、verifyWith。`outcome` 说明哪部分用户目标成为事实；`doneWhen` 写完成条件；`verifyWith` 写该结果的证据。只填写真实依赖，不按文件数量或固定阶段凑步骤。
+
+理解、调研、设计、编码、测试、回归和收口验收通常是交付项内的动作，不单列顶层任务；如果用户明确要求调研报告、设计方案或验收报告，它们才是独立交付结果。例如“实现批量取消并逐笔反馈”，可拆成“批量取消 API 返回逐笔结果”和“页面展示逐笔结果”，各自附检查；不要拆成“调研、开发、测试”。根因未知且用户要求排障时，可先列可验证的诊断结果，取得证据后细化修复项。全部交付后主 Agent 复核整体需求，这是收口动作，不另占一个计划步骤。
 
 ## 准备与更新原生列表
 

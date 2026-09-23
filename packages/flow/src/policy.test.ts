@@ -23,6 +23,7 @@ test('policy distinguishes ordinary questions, bounded work, dependencies, and s
     const template = planningTemplate(decision)!
     assert(template.taskFields.includes('doneWhen'))
     assert(!Object.hasOwn(template, 'tasks'), 'Templates must not create a fixed hidden task list')
+    assert(!Object.hasOwn(template, 'focus'), 'Templates must not seed process phases as plan steps')
   }
   assert.throws(() => policyRequestSchema.parse({ intent: 'unknown' }))
   assert.throws(() => policyModeSchema.parse('strcit'), 'Do not silently turn a typo into adaptive')
