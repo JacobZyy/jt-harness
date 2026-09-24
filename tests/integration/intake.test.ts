@@ -171,7 +171,7 @@ test('partial intake publishes independent memories and preserves rejected and u
       assert.equal(api.mock.callCount(), beforeCalls, 'relation repair must reuse already indexed facts without embedding calls')
       assert.equal((await pool.query('SELECT * FROM jt_memo.intake_recoveries WHERE submission_id=$1', [incoming.submission_id])).rowCount, 1)
       assert.deepEqual((await storage.getSubmission(incoming.submission_id)).index_receipts, saved.index_receipts, 'original receipt is immutable')
-      const cli = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', 'recover', incoming.submission_id, '--env-file', envFile])
+      const cli = await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', 'recover', incoming.submission_id, '--env-file', envFile])
       assert.equal(JSON.parse(cli.stdout).unresolved_count, 0)
     })
 
@@ -202,7 +202,7 @@ test('partial intake publishes independent memories and preserves rejected and u
       assert.equal(outputs.length, 2)
       assert(outputs.every(output => output.response === raw && output.validation_error))
       await assert.rejects(storage.getSubmission(submission.submission_id), /不存在/)
-      const result = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', 'outputs', submission.submission_id, '--env-file', envFile])
+      const result = await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', 'outputs', submission.submission_id, '--env-file', envFile])
       assert.equal(JSON.parse(result.stdout).outputs.length, 2)
     })
   } finally { await pool.end(); await rm(directory, { recursive: true, force: true }) }

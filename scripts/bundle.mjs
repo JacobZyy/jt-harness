@@ -42,7 +42,7 @@ manifest.jthDistribution = { format: 1, build: `${manifest.version.replaceAll('.
 manifest.private = false
 delete manifest.scripts
 await writeFile(resolve(target, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
-execFileSync(process.execPath, [resolve(target, 'bin/jth.mjs'), '--help'], { cwd: target, stdio: 'ignore' })
+execFileSync(process.execPath, [resolve(target, 'bin/jth.ts'), '--help'], { cwd: target, stdio: 'ignore' })
 const archive = resolve(output, `jt-harness-${manifest.version}.tar.gz`)
 execFileSync('tar', ['-czf', archive, '-C', output, 'jt-harness'])
 const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex')

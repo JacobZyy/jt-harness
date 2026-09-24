@@ -14,7 +14,7 @@ const directory = resolve(root, 'artifacts/jth', project)
 const home = resolve(directory, 'codex'), dataDir = resolve(directory, 'data')
 await mkdir(resolve(home, 'sessions'), { recursive: true, mode: 0o700 })
 const execute = promisify(execFile)
-const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', ...args], {
+const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args], {
   cwd: root, timeout: 70_000, maxBuffer: 2_000_000,
   // An inaccessible DSH executable proves the normal write/index path does not launch it.
   env: { ...process.env, JTH_DATA_DIR: dataDir, JTH_DSH_BIN: '/nonexistent/jth-no-dsh' },

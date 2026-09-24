@@ -14,7 +14,7 @@ await mkdir(directory, { recursive: true, mode: 0o700 })
 const execute = promisify(execFile)
 const cli = async (...args: string[]) => {
   try {
-    return JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', ...args], { cwd: root, timeout: 240_000, maxBuffer: 3_000_000 })).stdout)
+    return JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args], { cwd: root, timeout: 240_000, maxBuffer: 3_000_000 })).stdout)
   } catch (error) {
     const output = error as { stdout?: string, stderr?: string }
     const result = JSON.parse(output.stdout || output.stderr || '{}')

@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "jth": "bin/jth.mjs"
-  },
   "exports": {
     ".": {
       "types": "./src/index.ts",

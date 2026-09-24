@@ -12,21 +12,28 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { installCli, isManagedHook } from './delivery.ts'
 import { configureProjectCodex, withCodex } from './codex-client.ts'
 import { parse } from '@decimalturn/toml-patch'
-import { quote } from '@jacob-z/jt-harness/codex-hooks'
+import { hookCommand, memoHookCommand, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
 import { readPrimaryInstallation } from '../../../scripts/setup-worktree.ts'
 
 test('trust selection excludes foreign markers, events, commands and ancestor projects', () => {
-  const root = '/tool', workspace = '/project'
+  const workspace = '/project'
+  const settings: CaptureSettings = { workspace, codex_home: '/codex', env_file: '/config/.env', enabled_at: '2026-01-01T00:00:00Z',
+    scope: { project_ids: ['project'], business_ids: [] } }
   const hook = { key: 'fixture', source: 'project', sourcePath: '/project/.codex/hooks.json', eventName: 'userPromptSubmit', currentHash: 'hash',
-    statusMessage: 'jth flow entry', command: [process.execPath, '--', '/tool/bin/jth.mjs', 'flow', 'prompt'].map(quote).join(' '), enabled: true, trustStatus: 'untrusted' }
-  assert(isManagedHook(hook, root, workspace, false))
+    statusMessage: 'jth flow entry', command: hookCommand('flow', 'prompt', '--workspace', workspace), enabled: true, trustStatus: 'untrusted' }
+  assert(isManagedHook(hook, workspace, settings, false))
   for (const changed of [{ statusMessage: 'jth unknown' }, { eventName: 'preToolUse' }, { sourcePath: '/parent/.codex/hooks.json' },
-    { command: `echo ${hook.command}` }, { statusMessage: 'jth monitor' }]) assert.equal(isManagedHook({ ...hook, ...changed }, root, workspace, false), false)
+    { command: `echo ${hook.command}` }, { command: `${hook.command}; echo injected` }, { statusMessage: 'jth monitor' }]) {
+    assert.equal(isManagedHook({ ...hook, ...changed }, workspace, settings, false), false)
+  }
+  const cue = { ...hook, eventName: 'sessionStart', statusMessage: 'jth memo cues', command: memoHookCommand(settings, 'cue') }
+  assert(isManagedHook(cue, workspace, settings, false))
+  assert.equal(isManagedHook({ ...cue, command: `${cue.command}; echo injected` }, workspace, settings, false), false)
 })
 
-test('Node-managed launcher runs the TypeScript CLI through Bun', async () => {
+test('published TypeScript launcher runs directly through Bun', async () => {
   const root = resolve(import.meta.dirname, '../../..'), execute = promisify(execFile)
-  const { stdout } = await execute('node', ['--no-experimental-strip-types', resolve(root, 'bin/jth.mjs'), 'init', '--help'])
+  const { stdout } = await execute('bun', ['--', resolve(root, 'bin/jth.ts'), 'init', '--help'])
   assert.match(stdout, /^jth init /)
 })
 
@@ -39,7 +46,7 @@ test('versioned CLI install preserves credentials and refuses an unrelated binar
     for (const build of ['first-build', 'second-build']) {
       const source = resolve(root, build)
       await mkdir(resolve(source, 'bin'), { recursive: true })
-      await writeFile(resolve(source, 'bin/jth.mjs'), '#!/usr/bin/env bun\nconsole.log("fixture CLI")\n')
+      await writeFile(resolve(source, 'bin/jth.ts'), '#!/usr/bin/env bun\nconsole.log("fixture CLI")\n')
       if (build === 'first-build') {
         await mkdir(resolve(source, 'fixture-runtime'))
         await writeFile(resolve(source, 'fixture-runtime/package.json'), JSON.stringify({ name: 'fixture-runtime', version: '1.0.0' }))
@@ -47,7 +54,7 @@ test('versioned CLI install preserves credentials and refuses an unrelated binar
       await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'jt-harness', version: '0.1.0', jthDistribution: { build },
         dependencies: build === 'first-build' ? { 'fixture-runtime': 'file:./fixture-runtime' } : {} }))
       const installed = await installCli(source, prefix, envFile, environment)
-      assert.equal(await realpath(installed.binary), resolve(installed.root, 'bin/jth.mjs'))
+      assert.equal(await realpath(installed.binary), resolve(installed.root, 'bin/jth.ts'))
       if (build === 'first-build') assert((await readFile(resolve(installed.root, 'node_modules/fixture-runtime/package.json'), 'utf8')).includes('fixture-runtime'))
       assert.equal(await realpath(resolve(installed.root, '.env')), resolve(environment.JTH_CONFIG_DIR, '.env'))
       assert.notEqual(installed.envFile, envFile)
@@ -68,22 +75,22 @@ test('versioned CLI install preserves credentials and refuses an unrelated binar
 
 test('upgrade command is removed in favor of init', async () => {
   const root = resolve(import.meta.dirname, '../../..'), execute = promisify(execFile)
-  await assert.rejects(execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'upgrade']), /upgrade 已移除/)
-  const help = (await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'init', '--help'])).stdout
+  await assert.rejects(execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'upgrade']), /upgrade 已移除/)
+  const help = (await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'init', '--help'])).stdout
   assert(!help.includes('jth upgrade'))
 })
 
 test('init refreshes project setup; uninstall removes project configuration without touching data', async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-project-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env')
-  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })).stdout)
+  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), ...args, '--workspace', workspace], { cwd: workspace })).stdout)
   try {
     await mkdir(resolve(workspace, '.codex'), { recursive: true })
     await writeFile(resolve(workspace, '.codex/hooks.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'keep-other-tool' }] }] } }))
     await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL ?? 'postgresql://127.0.0.1:1/test'}\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await cli('install', '--project', 'fixture', '--env-file', envFile)
     await mkdir(resolve(workspace, 'bin'))
-    await symlink(resolve(root, 'bin/jth.mjs'), resolve(workspace, 'bin/jth.mjs'))
+    await symlink(resolve(root, 'bin/jth.ts'), resolve(workspace, 'bin/jth.ts'))
     assert.deepEqual(await readPrimaryInstallation(workspace), { envFile, projectIds: ['fixture'], businessIds: [] })
     const first = await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')
     const originalConfig = await readFile(envFile, 'utf8')
@@ -130,7 +137,7 @@ test('init refreshes project setup; uninstall removes project configuration with
 test('uninstall removes JTH-only hook and Codex configuration files', async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-uninstall-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env')
-  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })
+  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.ts'), ...args, '--workspace', workspace], { cwd: workspace })
   try {
     await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await cli('install', '--project', 'fixture', '--env-file', envFile)
@@ -148,7 +155,7 @@ test('init replaces stale JTH Skill links and copies without matching old Hooks'
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-removed-package-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env')
   const hooksPath = resolve(workspace, '.codex/hooks.json'), oldRoot = resolve(workspace, 'removed-package')
-  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })).stdout)
+  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), ...args, '--workspace', workspace], { cwd: workspace })).stdout)
   try {
     await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await cli('install', '--project', 'fixture', '--env-file', envFile)
@@ -225,7 +232,7 @@ test('project preferences preserve TOML comments and unrelated values; inherit r
 test('init sets fresh project defaults; repeated init preserves user choices', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-init-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env'), path = resolve(workspace, '.codex/config.toml')
-  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })
+  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.ts'), ...args, '--workspace', workspace], { cwd: workspace })
   try {
     await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
     await assert.rejects(cli('init', '--codex-memory', 'invalid'), /仅支持 off 或 inherit/)
@@ -263,7 +270,7 @@ test('bare init completes a real terminal questionnaire and reuses global config
 }, async () => {
   const root = resolve(import.meta.dirname, '../../..'), fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-init-wizard-')))
   const workspace = resolve(fixture, 'first-project'), sibling = resolve(fixture, 'second-project'), declined = resolve(fixture, 'declined-project'), home = resolve(fixture, 'codex-home')
-  const userConfig = resolve(fixture, 'user-config'), envFile = resolve(userConfig, '.env'), binary = resolve(root, 'bin/jth.mjs')
+  const userConfig = resolve(fixture, 'user-config'), envFile = resolve(userConfig, '.env'), binary = resolve(root, 'bin/jth.ts')
   const environment: NodeJS.ProcessEnv = { ...process.env, JTH_CONFIG_DIR: userConfig, CODEX_HOME: home, TERM: 'dumb' }
   for (const key of ['JTH_ENV_FILE', 'JTH_DATABASE_URL', 'JTH_DATA_DIR', 'JTH_PG_DATA_DIR', 'JTH_PG_BIN_DIR', 'EMBEDDING_BASE_URL', 'EMBEDDING_MODEL', 'EMBEDDING_DIMENSIONS', 'EMBEDDING_API_KEY']) delete environment[key]
   const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })

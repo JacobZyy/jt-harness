@@ -14,7 +14,7 @@
     "test:live": "DSH_MEMORY_LIVE=1 bun test --isolate --parallel=1 --path-ignore-patterns=artifacts packages/memo/src/agents/*.test.ts",
     "typecheck": "node scripts/typecheck.mjs",
     "bundle": "bun scripts/bundle.mjs",
-    "jth": "bun bin/jth.mjs",
+    "jth": "bun bin/jth.ts",
     "test:postgres": "node scripts/test-postgres.mjs"
   },
   "dependencies": {
@@ -37,7 +37,7 @@
     "typescript": "link:../deepseek-harness/node_modules/typescript"
   },
   "bin": {
-    "jth": "bin/jth.mjs"
+    "jth": "bin/jth.ts"
   },
   "exports": {
     ".": "./packages/cli/src/index.ts",

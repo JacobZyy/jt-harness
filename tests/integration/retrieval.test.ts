@@ -17,7 +17,7 @@ test('retrieval, evidence levels, lifecycle cues and usage feedback preserve sco
   const envFile = resolve(directory, '.env'), source = resolve(home, 'sessions/parent.jsonl'), session = 'retrieval-session'
   const project = `retrieval-${randomUUID()}`, otherProject = `other-${randomUUID()}`
   const execute = promisify(execFile)
-  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, ['bin/jth.mjs', 'memo', ...args, '--env-file', envFile], { cwd: process.cwd() })).stdout)
+  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, ['bin/jth.ts', 'memo', ...args, '--env-file', envFile], { cwd: process.cwd() })).stdout)
   try {
     assert.equal((await pool.query('SELECT current_database() AS name')).rows[0].name, 'jth_test')
     await prepareDatabase(pool, true)

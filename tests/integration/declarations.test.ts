@@ -34,7 +34,7 @@ test('installed declaration CLI persists a cross-turn approval with both sources
   await mkdir(resolve(home, 'sessions'), { recursive: true })
   await writeFile(envFile, `JTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nJTH_DATA_DIR=${directory}/data\nEMBEDDING_API_KEY=test\nEMBEDDING_BASE_URL=http://127.0.0.1:${address.port}/v1\nEMBEDDING_MODEL=declaration-cli\nEMBEDDING_DIMENSIONS=2\nJTH_DSH_BIN=/must-not-run-dsh\n`)
   const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
-  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', ...args, '--env-file', envFile], { cwd: directory })
+  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile], { cwd: directory })
   let hookCommand = ''
   const hook = (text: string) => new Promise<void>((done, reject) => {
     const child = execFile('/bin/sh', ['-c', hookCommand], { cwd: directory }, (error, stdout, stderr) => {

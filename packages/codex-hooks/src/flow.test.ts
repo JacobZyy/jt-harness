@@ -75,7 +75,7 @@ test('explicit legacy CLI retains historical task execution while memory is offl
   await prepareFlowDatabase(pool)
   const store = new FlowStore(workspace, pool)
   const command = async (...args: string[]) => {
-    const result = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', ...args, '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace })
+    const result = await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'flow', 'legacy', ...args, '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace })
     return JSON.parse(result.stdout)
   }
   try {
@@ -85,7 +85,7 @@ test('explicit legacy CLI retains historical task execution while memory is offl
     await writeFile(resolve(workspace, '.jth/flow-events/pending.json'), pendingEvent)
     const created = await command('start', '验证真实 CLI 闭环', '--phase', 'execution', '--accept', '验收命令通过', '--check', `${process.execPath} -e "console.log('checked')"`)
     assert.equal(created.phase, 'execution')
-    const recall = await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt]).catch(error => error)
+    const recall = await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'flow', 'legacy', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt]).catch(error => error)
     assert.equal(JSON.parse(recall.stdout).status, 'failed')
     assert.equal((await command('status')).id, created.id)
     assert.equal(await readFile(resolve(workspace, '.jth/flow-events/pending.json'), 'utf8'), pendingEvent, 'Reading legacy status must not replay pending lifecycle events')

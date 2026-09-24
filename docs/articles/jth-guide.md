@@ -72,7 +72,7 @@ command -v jth
 
 ```sh
 tar -xzf jt-harness-0.3.10.tar.gz
-bun -- ./jt-harness/bin/jth.mjs install --cli
+bun -- ./jt-harness/bin/jth.ts install --cli
 export PATH="$HOME/.local/bin:$PATH"
 command -v jth
 jth --version
@@ -393,7 +393,7 @@ jth doctor
 独立发行包用户取得新包并解压后，先更新工具本体，再在已接入项目执行：
 
 ```sh
-bun -- /absolute/path/to/new-release/jt-harness/bin/jth.mjs install --cli
+bun -- /absolute/path/to/new-release/jt-harness/bin/jth.ts install --cli
 cd /path/to/my-project
 jth init --trust
 ```

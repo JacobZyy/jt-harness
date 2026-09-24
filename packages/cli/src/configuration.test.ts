@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, readFile, writeFile, realpath, rename, rm, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, realpath, rename, rm, stat, symlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
@@ -12,10 +12,13 @@ import { completeConfiguration, configurationScope, ensureUserConfig, loadWorksp
 test('user configuration survives source removal and reuses old repository bindings without changing scope', async () => {
   const fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-config-migration-')))
   const root = resolve(import.meta.dirname, '../../..'), workspace = resolve(fixture, 'project'), source = resolve(fixture, 'old.env')
-  const environment = { ...process.env, JTH_CONFIG_DIR: resolve(fixture, 'user') }, execute = promisify(execFile)
-  const cli = async (...args: string[]) => JSON.parse((await execute(resolve(root, 'bin/jth.mjs'), [...args, '--workspace', workspace], { cwd: workspace, env: environment })).stdout)
+  const environment: NodeJS.ProcessEnv = { ...process.env, JTH_CONFIG_DIR: resolve(fixture, 'user') }, execute = promisify(execFile)
+  const cli = async (...args: string[]) => JSON.parse((await execute(resolve(root, 'bin/jth.ts'), [...args, '--workspace', workspace], { cwd: workspace, env: environment })).stdout)
   try {
     await mkdir(workspace)
+    await mkdir(resolve(workspace, 'bin'))
+    await symlink(resolve(root, 'bin/jth.ts'), resolve(workspace, 'bin/jth'))
+    environment.PATH = `${workspace}/bin:${process.env.PATH ?? ''}`
     const original = 'JTH_DATA_DIR=./state\nJTH_PG_DATA_DIR=./postgres\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=old-private-key\n'
     await writeFile(source, original)
     const installed = await cli('install', '--project', 'migration-project', '--env-file', source)
@@ -84,7 +87,7 @@ test('initialization requests missing values, preserves complete configuration a
     await completeConfiguration(root, completed, { environment, interactive: false, ask: async () => assert.fail('Complete configuration must not prompt again') })
     const workspace = resolve(fixture, 'project'); await mkdir(workspace)
     const empty = resolve(fixture, 'empty.env'); await writeFile(empty, '')
-    await assert.rejects(promisify(execFile)(process.execPath, [resolve(root, 'bin/jth.mjs'), 'init', '--project', 'missing', '--env-file', empty],
+    await assert.rejects(promisify(execFile)(process.execPath, [resolve(root, 'bin/jth.ts'), 'init', '--project', 'missing', '--env-file', empty],
       { cwd: workspace, env: { ...process.env, ...environment } }), /配置不完整/)
     await assert.rejects(readFile(resolve(workspace, '.jth/flow.json')), { code: 'ENOENT' })
     assert.equal((await loadConfig(root, undefined, environment)).envFile, userConfigPaths(environment).envFile)

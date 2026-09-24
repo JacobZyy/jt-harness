@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, readFile, readlink, realpath, rename, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,10 +16,10 @@ test('native flow installs without PG or model calls, retires old hooks and pres
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
   const address = server.address(); assert(address && typeof address !== 'string')
   const envFile = resolve(workspace, '.env')
-  const cli = (...args: string[]) => run(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', ...args, '--workspace', workspace], { cwd: workspace })
+  const cli = (...args: string[]) => run(process.execPath, [resolve(root, 'bin/jth.ts'), 'flow', ...args, '--workspace', workspace], { cwd: workspace })
   const event = { hook_event_name: 'UserPromptSubmit', session_id: 'current-session', turn_id: 'turn-one', cwd: workspace }
   const hook = (command = 'hook', input = JSON.stringify(event)) => new Promise<{ stdout: string, stderr: string }>((done, reject) => {
-    const child = execFile(process.execPath, [resolve(root, 'bin/jth.mjs'), 'flow', command, '--workspace', workspace], { cwd: workspace },
+    const child = execFile(process.execPath, [resolve(root, 'bin/jth.ts'), 'flow', command, '--workspace', workspace], { cwd: workspace },
       (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
     child.stdin!.end(input)
   })
@@ -68,6 +68,18 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert(!Object.hasOwn(status, 'tasks'))
     assert.deepEqual(JSON.parse((await cli('context')).stdout), status)
     assert.deepEqual(await hook(), { stdout: '{}\n', stderr: '' })
+    const entryCommand = handlers.find(handler => handler.statusMessage === 'jth flow entry')!.command
+    assert(entryCommand.startsWith("'jth' '--' 'flow' 'prompt' "))
+    assert(!entryCommand.includes(resolve(root, 'bin')))
+    await mkdir(resolve(workspace, 'bin'))
+    await symlink(resolve(root, 'bin/jth.ts'), resolve(workspace, 'bin/jth'))
+    const viaPath = await new Promise<{ stdout: string, stderr: string }>((done, reject) => {
+      const child = execFile('sh', ['-c', entryCommand], { cwd: workspace, env: { ...process.env, PATH: `${workspace}/bin:${process.env.PATH}` } },
+        (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
+      child.stdin!.end(JSON.stringify(event))
+    })
+    assert.equal(viaPath.stderr, '')
+    assert(JSON.parse(viaPath.stdout).hookSpecificOutput.additionalContext.includes('jth-flow Skill'))
     // The actual handler must work even when the configured environment file is unavailable.
     await rename(envFile, `${envFile}.offline`)
     const injected = await hook('prompt', JSON.stringify({ ...event, prompt: 'PRIVATE_USER_TEXT', transcript_path: '/must-not-read' }))

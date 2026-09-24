@@ -459,7 +459,7 @@ test('native PostgreSQL + pgvector: durable queue, atomic publication, scope iso
     })
 
     await t.test('built CLI validates arguments and durably returns while a worker is blocked', async () => {
-      const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'memo', ...args, '--env-file', envFile])).stdout)
+      const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile])).stdout)
       assert.equal((await cli('status', 'batch')).status, 'complete')
       assert.equal((await cli('read', '--submission', 'batch')).extraction.revisions.length, 1)
       assert.equal((await cli('doctor')).ok, true)

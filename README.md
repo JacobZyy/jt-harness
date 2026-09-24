@@ -18,7 +18,7 @@
 
 ## 模块与运行模式
 
-生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.mjs` 保持稳定。
+生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.ts` 保持稳定。
 
 默认使用主会话声明：安装项目 `jth-memo` Skill，`UserPromptSubmit` 注入短入口，Agent 按需读取规则并在有值得保留的结论时输出最多三条短声明。Stop Hook 保存事件，后台 `memo work` 绑定原始证据、精确去重并生成向量。没有声明就不调用 Embedding；Hook 不等待后台处理。
 
@@ -162,9 +162,9 @@ JTH 命令使用 Bun ≥ 1.3.14 直接运行 TypeScript 源码，不需要构建
 
 ```sh
 pnpm install --frozen-lockfile
-bun bin/jth.mjs --help
+bun bin/jth.ts --help
 # 问卷补齐共享配置，自动建表并接入当前项目。
-bun -- bin/jth.mjs init
+bun -- bin/jth.ts init
 ```
 
 `init` 自动调用现有建表与迁移逻辑，创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v8，保留原材料、条目、向量与回执。高级手动入口 `memo init` 继续保留。v8 只在 v7 上增加采用记录，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL 或创建数据库实例；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。

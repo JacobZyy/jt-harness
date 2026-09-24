@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { hash, readJson, writeJson } from './capture.ts'
 import { transcriptIdentity } from './transcript.ts'
-import { mergeHooks, quote, updateHookConfig } from './install.ts'
+import { hookCommand, mergeHooks, updateHookConfig } from './install.ts'
 
 export const monitorEvents = ['UserPromptSubmit', 'Stop', 'Interrupt']
 const eventSchema = z.object({ hook_event_name: z.enum(['UserPromptSubmit', 'Stop', 'Interrupt']),
@@ -28,7 +28,7 @@ async function usageBefore(path: string, end: number): Promise<MonitorUsage | un
 }
 
 export async function configureMonitorHooks(root: string, workspace: string, enabled: boolean) {
-  const command = enabled ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'monitor', 'capture', '--workspace', workspace].map(quote).join(' ') : undefined
+  const command = enabled ? hookCommand('monitor', 'capture', '--workspace', workspace) : undefined
   await updateHookConfig(resolve(workspace, '.codex/hooks.json'), resolve(workspace, '.jth/backups'), document => mergeHooks(document, command, { marker: 'jth monitor', events: monitorEvents }))
 }
 

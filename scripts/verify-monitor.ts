@@ -35,7 +35,7 @@ try {
   await writeFile(resolve(workspace, 'AGENTS.md'), '# Monitor verification\nNo code changes, tools or memory declarations are requested.\n')
   const envFile = resolve(directory, '.env')
   await writeFile(envFile, `JTH_DATABASE_URL=${config.databaseUrl}\nJTH_DATA_DIR=${directory}/data\n`, { mode: 0o600 })
-  await execute('bun', [resolve(root, 'bin/jth.mjs'), 'install', '--workspace', workspace, '--project', 'jth-monitor-fixture', '--env-file', envFile], { env: { ...process.env, CODEX_HOME: home } })
+  await execute('bun', [resolve(root, 'bin/jth.ts'), 'install', '--workspace', workspace, '--project', 'jth-monitor-fixture', '--env-file', envFile], { env: { ...process.env, CODEX_HOME: home } })
   await writeFile(resolve(workspace, '.jth/monitor.json'), '{"enabled":true}')
   const { configureMonitorHooks } = await import('../packages/codex-hooks/src/monitor.ts')
   await configureMonitorHooks(root, workspace, true)

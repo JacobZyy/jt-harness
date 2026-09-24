@@ -22,7 +22,7 @@ export async function ensureSharedLink(source: string, target: string) {
 }
 
 export async function readPrimaryInstallation(primary: string) {
-  const primaryCli = resolve(primary, 'bin/jth.mjs')
+  const primaryCli = resolve(primary, 'bin/jth.ts')
   // Reuse the primary installation's scope and config instead of copying workspace-bound runtime files.
   const status = JSON.parse(execFileSync('bun', ['--', primaryCli, 'flow', 'status', '--workspace', primary], {
     cwd: primary, encoding: 'utf8',
@@ -46,7 +46,7 @@ export async function setupWorktree() {
     await ensureSharedLink(dsh, resolve(dirname(workspace), 'deepseek-harness'))
   }
   execFileSync('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'], { cwd: workspace, stdio: 'inherit' })
-  execFileSync('bun', ['--', resolve(workspace, 'bin/jth.mjs'), 'flow', 'install',
+  execFileSync('bun', ['--', resolve(workspace, 'bin/jth.ts'), 'flow', 'install',
     '--workspace', workspace, '--env-file', envFile,
     ...projectIds.flatMap(id => ['--project', id]),
     ...businessIds.flatMap(id => ['--business', id]),

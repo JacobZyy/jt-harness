@@ -83,7 +83,7 @@ test('policy CLI stays offline, config overrides are explicit, and no task datab
   const execute = promisify(execFile)
   const environment = { ...process.env, JTH_CONFIG_DIR: user, JTH_WORKFLOW_POLICY_MODE: undefined,
     JTH_DATABASE_URL: 'must-not-parse', EMBEDDING_BASE_URL: 'must-not-parse', JTH_DSH_BIN: '/must-not-run' }
-  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.mjs'), 'flow', ...args, '--workspace', workspace], { env: environment, timeout: 15000 })).stdout)
+  const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.ts'), 'flow', ...args, '--workspace', workspace], { env: environment, timeout: 15000 })).stdout)
   try {
     await mkdir(workspace)
     const input = resolve(fixture, 'request.json')
@@ -115,7 +115,7 @@ test('policy CLI stays offline, config overrides are explicit, and no task datab
     assert.equal((await cli('config', '--mode', 'inherit')).effective.source, 'user')
     await assert.rejects(cli('policy', input, '--host', 'claude'), /尚无任务记录适配器/)
     await assert.rejects(cli('policy', input, '--mode', 'strcit'))
-    const override = await execute(process.execPath, ['--', resolve(root, 'bin/jth.mjs'), 'flow', 'config', '--workspace', workspace],
+    const override = await execute(process.execPath, ['--', resolve(root, 'bin/jth.ts'), 'flow', 'config', '--workspace', workspace],
       { env: { ...environment, JTH_WORKFLOW_POLICY_MODE: 'adaptive' } })
     assert.equal(JSON.parse(override.stdout).effective.source, 'environment')
     assert.deepEqual(await readdir(resolve(workspace, '.jth')), ['workflow.json'])

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { relative, resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { FlowStore, renderFlowContext } from '@jacob-z/jt-harness/flow'
-import { configureSkill, mergeHooks, quote, updateHookConfig } from './install.ts'
+import { configureSkill, hookCommand, mergeHooks, updateHookConfig } from './install.ts'
 import { writeJson, readJson } from './capture.ts'
 import { flowEntryMarker } from './flow-entry.ts'
 
@@ -60,8 +60,8 @@ export async function configureFlowHooks(root: string, workspace: string, enable
     const missing = ['/.jth/', '/.codex/hooks.json'].filter(line => !ignore.split(/\r?\n/).includes(line))
     if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
   }
-  const command = enabled && mode === 'legacy' ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'flow', 'legacy', 'hook', '--workspace', workspace].map(quote).join(' ') : undefined
-  const entry = enabled && mode === 'native' ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'flow', 'prompt', '--workspace', workspace].map(quote).join(' ') : undefined
+  const command = enabled && mode === 'legacy' ? hookCommand('flow', 'legacy', 'hook', '--workspace', workspace) : undefined
+  const entry = enabled && mode === 'native' ? hookCommand('flow', 'prompt', '--workspace', workspace) : undefined
   const hooksPath = resolve(workspace, '.codex/hooks.json')
   await updateHookConfig(hooksPath, resolve(workspace, '.jth/backups'), document => mergeHooks(mergeHooks(document, command, {
     marker: 'jth flow context', events: flowEvents, additionalContextLimit: 6000,

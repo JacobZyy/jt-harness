@@ -38,6 +38,11 @@ async function removeDeclarationInstructions(workspace: string, backupDirectory:
   await writeFile(path, next)
 }
 export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+export const hookCommand = (...args: string[]) => ['jth', '--', ...args].map(quote).join(' ')
+export const memoHookCommand = (settings: CaptureSettings, action: 'declare' | 'cue') => hookCommand('memo', 'codex', action,
+  '--env-file', settings.env_file, '--workspace', settings.workspace, '--codex-home', settings.codex_home,
+  '--since', settings.enabled_at, ...settings.scope.project_ids.flatMap(id => ['--project', id]),
+  ...settings.scope.business_ids.flatMap(id => ['--business', id]))
 type HookHandler = { statusMessage?: string, command?: string, [key: string]: unknown }
 type HookGroup = { hooks?: HookHandler[], [key: string]: unknown }
 type HookConfig = { hooks?: Record<string, HookGroup[]>, [key: string]: unknown }
@@ -85,11 +90,7 @@ export async function configureHooks(root: string, config: { dataDir: string, en
   }) : undefined
   if (settings && prior?.settings && !prior.disabled && (JSON.stringify(prior.settings.scope) !== JSON.stringify(settings.scope)
     || prior.settings.workspace !== settings.workspace || !matchesConfigFile(config, prior.settings.env_file) || prior.settings.codex_home !== settings.codex_home)) throw new Error('已有安装的范围不同；请先 uninstall，再重新 install')
-  const command = (action: string) => settings ? [process.execPath, '--', resolve(root, 'bin/jth.mjs'), 'memo', 'codex', action,
-    '--env-file', config.envFile, '--workspace', settings.workspace, '--codex-home', settings.codex_home,
-    '--since', settings.enabled_at, ...settings.scope.project_ids.flatMap(id => ['--project', id]),
-    ...settings.scope.business_ids.flatMap(id => ['--business', id]),
-  ].map(quote).join(' ') : undefined
+  const command = (action: 'declare' | 'cue') => settings ? memoHookCommand(settings, action) : undefined
   const backups = resolve(codexDirectory(config), 'backups')
   const skill = await configureSkill(root, workspace, 'memo', Boolean(settings))
   await removeDeclarationInstructions(workspace, backups)
