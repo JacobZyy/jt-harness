@@ -11,7 +11,7 @@ npm install --global @jacob-z/jt-harness
 jth --version
 ```
 
-使用其他包管理器时，由该包管理器负责全局包的安装和版本更新。更新工具后，在已接入的项目执行 `jth upgrade --trust` 同步 Hook 和 Skill；裸 `jth upgrade` 不下载 npm 新版本。
+使用其他包管理器时，由该包管理器负责全局包的安装和版本更新。更新工具后，单项目执行 `jth upgrade --trust`，同步 Hook、Skill 并迁移 Memo 表；多个项目共用数据库时按下文分步同步。裸 `jth upgrade` 不下载 npm 新版本。升级时数据库需要可连接。
 
 开发者也可运行 `pnpm bundle`，得到当前版本的 `artifacts/distribution/jt-harness-<版本>.tar.gz` 及 SHA-256 文件。打包复用 pnpm deploy，包含生产依赖、TypeScript 源码和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
 
@@ -41,7 +41,7 @@ jth uninstall
 
 回答完成后，命令自动连接数据库、初始化或升级 Memo 表、安装 Flow 与 Memo Skill 和 Hooks，并执行接入检查。数据库错误可以在同一问卷内修改连接重试。成功输出简短摘要，不需要再执行 `memo init` 或 `doctor`；只有新回合的实际触发仍需重新打开 Codex 任务后验证。
 
-`init` 默认向项目 `.codex/config.toml` 写入：
+首次 `init` 默认向项目 `.codex/config.toml` 写入：
 
 ```toml
 [memories]
@@ -54,9 +54,9 @@ enabled = true
 
 这两个 [Codex 原生配置项](https://learn.chatgpt.com/docs/customization/memories) 关闭本项目的原生记忆读取和生成，由 JTH 管理跨会话记忆。只修改项目文件，保留其他配置和注释；不修改全局记忆、模型、Goal 或上下文压缩配置。[项目配置需要受信任](https://learn.chatgpt.com/docs/config-file/config-basic)，新会话读取；当前会话可通过 `/memories` 调整。
 
-`update_plan` 在 [Codex CLI 0.152.0](https://learn.chatgpt.com/docs/changelog) 起默认关闭，`init` 显式开启当前项目的原生计划工具。只修改这一配置项，保留其他工具配置；重新加载后需核验宿主确实提供了计划工具，写入配置本身不等于已有任务已拆步。
+`update_plan` 在 [Codex CLI 0.152.0](https://learn.chatgpt.com/docs/changelog) 起默认关闭，首次 `init` 显式开启当前项目的原生计划工具。只修改这一配置项，保留其他工具配置；重新加载后需核验宿主确实提供了计划工具，写入配置本身不等于已有任务已拆步。
 
-`jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，仍开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`install`、`upgrade` 和 `uninstall` 均保留用户已有的计划工具开关；再次执行 `init` 会将其设为开启。
+首次 `jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，同时开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围；再次执行 `init` 会补齐缺失配置、迁移 Memo 表并同步接入，保留项目原有记忆和计划工具偏好，除非显式传入 `--codex-memory`。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`upgrade` 和 `uninstall` 也保留项目偏好。
 
 交互 `init` 的问卷会明确确认项目目录和 JTH Hook 信任。AI 或脚本使用非交互 JSON 模式时，仍可显式传入 `--project`、`--env-file`、`--trust`；其中 `--trust` 只信任本次安装的 JTH Hooks，项目配置层需要已受信任。`install`、`upgrade` 的信任语义保持不变。
 
@@ -71,11 +71,13 @@ jth doctor
 
 包管理器升级可能移除旧安装目录。`upgrade` 可根据同一项目中匹配旧安装路径的 JTH Hook 确认归属，修复失效的 Skill 链接并更新 Hook；缺少归属证据时保留链接并报错。`doctor` 同时检查 `skill_available`，避免把已受信任但安装文件缺失的状态报为正常。
 
-`upgrade --from` 安装指定已解压发行目录，验证可执行后切换命令链接，并同步当前已接入项目；其他项目随后运行 `jth upgrade` 同步。无 `--from` 时只同步当前项目。项目/业务范围和原 `.env` 引用继续使用已有安装配置。
+`upgrade --from` 安装指定已解压发行目录，验证可执行后切换命令链接，并升级当前已接入项目；其他项目随后运行 `jth upgrade`。无 `--from` 时只升级当前项目。升级先检查现有配置和数据库、执行保留数据的 Memo 表迁移，再同步 Hook 与 Skill；配置缺项会报错并提示运行 `jth init` 补齐。原 `.env`、项目/业务范围和 Codex 偏好保留，不先删除旧配置。数据库不可连接时项目接入文件不更新，修复连接后重试。
+
+多个项目共用同一个 Memo 数据库时，先在每个项目运行 `jth install --trust` 同步到新 CLI 的入口；该命令不迁移数据库。全部项目入口就绪后，在任一项目运行一次 `jth upgrade --trust` 迁移共享数据库。旧 CLI 会拒绝新 schema，迁移期间不要继续使用尚未同步的项目。
 
 `uninstall` 移除当前项目的 JTH Skill 和 Hooks，保留其他工具配置、凭据、数据库、历史队列及观测数据，不卸载共享 Phoenix 服务。Codex 项目记忆偏好作为用户配置保留；希望恢复跟随全局时，先运行 `jth install --codex-memory inherit`，再卸载。
 
-`doctor` 输出 CLI/Node、配置完整性、数据库队列、原生 Hook 信任状态、入口最近触发和 Phoenix 状态。它不调用模型，不触发 Embedding，也不将“已安装”当成“已执行”。完整记忆一致性检查仍使用 `jth memo doctor`。
+`doctor` 输出 CLI/Bun、配置完整性、数据库队列、原生 Hook 信任状态、入口最近触发和 Phoenix 状态。它不调用模型，不触发 Embedding，也不将“已安装”当成“已执行”。完整记忆一致性检查仍使用 `jth memo doctor`。
 
 ## 本机 Phoenix
 

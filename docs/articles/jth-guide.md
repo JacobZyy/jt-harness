@@ -379,15 +379,14 @@ jth memo search '共同接口约定' --project my-project --project another-proj
 
 ### 更新工具之后，再同步项目接入
 
-工具版本和项目接入是两层。裸 `jth upgrade` 同步当前项目的 Hook 与 Skill，不会从 npm 下载新版本。
+工具版本和项目接入是两层。裸 `jth upgrade` 检查配置、迁移 Memo 表并同步当前项目的 Hook 与 Skill，不会从 npm 下载新版本。
 
-始终沿用所选安装渠道。npm 用户在所需功能的新版本发布后，按下面顺序更新；这是单项目示例，共享数据库的多个项目应先逐一同步兼容的新 Hook 入口，再升级数据库 schema：
+始终沿用所选安装渠道。npm 用户在所需功能的新版本发布后，按下面顺序更新；这是单项目示例：
 
 ```sh
 npm install --global @jacob-z/jt-harness@latest
 cd /path/to/my-project
 jth upgrade --trust --summary
-jth memo init
 jth doctor
 ```
 
@@ -397,7 +396,7 @@ jth doctor
 jth upgrade --from /absolute/path/to/new-release/jt-harness --trust --summary
 ```
 
-`--from` 指向解压后的发行目录；`--summary` 输出简短摘要。其他已接入项目也需要运行 `jth upgrade --trust --summary` 同步自己的入口。数据库升级完成后，重新加载相关 Codex 任务。
+`--from` 指向解压后的发行目录；`--summary` 输出简短摘要。其他已接入项目也需要同步自己的入口。多个项目共用数据库时，先在各项目执行 `jth install --trust`，最后在任一项目执行 `jth upgrade --trust --summary` 迁移共享数据库。数据库升级完成后，重新加载相关 Codex 任务。
 
 Hook 的信任与定义内容绑定，更新后可能显示 `modified`，从而被 Codex 跳过。`--trust` 会信任本次生成的 JTH 定义；也可以在 Codex 的 `/hooks` 中审阅。用 `doctor` 确认状态，再通过新的输入和回复核对实际触发。
 
@@ -461,7 +460,7 @@ jth monitor stop
 - **首次接入项目**：`jth init`。问卷补齐配置，自动准备记忆表、安装入口并检查。
 - **安装独立工具本体**：`jth install --cli`。与项目接入是两件事；从独立发行目录执行。
 - **同步项目接入**：`jth install --trust`。未传原生记忆选项时保留已有偏好，不替代首次 `init` 的配置向导。
-- **升级项目入口**：`jth upgrade --trust --summary`。同步当前 CLI 对应的 Hook 和 Skill，不下载 npm 新版本。
+- **升级项目入口**：`jth upgrade --trust --summary`。迁移 Memo 表并同步当前 CLI 对应的 Hook 和 Skill，不下载 npm 新版本。
 - **查看接入健康度**：`jth doctor`。先检查它，再判断是安装、配置还是触发问题。
 - **查看 Flow 接入**：`jth flow status`。查看项目范围与入口记录；实际进度在 Codex 中。
 - **查关键词或语义**：`jth memo recall` 与 `jth memo search`。都需要查询文本及明确范围。

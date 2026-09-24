@@ -4,11 +4,11 @@
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
-项目接入只需运行 `jth init`：问卷默认用当前文件夹名，复用完整的全局配置，缺项才询问。确认后自动准备记忆表、安装项目指引和 Hooks、处理信任并检查接入。默认开启原生 `update_plan`、关闭本项目 Codex 原生记忆读写；高级参数 `--codex-memory inherit` 可改为跟随上层记忆设置。
+项目接入只需运行 `jth init`：问卷默认用当前文件夹名，复用完整的全局配置，缺项才询问。确认后自动准备记忆表、安装项目指引和 Hooks、处理信任并检查接入。首次接入默认开启原生 `update_plan`、关闭本项目 Codex 原生记忆读写；再次运行保留现有偏好。高级参数 `--codex-memory inherit` 可改为跟随上层记忆设置。
 
 开始前准备 Bun 1.3.14 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后，进入项目目录运行 `jth init`，按问卷填写并重新打开 Codex 任务即可。后续项目仍运行同一命令，不重复配置全局凭据。
 
-其他交付命令为 `jth install / upgrade / doctor / uninstall`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
+更新工具本体后，单项目运行 `jth upgrade --trust`，保留配置并迁移记忆表；共用数据库的多个项目先逐个运行 `jth install --trust` 同步入口，再运行一次 `jth upgrade --trust`。缺少新配置项时运行 `jth init` 补齐。其他交付命令为 `jth install / doctor / uninstall`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
 
 共享配置与凭据默认存放于 `~/.jt-harness/.env`；仓库只保存自己的接入、范围与开关，默认不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级与仓库级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
 

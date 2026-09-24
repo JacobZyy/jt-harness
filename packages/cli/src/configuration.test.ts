@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 import { loadConfig, matchesConfigFile, userConfigPaths } from '@jacob-z/jt-harness/memo/config'
 import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, promptConfigValue } from './configuration.ts'
 
-test('user configuration survives source removal and upgrades old repository bindings without changing scope', async () => {
+test('user configuration survives source removal and reuses old repository bindings without changing scope', async () => {
   const fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-config-migration-')))
   const root = resolve(import.meta.dirname, '../../..'), workspace = resolve(fixture, 'project'), source = resolve(fixture, 'old.env')
   const environment = { ...process.env, JTH_CONFIG_DIR: resolve(fixture, 'user') }, execute = promisify(execFile)
@@ -39,7 +39,7 @@ test('user configuration survives source removal and upgrades old repository bin
       child.stdin!.end(JSON.stringify({ hook_event_name: 'Stop', session_id: 'migration-check', cwd: workspace, last_assistant_message: 'No declaration.' }))
     })
     assert.deepEqual(captured, { stdout: '', stderr: '' })
-    const upgraded = await cli('upgrade')
+    const upgraded = await cli('install')
     assert.equal(upgraded.memo.settings.env_file, migrated.envFile)
     assert.equal(upgraded.memo.settings.enabled_at, installed.memo.settings.enabled_at)
     assert.deepEqual(upgraded.memo.settings.scope, installed.memo.settings.scope)

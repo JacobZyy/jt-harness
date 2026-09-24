@@ -19,10 +19,10 @@ jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-fi
 jth upgrade [--from <已解压发行目录>] [--prefix <目录>] [--workspace <项目目录>] [--trust] [--summary]
 jth doctor [--workspace <path>] [--env-file <path>]
 jth uninstall [--workspace <path>]
-init 是交互初始化问卷：项目名默认当前文件夹，已有项目复用原范围；全局配置完整时跳过，缺项才询问并保存。
+init 是交互初始化问卷：项目名默认当前文件夹，已有项目复用原范围与 Codex 偏好；全局配置完整时跳过，缺项才询问并保存。
 问卷确认后自动准备记忆表、接入项目并检查，终端输出完成摘要；无需再执行 memo init 或 doctor。
-init 默认关闭本项目 Codex 原生记忆并开启 update_plan；inherit 跟随上层记忆设置。
-install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录并同步当前项目。
+首次 init 默认关闭本项目 Codex 原生记忆并开启 update_plan；再次 init 保留现有偏好，inherit 跟随上层记忆设置。
+install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录、补齐项目接入并迁移记忆表，配置缺项时请运行 init。
 用户配置默认保存于 ~/.jt-harness/.env，项目只保存范围、偏好和配置引用；API Key 隐藏输入。--env-file 显式覆盖。
 非交互 init 使用配置和默认项目名，输出 JSON；--trust 只信任 JTH Hooks，项目配置层需已受信任。
 doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数据库、队列与凭据。
@@ -144,7 +144,7 @@ export async function deliveryMain(root: string, args: string[]) {
       upgrade: ['workspace', 'from', 'prefix', 'trust', 'summary'], doctor: ['workspace', 'env-file'], uninstall: ['workspace', 'env-file'],
     }
     if (!allowed[command] || Object.keys(values).some(key => !allowed[command].includes(key))) throw new Error(`${command} 参数不支持；运行 jth install --help`)
-    const memoryPolicy = values['codex-memory'] ?? (command === 'init' ? 'off' : undefined)
+    const memoryPolicy = values['codex-memory']
     if (memoryPolicy !== undefined && memoryPolicy !== 'off' && memoryPolicy !== 'inherit') throw new Error('--codex-memory 仅支持 off 或 inherit')
     if (values.cli && (values.project || values.business || values.trust || memoryPolicy)) throw new Error('--cli 安装工具本体；项目接入请另用 jth init 或 jth install')
     if (values.cli && command !== 'install') throw new Error('--cli 仅用于 install')
@@ -166,6 +166,7 @@ export async function deliveryMain(root: string, args: string[]) {
       output(installed); return
     }
     const locator = await readJson(resolve(workspace, '.jth/flow.json')) as { envFile: string } | undefined
+    const projectMemoryPolicy = memoryPolicy ?? (command === 'init' && !locator ? 'off' : undefined)
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     if (command === 'doctor') {
       const report = await inspectProject(root, workspace, config)
@@ -204,12 +205,12 @@ export async function deliveryMain(root: string, args: string[]) {
       }
     }
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
-    if (command === 'init') {
+    if (command === 'init' || command === 'upgrade') {
       if (interactive) {
         const configuration = await configurationScope(config)
         process.stderr.write(`\n${configuration.scope === 'user' ? '全局共享配置' : '项目指定配置'}：${config.envFile}\n${missingConfiguration(config).length ? '仅补齐缺项；首次配置可回车保留默认值。' : '配置完整，直接复用，不重复询问凭据。'}\n`)
       }
-      config = await completeConfiguration(root, config, { reviewDefaults: userConfig?.created && !userConfig.imported })
+      config = await completeConfiguration(root, config, { reviewDefaults: command === 'init' && userConfig?.created && !userConfig.imported, interactive: command === 'init' && interactive })
       for (;;) {
         try {
           if (interactive) process.stderr.write('\n正在连接数据库并准备记忆表…\n')
@@ -217,7 +218,7 @@ export async function deliveryMain(root: string, args: string[]) {
           try { await prepareDatabase(pool, true) } finally { await pool.end() }
           break
         } catch (error) {
-          if (!interactive || process.env.JTH_DATABASE_URL) throw error
+          if (command !== 'init' || !interactive || process.env.JTH_DATABASE_URL) throw error
           process.stderr.write(`数据库尚未就绪：${safeError(error, config)}\n`)
           if (!await promptConfirmation('重新输入数据库连接并重试？')) throw error
           config = await completeConfiguration(root, config, { editDatabase: true })
@@ -227,7 +228,8 @@ export async function deliveryMain(root: string, args: string[]) {
     if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
     if (oldMemoRoot && oldMemoRoot !== await realpath(root)) await configureSkill(oldMemoRoot, workspace, 'memo', false)
     const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
-    const codexPreferences = memoryPolicy ? await configureProjectCodex(workspace, memoryPolicy, command === 'init') : {}
+    const codexPreferences = projectMemoryPolicy
+      ? await configureProjectCodex(workspace, projectMemoryPolicy, command === 'init' && !locator) : {}
     const monitoring = Boolean((await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined)?.enabled)
     if (monitoring) await configureMonitorHooks(root, workspace, true)
     if (trust) await withCodex(async call => {
@@ -239,7 +241,8 @@ export async function deliveryMain(root: string, args: string[]) {
     })
     const verification = command === 'init' ? await inspectProject(root, workspace, config) : undefined
     const result = { ...installed, ...codexPreferences, configuration: await configurationScope(config),
-      ...(verification ? { database: { status: 'ready', schema_version: schemaVersion }, verification } : {}) }
+      ...(['init', 'upgrade'].includes(command) ? { database: { status: 'ready', schema_version: schemaVersion } } : {}),
+      ...(verification ? { verification } : {}) }
     if (verification) {
       process.exitCode = verification.checks.some(check => check.status === 'error') ? 1 : 0
       if (interactive) {
@@ -261,6 +264,7 @@ export async function deliveryMain(root: string, args: string[]) {
         `项目已同步 ${shortPath(workspace)}`,
         `策略 ${result.workflow_policy?.mode ?? 'adaptive'}`,
         `配置作用域 ${result.configuration?.scope ?? 'unknown'}`,
+        `记忆表 v${schemaVersion} 已就绪`,
         ...(settings?.env_file ? [`共享配置 ${shortPath(settings.env_file)}`] : []),
         ...(settings?.scope ? [`记忆范围 ${JSON.stringify(settings.scope)}`] : []),
       ].join('\n') + '\n'); return
