@@ -20,7 +20,7 @@ jth --version
 解压后安装：
 
 ```sh
-tar -xzf jt-harness-0.3.10.tar.gz
+tar -xzf jt-harness-0.3.11.tar.gz
 bun -- jt-harness/bin/jth.ts install --cli --env-file /absolute/path/to/.env
 jth --version
 ```

@@ -64,14 +64,14 @@ command -v jth
 
 第一条安装工具本体，第二条查看版本，第三条确认当前终端究竟使用哪个入口。
 
-本文命令以 `0.3.10` 为准。运行前用 `jth --version` 核对版本，并用 `jth memo --help` 确认所需命令。
+本文命令以 `0.3.11` 为准。运行前用 `jth --version` 核对版本，并用 `jth memo --help` 确认所需命令。
 
 ### 使用独立发行包
 
 取得对应版本的独立发行包后，在下载目录解压并安装：
 
 ```sh
-tar -xzf jt-harness-0.3.10.tar.gz
+tar -xzf jt-harness-0.3.11.tar.gz
 bun -- ./jt-harness/bin/jth.ts install --cli
 export PATH="$HOME/.local/bin:$PATH"
 command -v jth
