@@ -24,6 +24,12 @@ test('trust selection excludes foreign markers, events, commands and ancestor pr
     { command: `echo ${hook.command}` }, { statusMessage: 'jth monitor' }]) assert.equal(isManagedHook({ ...hook, ...changed }, root, workspace, false), false)
 })
 
+test('Node-managed launcher runs the TypeScript CLI through Bun', async () => {
+  const root = resolve(import.meta.dirname, '../../..'), execute = promisify(execFile)
+  const { stdout } = await execute('node', ['--no-experimental-strip-types', resolve(root, 'bin/jth.mjs'), 'init', '--help'])
+  assert.match(stdout, /^jth init /)
+})
+
 test('versioned CLI install preserves credentials and refuses an unrelated binary', async () => {
   const root = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-delivery-')))
   const prefix = resolve(root, 'prefix'), envFile = resolve(root, 'original.env')
