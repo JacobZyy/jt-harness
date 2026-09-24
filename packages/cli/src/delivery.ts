@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process'
-import { access, chmod, cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
+import { access, chmod, cp, lstat, mkdir, readFile, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jacob-z/jt-harness/memo'
-import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, configureSkill, installationPath, readJson, writeJson, quote } from '@jacob-z/jt-harness/codex-hooks'
+import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, installationPath, readJson, writeJson, quote } from '@jacob-z/jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
@@ -37,22 +37,6 @@ export function isManagedHook(hook: NativeHook, root: string, workspace: string,
   const prefix = [process.execPath, '--', resolve(root, 'bin/jth.mjs')].map(quote).join(' ') + ' '
   return hook.source === 'project' && hook.sourcePath === resolve(workspace, '.codex/hooks.json')
     && Boolean(events[hook.statusMessage ?? '']?.includes(hook.eventName) && hook.command?.startsWith(prefix))
-}
-
-async function ownedRoot(skill: string, workspace: string) {
-  const target = await readlink(skill).catch(error => { if (error.code === 'ENOENT') return null; throw error })
-  if (!target) return null
-  const root = resolve(dirname(skill), target, '../../../..')
-  const manifest = await readJson(resolve(root, 'package.json')) as { name: string } | undefined
-  if (manifest) {
-    if (!ownDistributionName(manifest.name)) throw new Error('已有 Skill 不属于 jt-harness；保留原文件')
-  } else {
-    const native = await inspectNativeHooks(workspace)
-    if (!native.hooks.some(hook => isManagedHook(hook, root, workspace, true))) {
-      throw new Error('旧 Skill 安装已移除且缺少匹配的 JTH Hook；无法确认归属，保留原链接')
-    }
-  }
-  return root
 }
 
 /** Versioned, relocatable releases; keep credentials outside replaceable release directories. */
@@ -164,8 +148,6 @@ export async function deliveryMain(root: string, args: string[]) {
       const report = await inspectProject(root, workspace, config)
       output(report); process.exitCode = report.checks.some(check => check.status === 'error') ? 1 : 0; return
     }
-    const oldRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-flow'), workspace)
-    const oldMemoRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-memo'), workspace)
     const priorInstallation = await readJson(installationPath(config, workspace)) as { settings?: unknown, disabled?: boolean } | undefined
     const previousScope = priorInstallation?.settings ? captureSettingsSchema.parse(priorInstallation.settings).scope : undefined
     if (command === 'uninstall') {
@@ -174,10 +156,14 @@ export async function deliveryMain(root: string, args: string[]) {
         const info = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })
         if (info?.isSymbolicLink()) throw new Error(`${name} 是符号链接；未修改仓库配置`)
       }
-      await configureMonitorHooks(oldRoot ?? root, workspace, false)
-      const flow = await configureFlowHooks(oldRoot ?? root, workspace, false)
-      const memo = await configureHooks(oldMemoRoot ?? root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-      if (locator || oldRoot || oldMemoRoot || priorInstallation?.settings) await configureProjectCodex(workspace, 'inherit', false, true)
+      const existingSkills = await Promise.all(['jth-flow', 'jth-memo'].map(async name => {
+        const info = await lstat(resolve(workspace, '.agents/skills', name)).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        return Boolean(info)
+      }))
+      await configureMonitorHooks(root, workspace, false)
+      const flow = await configureFlowHooks(root, workspace, false)
+      const memo = await configureHooks(root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
+      if (locator || existingSkills.some(Boolean) || priorInstallation?.settings) await configureProjectCodex(workspace, 'inherit', false, true)
       const hooksPath = resolve(workspace, '.codex/hooks.json')
       const hooksText = await readFile(hooksPath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
       if (hooksText) {
@@ -234,8 +220,6 @@ export async function deliveryMain(root: string, args: string[]) {
         }
       }
     }
-    if (oldRoot && oldRoot !== await realpath(root)) await configureFlowHooks(oldRoot, workspace, false)
-    if (oldMemoRoot && oldMemoRoot !== await realpath(root)) await configureSkill(oldMemoRoot, workspace, 'memo', false)
     const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
     const codexPreferences = projectMemoryPolicy
       ? await configureProjectCodex(workspace, projectMemoryPolicy, command === 'init' && !locator) : {}

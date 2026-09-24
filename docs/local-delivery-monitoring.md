@@ -68,7 +68,7 @@ jth doctor
 
 确认 JTH Hook 均为 `enabled: true`、`trustStatus: trusted`，然后重新加载已有 Codex 会话。`flow_entry` 的旧回执不能证明本次更新已经触发；后续输入和回复结束后，应检查 `jth flow status` 的新回执、`jth memo codex status` 及 `jth monitor status`。没有新记忆声明的回复不产生 Memo 入库回执。
 
-包管理器更新可能移除旧安装目录。`init` 可根据同一项目中匹配旧安装路径的 JTH Hook 确认归属，修复失效的 Skill 链接并更新 Hook；缺少归属证据时保留链接并报错。`doctor` 同时检查 `skill_available`，避免把已受信任但安装文件缺失的状态报为正常。
+包管理器更新可能移除旧安装目录。`init` 直接重装 `.agents/skills/jth-flow` 和 `.agents/skills/jth-memo`，并同步 Hook；旧 Skill 是断链、复制目录或普通文件，以及旧 Hook 是否匹配，都不阻断更新。`uninstall` 同样移除这两个项目 Skill 路径。`doctor` 同时检查 `skill_available`，避免把安装文件缺失报为正常。
 
 独立发行包更新先运行 `bun -- /absolute/path/to/new-release/jt-harness/bin/jth.mjs install --cli`，再在每个项目运行 `jth init`。`init` 检查现有配置和数据库、执行保留数据的 Memo 表迁移，再同步 Hook 与 Skill；缺项由问卷补齐。原 `.env`、项目/业务范围和 Codex 偏好保留。数据库不可连接时项目接入文件不更新，修复连接后重试。
 

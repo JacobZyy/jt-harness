@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readlink, symlink, unlink, writeFile } from 'node:fs/promises'
+import { appendFile, lstat, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
@@ -11,16 +11,17 @@ const declarationHookMarker = 'jth memo declaration'
 export async function configureSkill(root: string, workspace: string, kind: 'flow' | 'memo', enabled = true) {
   const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`)
   const target = resolve(workspace, '.agents/skills', name)
-  const prior = await readlink(target).catch(error => { if (error.code === 'ENOENT') return null; throw new Error(`已有 ${name} Skill 不是本工具的链接；保留原文件`) })
-  if (prior && resolve(dirname(target), prior) !== source) throw new Error(`已有 ${name} Skill 指向其他安装；保留原链接`)
+  const prior = await lstat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+  const current = prior?.isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source
   if (enabled) {
     await readFile(resolve(source, 'SKILL.md'), 'utf8')
     await mkdir(dirname(target), { recursive: true })
-    if (!prior) await symlink(source, target)
+    if (prior && !current) await rm(target, { recursive: true, force: true })
+    if (!current) await symlink(source, target)
     const ignorePath = resolve(workspace, '.gitignore'), line = `/.agents/skills/${name}`
     const ignore = await readFile(ignorePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
     if (!ignore.split(/\r?\n/).includes(line)) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${line}\n`)
-  } else if (prior) await unlink(target)
+  } else if (prior) await rm(target, { recursive: true, force: true })
   return target
 }
 
