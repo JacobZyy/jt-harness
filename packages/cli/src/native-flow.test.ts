@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, readFile, readlink, realpath, rename, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, lstat, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,8 +46,8 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert(handlers.some(handler => handler.command === 'other-tool'))
     assert(handlers.some(handler => handler.statusMessage === 'jth memo declaration'))
     assert(handlers.some(handler => handler.statusMessage === 'jth flow entry' && handler.command.includes("'prompt'")))
-    assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-flow')), resolve(root, 'packages/flow/skills/jth-flow'))
-    assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
+    for (const kind of ['flow', 'memo']) assert((await lstat(resolve(workspace, `.agents/skills/jth-${kind}`))).isDirectory())
+    assert.deepEqual(JSON.parse(await readFile(resolve(workspace, '.jth/flow.json'), 'utf8')), { version: 3, scope: { project_ids: ['fixture'], business_ids: [] } })
     const flowSkill = await readFile(resolve(workspace, '.agents/skills/jth-flow/SKILL.md'), 'utf8')
     for (const name of ['get_goal', 'create_goal', 'update_goal', 'update_plan']) assert(flowSkill.includes(name), `Installed Flow must explain ${name}`)
     for (const name of ['workflow-policy.md', 'acceptance.md']) {
@@ -130,7 +130,7 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert.equal(await readFile(resolve(workspace, '.jth/flow-events/pending.json'), 'utf8'), pending)
     assert.equal(await readFile(resolve(workspace, '.jth/flow.sqlite'), 'utf8'), sqlite)
     assert((await readFile(resolve(workspace, 'AGENTS.md'), 'utf8')).startsWith(originalAgent))
-    assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
+    assert((await lstat(resolve(workspace, '.agents/skills/jth-memo'))).isDirectory())
     assert.equal(connections, 0, 'Native setup, status and retired hooks must not connect to PG or a model endpoint')
   } finally { await new Promise<void>(done => server.close(() => done())); await rm(workspace, { recursive: true, force: true }) }
 })

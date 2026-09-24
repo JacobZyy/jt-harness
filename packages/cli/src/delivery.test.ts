@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, readFile, readlink, realpath, rm, symlink, stat } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink, stat, lstat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
@@ -123,8 +123,8 @@ test('init refreshes project setup; uninstall removes project configuration with
     assert((await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')).includes('keep-other-tool'))
     assert.deepEqual(structuredClone(parse(await readFile(resolve(codex, 'config.toml'), 'utf8'))), { model: 'keep-model' })
     assert.equal(await readFile(resolve(workspace, 'AGENTS.md'), 'utf8'), 'Keep project instructions.\n')
-    await assert.rejects(readlink(resolve(workspace, '.agents/skills/jth-flow')), { code: 'ENOENT' })
-    await assert.rejects(readlink(resolve(workspace, '.agents/skills/jth-memo')), { code: 'ENOENT' })
+    await assert.rejects(lstat(resolve(workspace, '.agents/skills/jth-flow')), { code: 'ENOENT' })
+    await assert.rejects(lstat(resolve(workspace, '.agents/skills/jth-memo')), { code: 'ENOENT' })
     assert((await readFile(envFile, 'utf8')).includes('JTH_DATABASE_URL'))
     if (process.env.JTH_TEST_DATABASE_URL) {
       const reinitialized = await cli('init', '--env-file', envFile)
@@ -161,15 +161,15 @@ test('init replaces stale JTH Skill links and copies without matching old Hooks'
     await cli('install', '--project', 'fixture', '--env-file', envFile)
     const installedHooks = await readFile(hooksPath, 'utf8')
     const flowSkill = resolve(workspace, '.agents/skills/jth-flow')
-    await rm(flowSkill)
+    await rm(flowSkill, { recursive: true })
     await symlink(resolve(oldRoot, 'packages/flow/skills/jth-flow'), flowSkill)
     const memoSkill = resolve(workspace, '.agents/skills/jth-memo')
-    await rm(memoSkill)
+    await rm(memoSkill, { recursive: true })
     await mkdir(memoSkill)
     await writeFile(resolve(memoSkill, 'SKILL.md'), 'old copy')
     assert.equal((await cli('init')).database.schema_version, 8)
     for (const kind of ['flow', 'memo']) {
-      assert.equal(await readlink(resolve(workspace, `.agents/skills/jth-${kind}`)), resolve(root, `packages/${kind}/skills/jth-${kind}`))
+      assert((await lstat(resolve(workspace, `.agents/skills/jth-${kind}`))).isDirectory())
     }
     assert.equal(await readFile(hooksPath, 'utf8'), installedHooks)
     assert.deepEqual((await cli('flow', 'status')).memo_scope.project_ids, ['fixture'])

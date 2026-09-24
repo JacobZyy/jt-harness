@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { access, lstat, readFile, realpath, symlink } from 'node:fs/promises'
+import { access, lstat, realpath, symlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -27,9 +27,9 @@ export async function readPrimaryInstallation(primary: string) {
   const status = JSON.parse(execFileSync('bun', ['--', primaryCli, 'flow', 'status', '--workspace', primary], {
     cwd: primary, encoding: 'utf8',
   })) as { memo_scope: { project_ids: string[], business_ids: string[] } | null, configuration?: { envFile: string } }
-  const locator = JSON.parse(await readFile(resolve(primary, '.jth/flow.json'), 'utf8')) as { envFile: string }
   if (!status.memo_scope) throw new Error('主工作区尚未配置 Memo 范围')
-  const envFile = await realpath(status.configuration?.envFile ?? locator.envFile)
+  if (!status.configuration?.envFile) throw new Error('主工作区尚未配置本机连接文件')
+  const envFile = await realpath(status.configuration.envFile)
   return { envFile, projectIds: status.memo_scope.project_ids, businessIds: status.memo_scope.business_ids }
 }
 

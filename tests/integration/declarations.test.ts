@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, appendFile, readFile, realpath, rename, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, realpath, rename, rm, symlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Pool } from 'pg'
@@ -37,13 +37,15 @@ test('installed declaration CLI persists a cross-turn approval with both sources
   const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile], { cwd: directory })
   let hookCommand = ''
   const hook = (text: string) => new Promise<void>((done, reject) => {
-    const child = execFile('/bin/sh', ['-c', hookCommand], { cwd: directory }, (error, stdout, stderr) => {
+    const child = execFile('/bin/sh', ['-c', hookCommand], { cwd: directory, env: { ...process.env, PATH: `${resolve(directory, 'bin')}:${process.env.PATH}` } }, (error, stdout, stderr) => {
       if (error) { reject(error); return }
       try { assert.equal(stdout, ''); assert.equal(stderr, ''); done() } catch (failure) { reject(failure) }
     })
     child.stdin!.end(JSON.stringify({ hook_event_name: 'Stop', session_id: 'declaration-cli-session', cwd: directory, transcript_path: source, last_assistant_message: text }))
   })
   try {
+    await mkdir(resolve(directory, 'bin'))
+    await symlink(resolve(root, 'bin/jth.ts'), resolve(directory, 'bin/jth'))
     await prepareDatabase(pool, true)
     const installed = JSON.parse((await cli('codex', 'install', '--workspace', directory, '--codex-home', home, '--project', 'declaration-cli')).stdout)
     assert.deepEqual(installed.events, ['Stop', 'SessionStart', 'UserPromptSubmit'])

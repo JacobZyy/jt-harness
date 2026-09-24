@@ -7,6 +7,7 @@ import { FlowStore, findFlowWorkspace, renderFlowContext, taskView, verifyTask, 
 import { configureFlowHooks, configureHooks, flowHook, stageFlowEvent, drainFlowEvents, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { openDatabase } from '@jacob-z/jt-harness/memo'
 import { loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
+import { loadWorkspaceConfig, saveWorkspaceBinding } from './configuration.ts'
 import { recallTask, scheduleRecall } from './flow-memory.ts'
 import { connectDatabase } from './postgres.ts'
 import { startBackground } from './background.ts'
@@ -67,19 +68,21 @@ export async function flowLegacyMain(root: string, args: string[]) {
       const pool = await connectDatabase(config)
       store = new FlowStore(workspace, pool)
       const result = await migrateFlow(workspace, pool)
-      await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
+      await saveWorkspaceBinding(workspace, config.envFile)
+      await writeJson(flowPath(workspace), { version: 3, scope: { project_ids: settings.projectIds, business_ids: settings.businessIds } })
       output(result)
       return
     }
     if (command === 'install') {
       if (existsSync(legacyFlowPath(workspace)) && !existsSync(flowPath(workspace))) throw new Error('检测到旧 SQLite；先运行 jth flow migrate，保留原任务')
-      const config = await loadConfig(root, values['env-file'])
+      const config = await loadWorkspaceConfig(root, values['env-file'], workspace)
       const pool = await connectDatabase(config)
       store = new FlowStore(workspace, pool)
       await prepareFlowDatabase(pool)
       await store.install({ version: 1, workspace, envFile: config.envFile, projectIds: values.project ?? [], businessIds: values.business ?? [], installedAt: new Date().toISOString() })
       const memo = await configureHooks(root, config, workspace, { project_ids: values.project ?? [], business_ids: values.business ?? [] }, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-      await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
+      await saveWorkspaceBinding(workspace, config.envFile)
+      await writeJson(flowPath(workspace), { version: 3, scope: { project_ids: values.project ?? [], business_ids: values.business ?? [] } })
       output({ ...await configureFlowHooks(root, workspace, true, 'legacy'), memo, state: 'PostgreSQL jt_flow', locator: flowPath(workspace) })
       return
     }
@@ -96,8 +99,8 @@ export async function flowLegacyMain(root: string, args: string[]) {
       let hook
       try {
         const location = locatorSchema.parse(await readJson(flowPath(workspace)))
-        if (location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
-        const config = await loadConfig(root, location.envFile)
+        if (location.version === 2 && location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
+        const config = await loadWorkspaceConfig(root, undefined, workspace)
         store = new FlowStore(workspace, openDatabase(config, true))
         hook = await flowHook(staged.event, store)
         await unlink(staged.file)
@@ -118,8 +121,8 @@ export async function flowLegacyMain(root: string, args: string[]) {
     if (command === 'uninstall') { output(await configureFlowHooks(root, workspace, false)); return }
     if (!existsSync(flowPath(workspace))) throw new Error('旧流程尚未迁移；运行 jth flow migrate')
     const location = locatorSchema.parse(await readJson(flowPath(workspace)))
-    if (location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
-    const config = await loadConfig(root, location.envFile)
+    if (location.version === 2 && location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
+    const config = await loadWorkspaceConfig(root, undefined, workspace)
     store = new FlowStore(workspace, await connectDatabase(config))
     await store.settings()
     if (command === 'sync') {

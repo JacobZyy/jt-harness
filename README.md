@@ -37,7 +37,7 @@ jth flow install --project jt-harness
 jth flow status
 ```
 
-安装保留 Memo Stop 声明入口，链接项目 `jth-flow` 和 `jth-memo` Skill，增加 `UserPromptSubmit` 短入口，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 只读取本地安装配置、最近一次入口输出与 Memo 范围，不返回旧目标、阶段或缓存记忆。入口记录位于 `.jth/flow-entry.json`，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
+安装保留 Memo Stop 声明入口，复制项目 `jth-flow` 和 `jth-memo` Skill，增加 `UserPromptSubmit` 短入口，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 读取项目范围、本机配置和最近一次入口输出，不返回旧目标、阶段或缓存记忆。入口记录位于 `.jth/flow-entry.json`，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
 
 Workflow Policy 默认 adaptive：普通问答直接回答，有界小改直接执行并做聚焦验证；多阶段或明确要求规划时走 planned，受信任入口明确要求主 Agent 启动或复用一个 Codex 原生 Goal，并用 `update_plan` 记录进度。用户明确停用 Goal 时不创建。`jth flow policy` 分别准备 Goal 和计划参数，不调用原生工具或保存任务；`plan.goal` 只是文本，更新计划不会自动启动 Goal。用户确认、补充及恢复沿用同一目标。工具未暴露时说明具体缺失，不伪造原生状态。配置与调用约定见 [Workflow Policy](docs/workflow-policy.md)。
 
@@ -154,7 +154,7 @@ jth db stop
 
 Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness` 本地环境。参考已有项目的 setup 模式，创建工作树时执行 `bun scripts/setup-worktree.ts`；已经存在或手动创建的工作树运行 `pnpm setup:worktree`。
 
-设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和已选配置（通常为用户目录 `.env`），为当前工作树单独安装依赖，并重新生成 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 链接。不会复制主工作区绑定了绝对路径的 Hook 或任务状态；Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
+设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和已选配置（通常为用户目录 `.env`），为当前工作树单独安装依赖，并刷新 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 文件。Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
 
 工作树 `.env` 链接到主配置，密钥更新立即共享，不提交 Git；相对运行路径以源配置所在目录解析。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成依赖安装与 `jth flow install`，作为可用的配置来源。
 
@@ -222,7 +222,7 @@ jth memo work
 jth memo codex uninstall
 ```
 
-`--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo 声明和线索 Hook，以及 `.agents/skills/jth-memo` 链接。升级时移除 `AGENTS.md` 中旧的 `JTH_MEMORY_START/END` 区块，保留其他说明并备份原文到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除受管 Hook 和 Skill。Codex 的 Hook 信任机制保持不变。
+`--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo 声明和线索 Hook，并复制 `.agents/skills/jth-memo` 文件。升级时移除 `AGENTS.md` 中旧的 `JTH_MEMORY_START/END` 区块，保留其他说明并备份原文到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除受管 Hook 和 Skill。Codex 的 Hook 信任机制保持不变。
 
 Memo 安装 `Stop` 声明入口，以及 `SessionStart` / `UserPromptSubmit` 有限线索入口。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短流程提示，不恢复旧任务生命周期 Hook。
 

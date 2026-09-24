@@ -1,11 +1,11 @@
-import { realpath, readlink } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { findFlowWorkspace, flowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
 import { captureSettingsSchema, configureFlowHooks, configureHooks, flowEntryHook, flowEntryMarker, flowEntryReceiptPath, installationPath, readJson, writeJson, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
-import { loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
-import { configurationScope, loadWorkspaceConfig } from './configuration.ts'
+import { safeError } from '@jacob-z/jt-harness/memo/config'
+import { configurationScope, loadWorkspaceConfig, saveWorkspaceBinding } from './configuration.ts'
 import { resolveWorkflowPolicy } from './workflow-settings.ts'
 
 const help = `jth flow install --project <id> [--business <id>] [--env-file <path>]
@@ -23,7 +23,8 @@ jth flow legacy <command>        显式访问旧任务，例如 status --all、c
 export async function installFlow(root: string, workspace: string, config: { dataDir: string, envFile: string, envAliases?: readonly string[] }, scope: CaptureSettings['scope']) {
   const workflowPolicy = await resolveWorkflowPolicy(workspace)
   const memo = await configureHooks(root, config, workspace, scope, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-  await writeJson(flowPath(workspace), { version: 2, workspace, envFile: config.envFile })
+  await saveWorkspaceBinding(workspace, config.envFile)
+  await writeJson(flowPath(workspace), { version: 3, scope })
   return { ...await configureFlowHooks(root, workspace), memo, workflow_policy: workflowPolicy, task_owner: 'Codex', locator: flowPath(workspace) }
 }
 
@@ -75,17 +76,17 @@ export async function flowMain(root: string, args: string[]) {
     }
     if (command === 'uninstall') { output(await configureFlowHooks(root, workspace, false)); return }
     const locator = locatorSchema.parse(await readJson(flowPath(workspace)))
-    if (locator.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
-    const config = await loadConfig(root, locator.envFile)
+    if (locator.version === 2 && locator.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
+    const config = await loadWorkspaceConfig(root, undefined, workspace)
     const installation = await readJson(installationPath(config, workspace)) as { settings?: unknown, disabled?: boolean } | undefined
-    const memoScope = installation?.settings ? captureSettingsSchema.parse(installation.settings).scope : null
+    const memoScope = locator.version === 3 ? locator.scope : installation?.settings ? captureSettingsSchema.parse(installation.settings).scope : null
     const skillPath = resolve(workspace, '.agents/skills/jth-flow')
-    const skillTarget = await readlink(skillPath).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+    const skillInstalled = await stat(resolve(skillPath, 'SKILL.md')).then(info => info.isFile(), error => { if (error.code === 'ENOENT') return false; throw error })
     const hooks = await readJson(resolve(workspace, '.codex/hooks.json')) as { hooks?: Record<string, { hooks: { statusMessage?: string }[] }[]> } | undefined
     const handlers = Object.values(hooks?.hooks ?? {}).flatMap(groups => groups.flatMap(group => group.hooks))
     const legacyHooks = handlers.filter(handler => handler.statusMessage === 'jth flow context').length
-    output({ mode: 'native', workspace, workflow_policy: await resolveWorkflowPolicy(workspace), configuration: await configurationScope(config), skill: { path: skillPath, installed: skillTarget !== null }, memo_scope: memoScope,
-      memo_enabled: Boolean(installation && !installation.disabled), legacy_flow_hooks: legacyHooks,
+    output({ mode: 'native', workspace, workflow_policy: await resolveWorkflowPolicy(workspace), configuration: await configurationScope(config), skill: { path: skillPath, installed: skillInstalled }, memo_scope: memoScope,
+      memo_enabled: Boolean(!installation?.disabled && (installation?.settings || (locator.version === 3 && handlers.some(handler => handler.statusMessage === 'jth memo declaration')))), legacy_flow_hooks: legacyHooks,
       entry_hook: { installed: handlers.some(handler => handler.statusMessage === flowEntryMarker), event: 'UserPromptSubmit',
         receipt_path: flowEntryReceiptPath(workspace), last_emission: await readJson(flowEntryReceiptPath(workspace)) ?? null },
       ...(legacyHooks ? { action: '重新运行 flow install，移除旧任务注入 Hook' } : {}),

@@ -1,5 +1,5 @@
 import { chmod, link, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -7,11 +7,23 @@ import { isDeepStrictEqual, parseEnv } from 'node:util'
 import { createInterface } from 'node:readline'
 import { Writable } from 'node:stream'
 import { stdin, stderr } from 'node:process'
+import { z } from 'zod'
 import { flowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
-import { memoLocatorPath, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { hash, memoLocatorPath, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { loadConfig, readConfigAliases, userConfigPaths, type Config } from '@jacob-z/jt-harness/memo/config'
 
 const readEnv = (path: string) => readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+const deviceBindingSchema = z.strictObject({ version: z.literal(1), envFile: z.string().refine(isAbsolute) })
+const deviceBindingPath = (workspace: string, environment: NodeJS.ProcessEnv = process.env) =>
+  resolve(userConfigPaths(environment).directory, 'projects', `${hash(realpathSync(workspace))}.json`)
+
+export async function saveWorkspaceBinding(workspace: string, envFile: string, environment: NodeJS.ProcessEnv = process.env) {
+  await writeJson(deviceBindingPath(workspace, environment), deviceBindingSchema.parse({ version: 1, envFile }))
+}
+
+export async function removeWorkspaceBinding(workspace: string, environment: NodeJS.ProcessEnv = process.env) {
+  await rm(deviceBindingPath(workspace, environment), { force: true })
+}
 
 export function findInstalledWorkspace(start: string) {
   let path = realpathSync(start)
@@ -27,11 +39,12 @@ export function findInstalledWorkspace(start: string) {
 export async function loadWorkspaceConfig(root: string, envFile?: string, workspace = process.cwd(), environment: NodeJS.ProcessEnv = process.env) {
   if (envFile !== undefined || environment.JTH_ENV_FILE !== undefined) return loadConfig(root, envFile, environment)
   const installed = findInstalledWorkspace(workspace)
+  const binding = await readJson(deviceBindingPath(installed, environment))
+  if (binding) return loadConfig(root, deviceBindingSchema.parse(binding).envFile, environment)
   const locator = await readJson(flowPath(installed)) ?? await readJson(memoLocatorPath(installed))
   if (!locator) return loadConfig(root, undefined, environment)
   const saved = locatorSchema.parse(locator)
-  if (saved.workspace !== installed) throw new Error('项目连接配置的工作区不一致')
-  return loadConfig(root, saved.envFile, environment)
+  return loadConfig(root, saved.version === 2 && saved.workspace === installed ? saved.envFile : undefined, environment)
 }
 
 export async function configurationScope(config: Config, environment: NodeJS.ProcessEnv = process.env) {

@@ -1,7 +1,7 @@
 import { Pool } from 'pg'
 import { prepareFlowDatabase } from '@jacob-z/jt-harness/flow'
 import assert from 'node:assert/strict'
-import { mkdtemp, realpath, rm, writeFile, readFile, mkdir, readlink } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile, readFile, mkdir, lstat } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
@@ -31,7 +31,7 @@ test('explicit legacy flow hooks preserve memory handlers, restore old goals and
     const first = await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')
     await configureFlowHooks(root, workspace, true, 'legacy')
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), first)
-    assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-flow')), resolve(root, 'packages/flow/skills/jth-flow'))
+    assert((await lstat(resolve(workspace, '.agents/skills/jth-flow'))).isDirectory())
     for (const event of flowEvents) assert.equal(JSON.parse(first).hooks[event].flatMap((group: { hooks: { statusMessage?: string }[] }) => group.hooks).filter((handler: { statusMessage?: string }) => handler.statusMessage === 'jth flow context').length, 1)
     const task = await store.start({ goal: '解决原来的长任务目标偏移', acceptance: ['保留讨论边界'] }, {}, 'parent')
     const focused = await store.focus(task.id, { action: '查证当前问题', acceptance: [1], readScope: ['docs'], expected: '带来源的结论' }, 'parent')

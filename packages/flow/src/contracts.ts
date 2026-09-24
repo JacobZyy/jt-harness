@@ -2,7 +2,12 @@ import { z } from 'zod'
 import { posix } from 'node:path'
 
 const text = z.string().trim().min(1).max(2000)
-export const locatorSchema = z.strictObject({ version: z.literal(2), workspace: text, envFile: text })
+const identifier = z.string().trim().min(1).max(200)
+export const projectScopeSchema = z.strictObject({ project_ids: z.array(identifier).min(1), business_ids: z.array(identifier).default([]) })
+export const locatorSchema = z.discriminatedUnion('version', [
+  z.strictObject({ version: z.literal(2), workspace: text, envFile: text }),
+  z.strictObject({ version: z.literal(3), scope: projectScopeSchema }),
+])
 export const phaseSchema = z.enum(['discussion', 'execution', 'verification', 'completed'])
 export const relativePathSchema = z.string().trim().min(1).max(1000).refine(path => (
   !path.startsWith('/') && !path.split(/[\\/]/).includes('..') && !path.includes('\0')

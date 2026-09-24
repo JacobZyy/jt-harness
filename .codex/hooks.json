@@ -1,0 +1,53 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'jth' '--' 'memo' 'codex' 'declare'",
+            "timeout": 3,
+            "statusMessage": "jth memo declaration"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'jth' '--' 'memo' 'codex' 'cue'",
+            "timeout": 3,
+            "statusMessage": "jth memo cues",
+            "additionalContextLimit": 1600
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'jth' '--' 'memo' 'codex' 'cue'",
+            "timeout": 3,
+            "statusMessage": "jth memo cues",
+            "additionalContextLimit": 1600
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'jth' '--' 'flow' 'prompt'",
+            "timeout": 3,
+            "statusMessage": "jth flow entry",
+            "additionalContextLimit": 512
+          }
+        ]
+      }
+    ]
+  }
+}

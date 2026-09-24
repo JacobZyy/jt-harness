@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtemp, mkdir, writeFile, appendFile, readFile, readlink, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, appendFile, readFile, lstat, readdir, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -189,7 +189,7 @@ test('installation replaces legacy capture with declaration and bounded cue hook
     } }))
     await configureHooks(root, f.config, f.directory, f.settings.scope, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
-    assert.equal(await readlink(resolve(f.directory, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
+    assert((await lstat(resolve(f.directory, '.agents/skills/jth-memo'))).isDirectory())
     assert((await readFile(resolve(f.directory, '.agents/skills/jth-memo/references/declarations.md'), 'utf8')).includes('confirmation_quote'))
     await configureHooks(root, f.config, f.directory, f.settings.scope, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
@@ -198,6 +198,6 @@ test('installation replaces legacy capture with declaration and bounded cue hook
     assert(hooks.Stop.flatMap((group: { hooks: { command: string }[] }) => group.hooks).some((hook: { command: string }) => hook.command.includes("'declare'")))
     await configureHooks(root, f.config, f.directory, undefined, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
-    await assert.rejects(readlink(resolve(f.directory, '.agents/skills/jth-memo')), { code: 'ENOENT' })
+    await assert.rejects(lstat(resolve(f.directory, '.agents/skills/jth-memo')), { code: 'ENOENT' })
   } finally { await f.cleanup() }
 })

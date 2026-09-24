@@ -5,11 +5,12 @@ import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jacob-z/jt-harness/memo'
+import { locatorSchema } from '@jacob-z/jt-harness/flow'
 import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, hookCommand, memoHookCommand, installationPath, readJson, writeJson, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
-import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration, promptConfigValue, promptConfirmation } from './configuration.ts'
+import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration, promptConfigValue, promptConfirmation, removeWorkspaceBinding } from './configuration.ts'
 import { connectDatabase } from './postgres.ts'
 
 const execute = promisify(execFile)
@@ -22,7 +23,7 @@ init 是交互初始化问卷：项目名默认当前文件夹，已有项目复
 问卷确认后自动准备记忆表、接入项目并检查，终端输出完成摘要；无需再执行 memo init 或 doctor。
 首次 init 默认关闭本项目 Codex 原生记忆并开启 update_plan；再次 init 保留现有偏好，inherit 跟随上层记忆设置。
 install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装或更新 CLI 本体。工具更新后重新运行 init，同步项目接入并迁移记忆表。
-用户配置默认保存于 ~/.jt-harness/.env，项目只保存范围、偏好和配置引用；API Key 隐藏输入。--env-file 显式覆盖。
+用户配置默认保存于 ~/.jt-harness/.env，项目只保存范围、偏好、Hooks 和 Skill 文件；本机配置引用只在本机保存。API Key 隐藏输入。--env-file 显式覆盖。
 非交互 init 使用配置和默认项目名，输出 JSON；--trust 只信任 JTH Hooks，项目配置层需已受信任。
 doctor 只读检查，不调用模型；uninstall 移除项目 JTH 配置，保留数据库、队列与用户凭据。
 `
@@ -143,7 +144,8 @@ export async function deliveryMain(root: string, args: string[]) {
       const installed = await installCli(resolve(values.from ?? root), resolve(values.prefix ?? resolve(homedir(), '.local')), values['env-file'])
       output(installed); return
     }
-    const locator = await readJson(resolve(workspace, '.jth/flow.json')) as { envFile: string } | undefined
+    const savedLocator = await readJson(resolve(workspace, '.jth/flow.json'))
+    const locator = savedLocator ? locatorSchema.parse(savedLocator) : undefined
     const projectMemoryPolicy = memoryPolicy ?? (command === 'init' && !locator ? 'off' : undefined)
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     if (command === 'doctor') {
@@ -176,12 +178,14 @@ export async function deliveryMain(root: string, args: string[]) {
         }
       }
       for (const name of ['flow.json', 'workflow.json', 'monitor.json', 'flow-entry.json']) await rm(resolve(workspace, '.jth', name), { force: true })
+      await removeWorkspaceBinding(workspace)
       output({ flow, memo, previous_scope: previousScope, configuration: await configurationScope(config), project_configuration_removed: true, database_preserved: true, queues_preserved: true }); return
     }
     if (!['init', 'install'].includes(command)) throw new Error('未知交付命令')
-    const status = locator ? JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.ts'), 'flow', 'status', '--workspace', workspace])).stdout) : null
-    const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? previousScope?.project_ids ?? []
-    const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? previousScope?.business_ids ?? []
+    const status = locator?.version === 2 && locator.workspace === workspace
+      ? JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.ts'), 'flow', 'status', '--workspace', workspace])).stdout) : null
+    const projects: string[] = values.project ?? (locator?.version === 3 ? locator.scope.project_ids : undefined) ?? status?.memo_scope?.project_ids ?? previousScope?.project_ids ?? []
+    const businesses: string[] = values.business ?? (locator?.version === 3 ? locator.scope.business_ids : undefined) ?? status?.memo_scope?.business_ids ?? previousScope?.business_ids ?? []
     if (interactive) process.stderr.write(`JTH 初始化\n准备：可连接的 PostgreSQL（已安装 pgvector）及 Embedding 服务配置。\n已有全局配置会复用，回车采用默认值，Ctrl+C 取消。\n\n项目配置\n目录：${workspace}\n`)
     if (command === 'init' && !projects.length) {
       projects.push(interactive ? await promptConfigValue('项目名称', { value: basename(workspace) }) : basename(workspace))

@@ -1,4 +1,5 @@
-import { appendFile, lstat, mkdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
@@ -12,18 +13,28 @@ export async function configureSkill(root: string, workspace: string, kind: 'flo
   const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`)
   const target = resolve(workspace, '.agents/skills', name)
   const prior = await lstat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error })
-  const current = prior?.isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source
   if (enabled) {
     await readFile(resolve(source, 'SKILL.md'), 'utf8')
     await mkdir(dirname(target), { recursive: true })
-    if (prior && !current) await rm(target, { recursive: true, force: true })
-    if (!current) await symlink(source, target)
-    const ignorePath = resolve(workspace, '.gitignore'), lines = [`/.agents/skills/${name}`, ...(kind === 'memo' ? ['/.jth/'] : [])]
-    const ignore = await readFile(ignorePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
-    const missing = lines.filter(line => !ignore.split(/\r?\n/).includes(line))
-    if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
+    const temporary = `${target}.${randomUUID()}.tmp`
+    try {
+      await cp(source, temporary, { recursive: true, dereference: true })
+      if (prior) await rm(target, { recursive: true, force: true })
+      await rename(temporary, target)
+    } finally { await rm(temporary, { recursive: true, force: true }) }
+    await configureProjectIgnore(workspace)
   } else if (prior) await rm(target, { recursive: true, force: true })
   return target
+}
+
+export async function configureProjectIgnore(workspace: string) {
+  const path = resolve(workspace, '.gitignore')
+  const original = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
+  const retired = new Set(['/.jth/', '/.agents/skills/jth-flow', '/.agents/skills/jth-memo', '/.codex/hooks.json'])
+  const lines = (original ? original.replace(/\r?\n$/u, '').split(/\r?\n/) : []).filter(line => !retired.has(line))
+  for (const line of ['/.jth/*', '!/.jth/flow.json', '!/.jth/workflow.json']) if (!lines.includes(line)) lines.push(line)
+  const next = `${lines.join('\n')}\n`
+  if (next !== original) await writeFile(path, next)
 }
 
 async function removeDeclarationInstructions(workspace: string, backupDirectory: string) {
@@ -97,8 +108,8 @@ export async function configureHooks(root: string, config: { dataDir: string, en
     mergeHooks(document), command('declare'), { marker: declarationHookMarker, events: ['Stop'] },
   ), command('cue'), { marker: cueMarker, events: ['SessionStart', 'UserPromptSubmit'], additionalContextLimit: 1600 }))
   if (settings) {
-    await writeJson(memoLocatorPath(workspace), { version: 2, workspace, envFile: config.envFile })
     await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: false, mode: 'declaration' })
+    await rm(memoLocatorPath(workspace), { force: true })
   } else {
     await writeJson(manifestPath, { hooks_path: hooksPath, settings: prior?.settings, disabled: true, mode: prior?.mode })
     await rm(memoLocatorPath(workspace), { force: true })

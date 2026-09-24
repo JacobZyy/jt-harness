@@ -94,7 +94,7 @@ jth memo status --summary
 jth memo work
 ```
 
-安装链接项目 `jth-memo` Skill，配置一个 Memo Stop Hook，以及启动/恢复线索所需的 `SessionStart` 和 `UserPromptSubmit` Hook。每轮固定部分只注入短入口，命中时附少量线索；详细规则由 Skill 按需加载。升级时移除旧 `AGENTS.md` 记忆区块。重新安装替换旧 Memo 六阶段捕获，保留 Flow 和其他工具的 Hook。主 Agent 核对子 Agent 结果后统一声明。卸载使用 `jth memo codex uninstall`，不删除已保存的数据。
+安装复制项目 `jth-memo` Skill，配置一个 Memo Stop Hook，以及启动/恢复线索所需的 `SessionStart` 和 `UserPromptSubmit` Hook。每轮固定部分只注入短入口，命中时附少量线索；详细规则由 Skill 按需加载。升级时移除旧 `AGENTS.md` 记忆区块。重新安装替换旧 Memo 六阶段捕获，保留 Flow 和其他工具的 Hook。主 Agent 核对子 Agent 结果后统一声明。卸载使用 `jth memo codex uninstall`，不删除已保存的数据。
 
 Hook 只保存本地事件与来源指针，后台负责解析、数据库和 Embedding。来源暂存继续使用已有硬链接机制，来源文件与数据目录应在同一文件系统。异常处理沿用以下边界：
 

@@ -20,7 +20,7 @@ jth --version
 解压后安装：
 
 ```sh
-tar -xzf jt-harness-0.3.11.tar.gz
+tar -xzf jt-harness-<版本>.tar.gz
 bun -- jt-harness/bin/jth.ts install --cli --env-file /absolute/path/to/.env
 jth --version
 ```
@@ -36,7 +36,7 @@ jth init
 jth uninstall
 ```
 
-`init` 面向人使用：默认项目名来自当前文件夹，已有项目复用原范围；全局连接和 Embedding 配置完整时直接复用，只有缺项才弹出问答。API Key 和数据库连接隐藏输入，保存到用户级 `.env`，项目只记录引用。问卷还会确认是否信任当前 Codex 项目并启用 JTH 自动入口，默认是。
+`init` 面向人使用：默认项目名来自当前文件夹，已有项目复用原范围；全局连接和 Embedding 配置完整时直接复用，只有缺项才弹出问答。API Key 和数据库连接隐藏输入，保存到用户级 `.env`；项目保存共享范围、Hook 和 Skill 文件，本机覆盖配置的引用留在 `~/.jt-harness/projects/`。问卷还会确认是否信任当前 Codex 项目并启用 JTH 自动入口，默认是。
 
 回答完成后，命令自动连接数据库、初始化或升级 Memo 表、安装 Flow 与 Memo Skill 和 Hooks，并执行接入检查。数据库错误可以在同一问卷内修改连接重试。成功输出简短摘要，不需要再执行 `memo init` 或 `doctor`；只有新回合的实际触发仍需重新打开 Codex 任务后验证。
 
@@ -74,7 +74,7 @@ jth doctor
 
 多个项目共用同一个 Memo 数据库时，在每个项目重新运行 `jth init`；首次迁移 schema 后，旧 CLI 会拒绝新版本，尚未更新的项目需先完成 `init` 再继续使用。
 
-`uninstall` 移除当前项目的 JTH Skill、Hooks、`.jth` 中的接入与策略文件，以及 `.codex/config.toml` 中的 JTH 记忆和计划覆盖项；其他工具配置保留。数据库、用户凭据、待处理队列、历史备份和观测数据不删除，也不卸载共享 Phoenix 服务。`.gitignore` 中的 `/.jth/` 保留，避免待处理文件被误提交。
+`uninstall` 移除当前项目的 JTH Skill、Hooks、`.jth` 中的接入与策略文件，以及 `.codex/config.toml` 中的 JTH 记忆和计划覆盖项；其他工具配置保留。数据库、用户凭据、待处理队列、历史备份和观测数据不删除，也不卸载共享 Phoenix 服务。`.gitignore` 只放行 `.jth/flow.json` 和 `.jth/workflow.json`，其余 `.jth` 运行文件保持忽略。
 
 卸载回执给出 `previous_scope` 和原配置路径。同一配置数据目录中的安装记录会让再次 `init` 复用该范围；原来使用独立 `--env-file` 时，再次 `init` 也应传入该路径。若改用另一配置数据目录，显式传入原 `--project` 或 `--business`，才能读取旧范围的记忆。
 

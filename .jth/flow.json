@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "scope": {
+    "project_ids": [
+      "jt-harness"
+    ],
+    "business_ids": []
+  }
+}

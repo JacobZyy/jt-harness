@@ -1,4 +1,4 @@
-import { readFile, unlink, realpath, appendFile, readdir } from 'node:fs/promises'
+import { unlink, realpath, readdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { relative, resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
@@ -54,12 +54,6 @@ export async function flowHook(input: unknown, store: FlowStore) {
 
 export async function configureFlowHooks(root: string, workspace: string, enabled = true, mode: 'native' | 'legacy' = 'native') {
   const target = await configureSkill(root, workspace, 'flow', enabled)
-  if (enabled) {
-    const ignorePath = resolve(workspace, '.gitignore')
-    const ignore = await readFile(ignorePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
-    const missing = ['/.jth/', '/.codex/hooks.json'].filter(line => !ignore.split(/\r?\n/).includes(line))
-    if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
-  }
   const command = enabled && mode === 'legacy' ? hookCommand('flow', 'legacy', 'hook') : undefined
   const entry = enabled && mode === 'native' ? hookCommand('flow', 'prompt') : undefined
   const hooksPath = resolve(workspace, '.codex/hooks.json')
