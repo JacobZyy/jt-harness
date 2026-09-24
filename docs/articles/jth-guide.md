@@ -64,14 +64,14 @@ command -v jth
 
 第一条安装工具本体，第二条查看版本，第三条确认当前终端究竟使用哪个入口。
 
-> **版本说明：** 核对时，npm 最新版是 `0.3.3`，发布来源为 `8ac0952`。本文的单入口初始化、主动线索、`recall`、混合检索、分层读取和 `usage` 尚未随该次 npm 发布交付。仅看到版本号 `0.3.3`，不能证明具备本文全部能力。
+本文命令以 `0.3.9` 为准。运行前用 `jth --version` 核对版本，并用 `jth memo --help` 确认所需命令。
 
-### 使用包含当前能力的独立发行包
+### 使用独立发行包
 
-如果要完整体验本文的增强读取功能，需要先取得维护者提供的对应独立发行包。拿到包后，在下载目录解压并安装：
+取得对应版本的独立发行包后，在下载目录解压并安装：
 
 ```sh
-tar -xzf jt-harness-0.3.3.tar.gz
+tar -xzf jt-harness-0.3.9.tar.gz
 bun -- ./jt-harness/bin/jth.mjs install --cli
 export PATH="$HOME/.local/bin:$PATH"
 command -v jth
@@ -81,7 +81,7 @@ jth memo --help
 
 这里的 `install --cli` 安装工具本体，默认命令位于 `~/.local/bin/jth`。`export` 只影响当前终端；以后新开终端也要能找到该目录，可以将这条 PATH 配置加入你使用的 Shell 启动文件。
 
-安装方式选一种即可。若机器上已有多个 JTH 入口，以 `command -v jth` 为准。确认 `jth memo --help` 中出现 `recall`、`usage` 和 `read --level`，再使用后文对应功能。当前增强版本尚未公开发布，是本文保留为草稿时需要明确的交付边界。
+安装方式选一种即可。若机器上已有多个 JTH 入口，以 `command -v jth` 为准。确认 `jth memo --help` 中出现 `recall`、`usage` 和 `read --level`，再使用后文对应功能。
 
 ---
 
