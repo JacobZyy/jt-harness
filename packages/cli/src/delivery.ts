@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jacob-z/jt-harness/memo'
-import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, configureSkill, readJson, writeJson, quote } from '@jacob-z/jt-harness/codex-hooks'
+import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, configureSkill, installationPath, readJson, writeJson, quote } from '@jacob-z/jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
@@ -16,16 +16,15 @@ const execute = promisify(execFile)
 const help = `jth init [--project <id>] [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
 jth install --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
 jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-file <path>]
-jth upgrade [--from <已解压发行目录>] [--prefix <目录>] [--workspace <项目目录>] [--trust] [--summary]
 jth doctor [--workspace <path>] [--env-file <path>]
-jth uninstall [--workspace <path>]
+jth uninstall [--workspace <path>] [--env-file <path>]
 init 是交互初始化问卷：项目名默认当前文件夹，已有项目复用原范围与 Codex 偏好；全局配置完整时跳过，缺项才询问并保存。
 问卷确认后自动准备记忆表、接入项目并检查，终端输出完成摘要；无需再执行 memo init 或 doctor。
 首次 init 默认关闭本项目 Codex 原生记忆并开启 update_plan；再次 init 保留现有偏好，inherit 跟随上层记忆设置。
-install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装 CLI 本体。upgrade 更新发行目录、补齐项目接入并迁移记忆表，配置缺项时请运行 init。
+install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装或更新 CLI 本体。工具更新后重新运行 init，同步项目接入并迁移记忆表。
 用户配置默认保存于 ~/.jt-harness/.env，项目只保存范围、偏好和配置引用；API Key 隐藏输入。--env-file 显式覆盖。
 非交互 init 使用配置和默认项目名，输出 JSON；--trust 只信任 JTH Hooks，项目配置层需已受信任。
-doctor 只读检查，不调用模型；uninstall 移除项目接入，保留数据库、队列与凭据。
+doctor 只读检查，不调用模型；uninstall 移除项目 JTH 配置，保留数据库、队列与用户凭据。
 `
 
 const ownDistributionName = (name: string) => name === 'jt-harness' || name === '@jacob-z/jt-harness'
@@ -131,7 +130,7 @@ export async function deliveryMain(root: string, args: string[]) {
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
       workspace: { type: 'string' }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
-      from: { type: 'string' }, prefix: { type: 'string' }, cli: { type: 'boolean' }, trust: { type: 'boolean' }, summary: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      from: { type: 'string' }, prefix: { type: 'string' }, cli: { type: 'boolean' }, trust: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       'codex-memory': { type: 'string' },
     } })
     const [command] = positionals
@@ -141,28 +140,21 @@ export async function deliveryMain(root: string, args: string[]) {
     const allowed: Record<string, string[]> = {
       init: ['workspace', 'env-file', 'project', 'business', 'trust', 'codex-memory'],
       install: ['workspace', 'env-file', 'project', 'business', 'from', 'prefix', 'cli', 'trust', 'codex-memory'],
-      upgrade: ['workspace', 'from', 'prefix', 'trust', 'summary'], doctor: ['workspace', 'env-file'], uninstall: ['workspace', 'env-file'],
+      doctor: ['workspace', 'env-file'], uninstall: ['workspace', 'env-file'],
     }
+    if (command === 'upgrade') throw new Error('upgrade 已移除；更新工具后在项目运行 jth init')
     if (!allowed[command] || Object.keys(values).some(key => !allowed[command].includes(key))) throw new Error(`${command} 参数不支持；运行 jth install --help`)
     const memoryPolicy = values['codex-memory']
     if (memoryPolicy !== undefined && memoryPolicy !== 'off' && memoryPolicy !== 'inherit') throw new Error('--codex-memory 仅支持 off 或 inherit')
     if (values.cli && (values.project || values.business || values.trust || memoryPolicy)) throw new Error('--cli 安装工具本体；项目接入请另用 jth init 或 jth install')
     if (values.cli && command !== 'install') throw new Error('--cli 仅用于 install')
-    if ((values.from || values.prefix) && !values.cli && command !== 'upgrade') throw new Error('--from/--prefix 用于 install --cli 或 upgrade')
-    if (values.summary && command !== 'upgrade') throw new Error('--summary 仅用于 upgrade；默认 JSON 输出供脚本使用')
+    if ((values.from || values.prefix) && !values.cli) throw new Error('--from/--prefix 仅用于 install --cli')
     const workspace = await realpath(resolve(values.workspace ?? process.cwd()))
     const output = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n')
     const home = homedir()
     const shortPath = (path: string) => path.startsWith(home) ? `~${path.slice(home.length)}` : path
-    if ((command === 'install' && values.cli) || (command === 'upgrade' && values.from)) {
+    if (command === 'install' && values.cli) {
       const installed = await installCli(resolve(values.from ?? root), resolve(values.prefix ?? resolve(homedir(), '.local')), values['env-file'])
-      if (command === 'upgrade' && await access(resolve(workspace, '.jth/flow.json')).then(() => true, () => false)) {
-        const updated = await execute(process.execPath, ['--', resolve(installed.root, 'bin/jth.mjs'), 'upgrade', '--workspace', workspace, ...(values.trust ? ['--trust'] : [])])
-        if (values.summary) {
-          process.stdout.write([`版本 ${installed.version}（build ${installed.build}）已升级`, `命令 ${shortPath(installed.binary)}`, `发行目录 ${shortPath(installed.root)}`, `共享配置 ${shortPath(installed.envFile)}`, `项目已同步 ${shortPath(workspace)}`].join('\n') + '\n'); return
-        }
-        output({ ...installed, project: JSON.parse(updated.stdout) }); return
-      }
       output(installed); return
     }
     const locator = await readJson(resolve(workspace, '.jth/flow.json')) as { envFile: string } | undefined
@@ -174,17 +166,34 @@ export async function deliveryMain(root: string, args: string[]) {
     }
     const oldRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-flow'), workspace)
     const oldMemoRoot = await ownedRoot(resolve(workspace, '.agents/skills/jth-memo'), workspace)
+    const priorInstallation = await readJson(installationPath(config, workspace)) as { settings?: unknown, disabled?: boolean } | undefined
+    const previousScope = priorInstallation?.settings ? captureSettingsSchema.parse(priorInstallation.settings).scope : undefined
     if (command === 'uninstall') {
+      for (const name of ['.jth', '.codex', '.agents', '.agents/skills']) {
+        const path = resolve(workspace, name)
+        const info = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (info?.isSymbolicLink()) throw new Error(`${name} 是符号链接；未修改仓库配置`)
+      }
       await configureMonitorHooks(oldRoot ?? root, workspace, false)
-      if (await readJson(resolve(workspace, '.jth/monitor.json'))) await writeJson(resolve(workspace, '.jth/monitor.json'), { enabled: false })
       const flow = await configureFlowHooks(oldRoot ?? root, workspace, false)
       const memo = await configureHooks(oldMemoRoot ?? root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-      output({ flow, memo, data_preserved: true }); return
+      if (locator || oldRoot || oldMemoRoot || priorInstallation?.settings) await configureProjectCodex(workspace, 'inherit', false, true)
+      const hooksPath = resolve(workspace, '.codex/hooks.json')
+      const hooksText = await readFile(hooksPath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
+      if (hooksText) {
+        const document = JSON.parse(hooksText)
+        if (Object.keys(document).length === 1 && document.hooks && Object.keys(document.hooks).length === 0) {
+          if (await readFile(hooksPath, 'utf8') !== hooksText) throw new Error('Hook 配置被其他进程更新；请重试，原配置未覆盖')
+          await rm(hooksPath)
+        }
+      }
+      for (const name of ['flow.json', 'workflow.json', 'monitor.json', 'flow-entry.json']) await rm(resolve(workspace, '.jth', name), { force: true })
+      output({ flow, memo, previous_scope: previousScope, configuration: await configurationScope(config), project_configuration_removed: true, database_preserved: true, queues_preserved: true }); return
     }
-    if (!['init', 'install', 'upgrade'].includes(command)) throw new Error('未知交付命令')
+    if (!['init', 'install'].includes(command)) throw new Error('未知交付命令')
     const status = locator ? JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.mjs'), 'flow', 'status', '--workspace', workspace])).stdout) : null
-    const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? []
-    const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? []
+    const projects: string[] = values.project ?? status?.memo_scope?.project_ids ?? previousScope?.project_ids ?? []
+    const businesses: string[] = values.business ?? status?.memo_scope?.business_ids ?? previousScope?.business_ids ?? []
     if (interactive) process.stderr.write(`JTH 初始化\n准备：可连接的 PostgreSQL（已安装 pgvector）及 Embedding 服务配置。\n已有全局配置会复用，回车采用默认值，Ctrl+C 取消。\n\n项目配置\n目录：${workspace}\n`)
     if (command === 'init' && !projects.length) {
       projects.push(interactive ? await promptConfigValue('项目名称', { value: basename(workspace) }) : basename(workspace))
@@ -205,12 +214,12 @@ export async function deliveryMain(root: string, args: string[]) {
       }
     }
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
-    if (command === 'init' || command === 'upgrade') {
+    if (command === 'init') {
       if (interactive) {
         const configuration = await configurationScope(config)
         process.stderr.write(`\n${configuration.scope === 'user' ? '全局共享配置' : '项目指定配置'}：${config.envFile}\n${missingConfiguration(config).length ? '仅补齐缺项；首次配置可回车保留默认值。' : '配置完整，直接复用，不重复询问凭据。'}\n`)
       }
-      config = await completeConfiguration(root, config, { reviewDefaults: command === 'init' && userConfig?.created && !userConfig.imported, interactive: command === 'init' && interactive })
+      config = await completeConfiguration(root, config, { reviewDefaults: userConfig?.created && !userConfig.imported, interactive })
       for (;;) {
         try {
           if (interactive) process.stderr.write('\n正在连接数据库并准备记忆表…\n')
@@ -218,7 +227,7 @@ export async function deliveryMain(root: string, args: string[]) {
           try { await prepareDatabase(pool, true) } finally { await pool.end() }
           break
         } catch (error) {
-          if (command !== 'init' || !interactive || process.env.JTH_DATABASE_URL) throw error
+          if (!interactive || process.env.JTH_DATABASE_URL) throw error
           process.stderr.write(`数据库尚未就绪：${safeError(error, config)}\n`)
           if (!await promptConfirmation('重新输入数据库连接并重试？')) throw error
           config = await completeConfiguration(root, config, { editDatabase: true })
@@ -241,7 +250,7 @@ export async function deliveryMain(root: string, args: string[]) {
     })
     const verification = command === 'init' ? await inspectProject(root, workspace, config) : undefined
     const result = { ...installed, ...codexPreferences, configuration: await configurationScope(config),
-      ...(['init', 'upgrade'].includes(command) ? { database: { status: 'ready', schema_version: schemaVersion } } : {}),
+      ...(command === 'init' ? { database: { status: 'ready', schema_version: schemaVersion } } : {}),
       ...(verification ? { verification } : {}) }
     if (verification) {
       process.exitCode = verification.checks.some(check => check.status === 'error') ? 1 : 0
@@ -257,17 +266,6 @@ export async function deliveryMain(root: string, args: string[]) {
           '首次运行回执会在任务输入和回复后产生。',
         ].join('\n') + '\n'); return
       }
-    }
-    if (command === 'upgrade' && values.summary) {
-      const settings = (result as { memo?: { settings?: { env_file?: string, scope?: unknown, enabled_at?: string } } }).memo?.settings
-      process.stdout.write([
-        `项目已同步 ${shortPath(workspace)}`,
-        `策略 ${result.workflow_policy?.mode ?? 'adaptive'}`,
-        `配置作用域 ${result.configuration?.scope ?? 'unknown'}`,
-        `记忆表 v${schemaVersion} 已就绪`,
-        ...(settings?.env_file ? [`共享配置 ${shortPath(settings.env_file)}`] : []),
-        ...(settings?.scope ? [`记忆范围 ${JSON.stringify(settings.scope)}`] : []),
-      ].join('\n') + '\n'); return
     }
     output(result)
   } catch (error) {

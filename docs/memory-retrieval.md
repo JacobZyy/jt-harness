@@ -70,7 +70,7 @@ jth memo usage --session <Codex会话ID>
 jth init
 ```
 
-问答式 `init` 自动复用配置、准备表结构、同步项目入口并检查。`memo init`、`upgrade` 和 `doctor` 继续保留为高级分步或诊断入口。
+问答式 `init` 自动复用配置、准备表结构、同步项目入口并检查。`memo init` 和 `doctor` 继续保留为高级分步或诊断入口。
 
 共享同一数据库的旧 CLI 需要升级其运行入口，避免旧 worker 因版本不符停止接收。不要清空队列或删除历史来源；新版 worker 继续沿用原收件流程。已有 Codex 会话重新加载后使用新 Hook 与指引。
 

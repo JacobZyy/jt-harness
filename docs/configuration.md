@@ -38,19 +38,19 @@ AI 或脚本运行时保留非交互 JSON 输出，项目名同样可以省略�
 jth init --project my-project --env-file /absolute/path/to/private.env --trust
 ```
 
-非交互的 `--trust` 仅信任 JTH Hooks，Codex 项目配置层需要已受信任；交互问卷中的确认则明确包含当前项目的信任。`--env-file` 保留显式指定的独立配置，不覆盖全局文件。`init` 不发送 Embedding 或生成模型测试请求；`doctor` 仍可作为后续只读诊断命令。`install --cli` 只安装程序；`upgrade` 检查配置、迁移 Memo 表并同步已有接入，缺项时提示运行 `init`，不弹出初始化问卷。
+非交互的 `--trust` 仅信任 JTH Hooks，Codex 项目配置层需要已受信任；交互问卷中的确认则明确包含当前项目的信任。`--env-file` 保留显式指定的独立配置，不覆盖全局文件。`init` 不发送 Embedding 或生成模型测试请求；`doctor` 仍可作为后续只读诊断命令。`install --cli` 只安装或更新程序，随后在项目运行 `init` 同步接入。
 
 ## 覆盖与来源
 
 Memo、数据库、监控和项目接入命令的配置文件选择顺序为 `--env-file`、`JTH_ENV_FILE`、当前仓库及其父目录中已有的 Flow 配置引用、用户配置。选择文件后，进程环境变量覆盖文件值；不会自动合并当前仓库任意 `.env`。`flow status/context` 按仓库绑定读取安装状态，避免临时覆盖改变所报告的项目范围。
 
-项目初始化时显式选择的 `--env-file` 继续作为该项目的覆盖配置，升级不将它擅自改为用户默认。`init`、`upgrade`、`flow status` 和 `doctor` 的 `configuration` 会显示 `scope`、实际 `envFile` 和默认 `userFile`；`scope=user` 表示用户默认，`scope=override` 表示显式覆盖。
+项目初始化时显式选择的 `--env-file` 继续作为该项目的覆盖配置，再次 `init` 不将它擅自改为用户默认。`init`、`flow status` 和 `doctor` 的 `configuration` 会显示 `scope`、实际 `envFile` 和默认 `userFile`；`scope=user` 表示用户默认，`scope=override` 表示显式覆盖。
 
 需要隔离或便携安装时可设置 `JTH_CONFIG_DIR` 改变用户配置目录；运行 CLI 和 Hook 的环境应保持这个变量一致。通常无需设置。数据库、Embedding 和模型选择不额外引入第二套配置格式。
 
 ## 从旧安装迁移
 
-旧版 `share/jth/.env` 可能链接到源码仓库。安装新 CLI 或升级使用该旧默认配置的仓库时，程序将其内容复制到用户配置目录，并把相对数据路径转换为原位置的绝对路径。原文件保留，已有用户配置不会被覆盖。
+旧版 `share/jth/.env` 可能链接到源码仓库。安装新 CLI 或重新初始化使用该旧默认配置的仓库时，程序将其内容复制到用户配置目录，并把相对数据路径转换为原位置的绝对路径。原文件保留，已有用户配置不会被覆盖。
 
 `config-migrations.json` 只记录已确认等价的旧配置路径。旧 Hook、待投递声明、暂存记录、索引和显式 legacy 队列仍可解析旧路径，即使旧配置文件随后移走。不会改写历史来源、项目范围、任务执行快照，也不会因此重跑 legacy 队列。
 
@@ -60,4 +60,4 @@ Memo、数据库、监控和项目接入命令的配置文件选择顺序为 `--
 
 若现有用户配置与旧配置不同，不建立等价映射，也不覆盖其中任何一份；已有项目继续保留自己的配置引用。明确核对后再选择需要的配置。
 
-安装新版本后，单项目运行 `jth upgrade --trust`。它保留原配置并执行数据库迁移；配置缺项时运行 `jth init` 补齐。多个项目共用数据库时，先在各项目运行 `jth install --trust`，再在任一项目运行一次 `jth upgrade --trust`。随后用 `jth doctor` 检查 Hook 信任，再重新加载 Codex 任务。定义变化时也可在 `/hooks` 重新审阅。诊断与实际触发的区别见[接入和升级](local-delivery-monitoring.md#项目接入和升级)。
+安装新版本后，在每个已接入项目运行 `jth init`。它补齐缺项、保留原配置并执行数据库迁移；迁移后的共享数据库可被已更新的项目复用。随后用 `jth doctor` 检查 Hook 信任，再重新加载 Codex 任务。定义变化时也可在 `/hooks` 重新审阅。`jth uninstall` 移除仓库内 JTH 接入配置，不删数据库、用户凭据或待处理队列。诊断与实际触发的区别见[接入和更新](local-delivery-monitoring.md#项目接入和更新)。

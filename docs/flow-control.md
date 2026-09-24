@@ -61,7 +61,7 @@ Memo 通过 Stop 保存主会话声明及采用反馈，后台处理存储与新
 
 原生 Goal 和计划工具由当前宿主提供，不由 `jth` 模拟。主 Agent 根据入口指令、实际授权和 `get_goal` 结果启动或复用 Goal，并独立调用 `update_plan`；只在全部验收后调用 `update_goal` 完成。未暴露工具时明确说明，并继续可执行工作，不用 Markdown 清单或旧 Flow Task 冒充原生 UI。两组工具互不替代，`flow status` 的安装信息也不证明 Goal 已启动。
 
-Codex CLI 0.152.0 起计划工具默认关闭。`jth init` 会在项目 `.codex/config.toml` 设置 `tools.update_plan.enabled = true`；`install` 和 `upgrade` 保留已有选择。新配置由重新加载的受信任项目会话读取，是否实际提供工具仍以宿主工具清单为准。
+Codex CLI 0.152.0 起计划工具默认关闭。首次 `jth init` 会在项目 `.codex/config.toml` 设置 `tools.update_plan.enabled = true`；再次 `init` 和 `install` 保留已有选择，`uninstall` 移除该项目覆盖项。新配置由重新加载的受信任项目会话读取，是否实际提供工具仍以宿主工具清单为准。
 
 `turn/plan/updated` 是宿主发出的计划通知，不是可以写入的公共计划接口。本版不伪造这些通知、不修改 Codex 私有数据库，也不为适配原生功能添加一个新服务。
 

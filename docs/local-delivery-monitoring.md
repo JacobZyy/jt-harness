@@ -11,7 +11,7 @@ npm install --global @jacob-z/jt-harness
 jth --version
 ```
 
-使用其他包管理器时，由该包管理器负责全局包的安装和版本更新。更新工具后，单项目执行 `jth upgrade --trust`，同步 Hook、Skill 并迁移 Memo 表；多个项目共用数据库时按下文分步同步。裸 `jth upgrade` 不下载 npm 新版本。升级时数据库需要可连接。
+使用其他包管理器时，由该包管理器负责全局包的安装和版本更新。更新工具后，在每个已接入项目重新运行 `jth init`，同步 Hook、Skill 并迁移 Memo 表。`init` 不下载 npm 新版本，运行时数据库需要可连接。
 
 开发者也可运行 `pnpm bundle`，得到当前版本的 `artifacts/distribution/jt-harness-<版本>.tar.gz` 及 SHA-256 文件。打包复用 pnpm deploy，包含生产依赖、TypeScript 源码和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
 
@@ -29,11 +29,10 @@ jth --version
 
 用户配置保存在 `~/.jt-harness/.env`。首次安装指定 `--env-file` 时导入其内容，不继续依赖原文件；已有用户配置不会被覆盖。旧版指向源码的共享配置会迁移，并保留旧路径兼容。没有配置时准备模板，由 `jth init` 交互补全缺失项。发行包不含密钥，配置和运行数据不随发行目录替换。分层、覆盖和迁移规则见[配置说明](configuration.md)。
 
-## 项目接入和升级
+## 项目接入和更新
 
 ```sh
 jth init
-jth upgrade --from /absolute/path/to/new-release/jt-harness --trust
 jth uninstall
 ```
 
@@ -56,26 +55,28 @@ enabled = true
 
 `update_plan` 在 [Codex CLI 0.152.0](https://learn.chatgpt.com/docs/changelog) 起默认关闭，首次 `init` 显式开启当前项目的原生计划工具。只修改这一配置项，保留其他工具配置；重新加载后需核验宿主确实提供了计划工具，写入配置本身不等于已有任务已拆步。
 
-首次 `jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，同时开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围；再次执行 `init` 会补齐缺失配置、迁移 Memo 表并同步接入，保留项目原有记忆和计划工具偏好，除非显式传入 `--codex-memory`。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`upgrade` 和 `uninstall` 也保留项目偏好。
+首次 `jth init --codex-memory inherit` 仅移除两个记忆覆盖项，恢复跟随上层配置，同时开启原生计划工具；它不强制开启全局记忆。已有项目可以省略 `--project` 复用原范围；再次执行 `init` 会补齐缺失配置、迁移 Memo 表并同步接入，保留项目原有记忆和计划工具偏好，除非显式传入 `--codex-memory`。`install` 同样支持 `--codex-memory off|inherit`，但不传该选项时保留原配置。`uninstall` 移除项目中的这些 JTH 覆盖项。
 
-交互 `init` 的问卷会明确确认项目目录和 JTH Hook 信任。AI 或脚本使用非交互 JSON 模式时，仍可显式传入 `--project`、`--env-file`、`--trust`；其中 `--trust` 只信任本次安装的 JTH Hooks，项目配置层需要已受信任。`install`、`upgrade` 的信任语义保持不变。
+交互 `init` 的问卷会明确确认项目目录和 JTH Hook 信任。AI 或脚本使用非交互 JSON 模式时，仍可显式传入 `--project`、`--env-file`、`--trust`；其中 `--trust` 只信任本次安装的 JTH Hooks，项目配置层需要已受信任。`install` 的信任语义保持不变。
 
 Codex 将信任绑定到 Hook 定义的哈希；更换 CLI 路径或更新定义后可能出现 `trustStatus: modified`，这些 Hook 会被跳过。按 [OpenAI 官方 Hook 说明](https://learn.chatgpt.com/docs/hooks)重新审阅，或在确认本次 JTH 更新后运行：
 
 ```sh
-jth upgrade --trust --summary
+jth init --trust
 jth doctor
 ```
 
 确认 JTH Hook 均为 `enabled: true`、`trustStatus: trusted`，然后重新加载已有 Codex 会话。`flow_entry` 的旧回执不能证明本次更新已经触发；后续输入和回复结束后，应检查 `jth flow status` 的新回执、`jth memo codex status` 及 `jth monitor status`。没有新记忆声明的回复不产生 Memo 入库回执。
 
-包管理器升级可能移除旧安装目录。`upgrade` 可根据同一项目中匹配旧安装路径的 JTH Hook 确认归属，修复失效的 Skill 链接并更新 Hook；缺少归属证据时保留链接并报错。`doctor` 同时检查 `skill_available`，避免把已受信任但安装文件缺失的状态报为正常。
+包管理器更新可能移除旧安装目录。`init` 可根据同一项目中匹配旧安装路径的 JTH Hook 确认归属，修复失效的 Skill 链接并更新 Hook；缺少归属证据时保留链接并报错。`doctor` 同时检查 `skill_available`，避免把已受信任但安装文件缺失的状态报为正常。
 
-`upgrade --from` 安装指定已解压发行目录，验证可执行后切换命令链接，并升级当前已接入项目；其他项目随后运行 `jth upgrade`。无 `--from` 时只升级当前项目。升级先检查现有配置和数据库、执行保留数据的 Memo 表迁移，再同步 Hook 与 Skill；配置缺项会报错并提示运行 `jth init` 补齐。原 `.env`、项目/业务范围和 Codex 偏好保留，不先删除旧配置。数据库不可连接时项目接入文件不更新，修复连接后重试。
+独立发行包更新先运行 `bun -- /absolute/path/to/new-release/jt-harness/bin/jth.mjs install --cli`，再在每个项目运行 `jth init`。`init` 检查现有配置和数据库、执行保留数据的 Memo 表迁移，再同步 Hook 与 Skill；缺项由问卷补齐。原 `.env`、项目/业务范围和 Codex 偏好保留。数据库不可连接时项目接入文件不更新，修复连接后重试。
 
-多个项目共用同一个 Memo 数据库时，先在每个项目运行 `jth install --trust` 同步到新 CLI 的入口；该命令不迁移数据库。全部项目入口就绪后，在任一项目运行一次 `jth upgrade --trust` 迁移共享数据库。旧 CLI 会拒绝新 schema，迁移期间不要继续使用尚未同步的项目。
+多个项目共用同一个 Memo 数据库时，在每个项目重新运行 `jth init`；首次迁移 schema 后，旧 CLI 会拒绝新版本，尚未更新的项目需先完成 `init` 再继续使用。
 
-`uninstall` 移除当前项目的 JTH Skill 和 Hooks，保留其他工具配置、凭据、数据库、历史队列及观测数据，不卸载共享 Phoenix 服务。Codex 项目记忆偏好作为用户配置保留；希望恢复跟随全局时，先运行 `jth install --codex-memory inherit`，再卸载。
+`uninstall` 移除当前项目的 JTH Skill、Hooks、`.jth` 中的接入与策略文件，以及 `.codex/config.toml` 中的 JTH 记忆和计划覆盖项；其他工具配置保留。数据库、用户凭据、待处理队列、历史备份和观测数据不删除，也不卸载共享 Phoenix 服务。`.gitignore` 中的 `/.jth/` 保留，避免待处理文件被误提交。
+
+卸载回执给出 `previous_scope` 和原配置路径。同一配置数据目录中的安装记录会让再次 `init` 复用该范围；原来使用独立 `--env-file` 时，再次 `init` 也应传入该路径。若改用另一配置数据目录，显式传入原 `--project` 或 `--business`，才能读取旧范围的记忆。
 
 `doctor` 输出 CLI/Bun、配置完整性、数据库队列、原生 Hook 信任状态、入口最近触发和 Phoenix 状态。它不调用模型，不触发 Embedding，也不将“已安装”当成“已执行”。完整记忆一致性检查仍使用 `jth memo doctor`。
 

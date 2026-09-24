@@ -8,7 +8,7 @@
 
 开始前准备 Bun 1.3.14 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后，进入项目目录运行 `jth init`，按问卷填写并重新打开 Codex 任务即可。后续项目仍运行同一命令，不重复配置全局凭据。
 
-更新工具本体后，单项目运行 `jth upgrade --trust`，保留配置并迁移记忆表；共用数据库的多个项目先逐个运行 `jth install --trust` 同步入口，再运行一次 `jth upgrade --trust`。缺少新配置项时运行 `jth init` 补齐。其他交付命令为 `jth install / doctor / uninstall`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
+更新工具本体后，在每个已接入项目重新运行 `jth init`：复用已有配置、迁移记忆表并刷新 Hook 和 Skill。`jth uninstall` 清理仓库内的 JTH 接入配置，保留数据库、待处理队列和用户凭据。其他交付命令为 `jth install / doctor`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
 
 共享配置与凭据默认存放于 `~/.jt-harness/.env`；仓库只保存自己的接入、范围与开关，默认不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级与仓库级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
 

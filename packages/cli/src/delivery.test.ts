@@ -24,7 +24,7 @@ test('trust selection excludes foreign markers, events, commands and ancestor pr
     { command: `echo ${hook.command}` }, { statusMessage: 'jth monitor' }]) assert.equal(isManagedHook({ ...hook, ...changed }, root, workspace, false), false)
 })
 
-test('versioned CLI install/upgrade preserves credentials and refuses an unrelated binary', async () => {
+test('versioned CLI install preserves credentials and refuses an unrelated binary', async () => {
   const root = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-delivery-')))
   const prefix = resolve(root, 'prefix'), envFile = resolve(root, 'original.env')
   const environment = { JTH_CONFIG_DIR: resolve(root, 'user-config') }
@@ -60,7 +60,14 @@ test('versioned CLI install/upgrade preserves credentials and refuses an unrelat
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('project install is idempotent; upgrade prepares the database; uninstall preserves data and other hooks', async () => {
+test('upgrade command is removed in favor of init', async () => {
+  const root = resolve(import.meta.dirname, '../../..'), execute = promisify(execFile)
+  await assert.rejects(execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'upgrade']), /upgrade 已移除/)
+  const help = (await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), 'init', '--help'])).stdout
+  assert(!help.includes('jth upgrade'))
+})
+
+test('init refreshes project setup; uninstall removes project configuration without touching data', async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-project-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env')
   const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })).stdout)
@@ -75,24 +82,63 @@ test('project install is idempotent; upgrade prepares the database; uninstall pr
     const first = await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')
     const originalConfig = await readFile(envFile, 'utf8')
     await writeFile(envFile, originalConfig.replace('EMBEDDING_API_KEY=fixture', 'EMBEDDING_API_KEY='))
-    await assert.rejects(cli('upgrade'), /配置不完整：缺少 EMBEDDING_API_KEY/)
+    await assert.rejects(cli('init'), /配置不完整：缺少 EMBEDDING_API_KEY/)
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), first)
     await writeFile(envFile, originalConfig)
-    if (process.env.JTH_TEST_DATABASE_URL) assert.equal((await cli('upgrade')).database.schema_version, 8)
-    else await assert.rejects(cli('upgrade'))
+    if (process.env.JTH_TEST_DATABASE_URL) assert.equal((await cli('init')).database.schema_version, 8)
+    else await assert.rejects(cli('init'))
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), first)
     assert.deepEqual(await readPrimaryInstallation(workspace), { envFile, projectIds: ['fixture'], businessIds: [] })
+    const jth = resolve(workspace, '.jth'), codex = resolve(workspace, '.codex')
+    await writeFile(resolve(jth, 'workflow.json'), '{"mode":"strict"}')
+    await writeFile(resolve(jth, 'monitor.json'), '{"enabled":false}')
+    await writeFile(resolve(jth, 'flow-entry.json'), '{"test":true}')
+    await mkdir(resolve(jth, 'flow-events'))
+    await writeFile(resolve(jth, 'flow-events/pending.json'), 'keep-queue')
+    await writeFile(resolve(codex, 'config.toml'), 'model = "keep-model"\n[memories]\nuse_memories = false\ngenerate_memories = false\n[tools.update_plan]\nenabled = true\n')
+    await writeFile(resolve(workspace, 'AGENTS.md'), 'Keep project instructions.\n')
     await writeFile(resolve(workspace, '.jth/keep-data'), 'keep')
-    await cli('uninstall')
+    const removed = await cli('uninstall')
+    assert.equal(removed.database_preserved, true)
+    assert.equal(removed.queues_preserved, true)
+    assert.deepEqual(removed.previous_scope.project_ids, ['fixture'])
+    for (const name of ['flow.json', 'workflow.json', 'monitor.json', 'flow-entry.json']) {
+      await assert.rejects(readFile(resolve(jth, name)), { code: 'ENOENT' })
+    }
     assert.equal(await readFile(resolve(workspace, '.jth/keep-data'), 'utf8'), 'keep')
+    assert.equal(await readFile(resolve(jth, 'flow-events/pending.json'), 'utf8'), 'keep-queue')
     assert((await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')).includes('keep-other-tool'))
+    assert.deepEqual(structuredClone(parse(await readFile(resolve(codex, 'config.toml'), 'utf8'))), { model: 'keep-model' })
+    assert.equal(await readFile(resolve(workspace, 'AGENTS.md'), 'utf8'), 'Keep project instructions.\n')
     await assert.rejects(readlink(resolve(workspace, '.agents/skills/jth-flow')), { code: 'ENOENT' })
     await assert.rejects(readlink(resolve(workspace, '.agents/skills/jth-memo')), { code: 'ENOENT' })
+    assert((await readFile(envFile, 'utf8')).includes('JTH_DATABASE_URL'))
+    if (process.env.JTH_TEST_DATABASE_URL) {
+      const reinitialized = await cli('init', '--env-file', envFile)
+      assert.deepEqual(reinitialized.memo.settings.scope.project_ids, ['fixture'])
+      assert.equal(reinitialized.database.schema_version, 8)
+    }
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+test('uninstall removes JTH-only hook and Codex configuration files', async () => {
+  const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-uninstall-')))
+  const execute = promisify(execFile), envFile = resolve(workspace, '.env')
+  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })
+  try {
+    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
+    await cli('install', '--project', 'fixture', '--env-file', envFile)
+    await configureProjectCodex(workspace, 'off', true)
+    await cli('uninstall')
+    await cli('uninstall', '--env-file', envFile)
+    for (const path of [resolve(workspace, '.codex/hooks.json'), resolve(workspace, '.codex/config.toml'), resolve(workspace, '.jth/flow.json')]) {
+      await assert.rejects(readFile(path), { code: 'ENOENT' })
+    }
     assert((await readFile(envFile, 'utf8')).includes('JTH_DATABASE_URL'))
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
-test('upgrade recovers a removed package installation only with matching managed hooks', { skip: !process.env.JTH_NATIVE_CONFIG_TEST }, async () => {
+test('init recovers a removed package installation only with matching managed hooks', { skip: !process.env.JTH_NATIVE_CONFIG_TEST }, async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-removed-package-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env'), home = resolve(workspace, 'codex-home')
   const skill = resolve(workspace, '.agents/skills/jth-flow'), hooksPath = resolve(workspace, '.codex/hooks.json'), oldRoot = resolve(workspace, 'removed-package')
@@ -105,33 +151,16 @@ test('upgrade recovers a removed package installation only with matching managed
     const installedHooks = await readFile(hooksPath, 'utf8')
     await rm(skill)
     await symlink(resolve(oldRoot, 'packages/flow/skills/jth-flow'), skill)
-    await assert.rejects(cli('upgrade'), /无法确认归属/)
+    await assert.rejects(cli('init'), /无法确认归属/)
     assert.equal(await readlink(skill), resolve(oldRoot, 'packages/flow/skills/jth-flow'))
     assert.equal(await readFile(hooksPath, 'utf8'), installedHooks)
     await writeFile(hooksPath, installedHooks.replaceAll(root, oldRoot))
     const diagnostic = await cli('doctor').catch(error => JSON.parse(error.stdout))
     assert.equal(diagnostic.checks.find((check: { name: string }) => check.name === 'hooks').detail.skill_available, false)
-    await cli(process.env.JTH_TEST_DATABASE_URL ? 'upgrade' : 'install')
+    await cli(process.env.JTH_TEST_DATABASE_URL ? 'init' : 'install')
     assert.equal(await readlink(skill), resolve(root, 'packages/flow/skills/jth-flow'))
     assert.equal(await readFile(hooksPath, 'utf8'), installedHooks)
     assert.deepEqual((await cli('flow', 'status')).memo_scope.project_ids, ['fixture'])
-  } finally { await rm(workspace, { recursive: true, force: true }) }
-})
-
-test('upgrade --summary prints human-readable text while JSON remains the default', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
-  const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-summary-')))
-  const execute = promisify(execFile), envFile = resolve(workspace, '.env')
-  const run = async (...args: string[]) => (await execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })).stdout
-  try {
-    await mkdir(resolve(workspace, '.codex'), { recursive: true })
-    await writeFile(envFile, `JTH_DATA_DIR=${workspace}/data\nJTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=fixture\n`)
-    await run('install', '--project', 'fixture', '--env-file', envFile)
-    const summary = await run('upgrade', '--summary')
-    assert(summary.includes('项目已同步'))
-    assert(summary.includes('策略 '))
-    assert(summary.includes('记忆表 v8 已就绪'))
-    assert.throws(() => JSON.parse(summary))
-    assert.equal(JSON.parse(await run('upgrade')).database.schema_version, 8)
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
@@ -188,7 +217,7 @@ test('project preferences preserve TOML comments and unrelated values; inherit r
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
-test('init sets fresh project defaults; repeated init and upgrade preserve user choices', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
+test('init sets fresh project defaults; repeated init preserves user choices', { skip: !process.env.JTH_TEST_DATABASE_URL }, async () => {
   const root = resolve(import.meta.dirname, '../../..'), workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-init-')))
   const execute = promisify(execFile), envFile = resolve(workspace, '.env'), path = resolve(workspace, '.codex/config.toml')
   const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.mjs'), ...args, '--workspace', workspace], { cwd: workspace })
@@ -206,11 +235,10 @@ test('init sets fresh project defaults; repeated init and upgrade preserve user 
     assert.equal(result.verification.checks.find((check: { name: string }) => check.name === 'database').status, 'ok')
     assert.deepEqual({ ...parse(await readFile(path, 'utf8')).memories }, { use_memories: false, generate_memories: false })
     assert.equal(parse(await readFile(path, 'utf8')).tools.update_plan.enabled, true)
-    // An explicit project preference remains owned by the user through upgrades and uninstall.
+    // Repeated init preserves explicit project preferences until uninstall removes JTH overrides.
     const changed = '# User preference\n[memories]\nuse_memories = true\ngenerate_memories = false\n[tools.update_plan]\nenabled = false\n'
     await writeFile(path, changed)
     await cli('install')
-    await cli('upgrade')
     assert.equal(await readFile(path, 'utf8'), changed)
     assert.equal(JSON.parse((await cli('init')).stdout).database.schema_version, 8)
     assert.equal(await readFile(path, 'utf8'), changed)
@@ -220,9 +248,8 @@ test('init sets fresh project defaults; repeated init and upgrade preserve user 
     assert.equal(parse(await readFile(path, 'utf8')).memories, undefined)
     assert.equal(parse(await readFile(path, 'utf8')).tools.update_plan.enabled, false)
     await cli('install', '--codex-memory', 'off')
-    const configured = await readFile(path, 'utf8')
     await cli('uninstall')
-    assert.equal(await readFile(path, 'utf8'), configured)
+    await assert.rejects(readFile(path), { code: 'ENOENT' })
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 

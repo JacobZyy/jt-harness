@@ -14,12 +14,13 @@ function configTable(value: unknown, name: string): Record<string, unknown> {
 }
 
 /** Project preferences stay in Codex's own config; never follow links into a shared user config. */
-export async function configureProjectCodex(workspace: string, memoryPolicy: 'off' | 'inherit', enablePlan = false) {
+export async function configureProjectCodex(workspace: string, memoryPolicy: 'off' | 'inherit', enablePlan = false, removePlan = false) {
   const directory = resolve(workspace, '.codex'), path = resolve(directory, 'config.toml')
   await mkdir(directory, { recursive: true })
   if (await realpath(directory) !== directory) throw new Error('项目 .codex 是符号链接；未修改共享配置')
   const metadata = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })
   if (metadata && !metadata.isFile()) throw new Error('项目 config.toml 不是普通文件；未修改共享配置')
+  if (removePlan && !metadata) return
   const read = () => readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
   const original = await read()
   let document: Record<string, unknown>
@@ -32,9 +33,22 @@ export async function configureProjectCodex(workspace: string, memoryPolicy: 'of
   if (enablePlan) {
     const tools = configTable(document.tools, 'tools')
     document.tools = { ...tools, update_plan: { ...configTable(tools.update_plan, 'tools.update_plan'), enabled: true } }
+  } else if (removePlan) {
+    const tools = { ...configTable(document.tools, 'tools') }
+    const plan = { ...configTable(tools.update_plan, 'tools.update_plan') }
+    delete plan.enabled
+    if (Object.keys(plan).length) tools.update_plan = plan
+    else delete tools.update_plan
+    if (Object.keys(tools).length) document.tools = tools
+    else delete document.tools
   }
   const next = patch(original, document)
   if (next !== original) {
+    if (removePlan && !next.trim()) {
+      if (await read() !== original) throw new Error('Codex 项目配置被其他进程更新；请重试，原配置未覆盖')
+      await rm(path)
+      return
+    }
     const temporary = `${path}.${randomUUID()}.tmp`
     try {
       await writeFile(temporary, next, { flag: 'wx', mode: metadata ? metadata.mode & 0o777 : 0o600 })
