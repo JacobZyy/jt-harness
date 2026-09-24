@@ -18,9 +18,10 @@ export async function configureSkill(root: string, workspace: string, kind: 'flo
     await mkdir(dirname(target), { recursive: true })
     if (prior && !current) await rm(target, { recursive: true, force: true })
     if (!current) await symlink(source, target)
-    const ignorePath = resolve(workspace, '.gitignore'), line = `/.agents/skills/${name}`
+    const ignorePath = resolve(workspace, '.gitignore'), lines = [`/.agents/skills/${name}`, ...(kind === 'memo' ? ['/.jth/'] : [])]
     const ignore = await readFile(ignorePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
-    if (!ignore.split(/\r?\n/).includes(line)) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${line}\n`)
+    const missing = lines.filter(line => !ignore.split(/\r?\n/).includes(line))
+    if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
   } else if (prior) await rm(target, { recursive: true, force: true })
   return target
 }
@@ -39,10 +40,8 @@ async function removeDeclarationInstructions(workspace: string, backupDirectory:
 }
 export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 export const hookCommand = (...args: string[]) => ['jth', '--', ...args].map(quote).join(' ')
-export const memoHookCommand = (settings: CaptureSettings, action: 'declare' | 'cue') => hookCommand('memo', 'codex', action,
-  '--env-file', settings.env_file, '--workspace', settings.workspace, '--codex-home', settings.codex_home,
-  '--since', settings.enabled_at, ...settings.scope.project_ids.flatMap(id => ['--project', id]),
-  ...settings.scope.business_ids.flatMap(id => ['--business', id]))
+export const memoHookCommand = (_settings: CaptureSettings, action: 'declare' | 'cue') => hookCommand('memo', 'codex', action)
+export const memoLocatorPath = (workspace: string) => resolve(workspace, '.jth/memo.json')
 type HookHandler = { statusMessage?: string, command?: string, [key: string]: unknown }
 type HookGroup = { hooks?: HookHandler[], [key: string]: unknown }
 type HookConfig = { hooks?: Record<string, HookGroup[]>, [key: string]: unknown }
@@ -97,8 +96,13 @@ export async function configureHooks(root: string, config: { dataDir: string, en
   await updateHookConfig(hooksPath, backups, document => mergeHooks(mergeHooks(
     mergeHooks(document), command('declare'), { marker: declarationHookMarker, events: ['Stop'] },
   ), command('cue'), { marker: cueMarker, events: ['SessionStart', 'UserPromptSubmit'], additionalContextLimit: 1600 }))
-  if (settings) await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: false, mode: 'declaration' })
-  else await writeJson(manifestPath, { hooks_path: hooksPath, settings: prior?.settings, disabled: true, mode: prior?.mode })
+  if (settings) {
+    await writeJson(memoLocatorPath(workspace), { version: 2, workspace, envFile: config.envFile })
+    await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: false, mode: 'declaration' })
+  } else {
+    await writeJson(manifestPath, { hooks_path: hooksPath, settings: prior?.settings, disabled: true, mode: prior?.mode })
+    await rm(memoLocatorPath(workspace), { force: true })
+  }
   return { status: settings ? 'installed' : 'uninstalled', mode: 'declaration', hooks_path: hooksPath, events: settings ? ['Stop', 'SessionStart', 'UserPromptSubmit'] : [],
     skill, settings, ...(settings ? { activation: '在 Codex /hooks 中审阅并信任新增定义；新会话或恢复后生效' } : {}) }
 }

@@ -59,7 +59,7 @@
     "examples/",
     "tsconfig.json"
   ],
-  "version": "0.3.11",
+  "version": "0.3.12",
   "publishConfig": {
     "access": "public"
   }

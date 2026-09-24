@@ -10,6 +10,7 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto'
 import { captureMonitor, configureMonitorHooks, monitorMetrics, readJson, writeJson, type MonitorReceipt } from '@jacob-z/jt-harness/codex-hooks'
 import { openDatabase, safeError, type Config } from '@jacob-z/jt-harness/memo'
 import { loadWorkspaceConfig } from './configuration.ts'
+import { findFlowWorkspace } from '@jacob-z/jt-harness/flow'
 import { phoenixStatus, phoenixUrl, startPhoenix, stopPhoenix } from './phoenix.ts'
 import { startBackground } from './background.ts'
 import { withCodex } from './codex-client.ts'
@@ -104,7 +105,7 @@ export async function monitorMain(root: string, args: string[]) {
     const [command] = positionals
     if (values.help || !command) { process.stdout.write(help); return }
     if (positionals.length !== 1 || !['start', 'stop', 'status', 'open', 'capture', 'flush'].includes(command)) throw new Error('未知 monitor 命令')
-    const workspace = resolve(values.workspace ?? process.cwd())
+    const workspace = values.workspace ? resolve(values.workspace) : command === 'capture' ? findFlowWorkspace(process.cwd()) : resolve(process.cwd())
     const locator = await readJson(resolve(workspace, '.jth/flow.json'))
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     if (command === 'capture') {

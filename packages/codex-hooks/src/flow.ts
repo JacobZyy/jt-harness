@@ -60,8 +60,8 @@ export async function configureFlowHooks(root: string, workspace: string, enable
     const missing = ['/.jth/', '/.codex/hooks.json'].filter(line => !ignore.split(/\r?\n/).includes(line))
     if (missing.length) await appendFile(ignorePath, `${ignore.endsWith('\n') || !ignore ? '' : '\n'}${missing.join('\n')}\n`)
   }
-  const command = enabled && mode === 'legacy' ? hookCommand('flow', 'legacy', 'hook', '--workspace', workspace) : undefined
-  const entry = enabled && mode === 'native' ? hookCommand('flow', 'prompt', '--workspace', workspace) : undefined
+  const command = enabled && mode === 'legacy' ? hookCommand('flow', 'legacy', 'hook') : undefined
+  const entry = enabled && mode === 'native' ? hookCommand('flow', 'prompt') : undefined
   const hooksPath = resolve(workspace, '.codex/hooks.json')
   await updateHookConfig(hooksPath, resolve(workspace, '.jth/backups'), document => mergeHooks(mergeHooks(document, command, {
     marker: 'jth flow context', events: flowEvents, additionalContextLimit: 6000,

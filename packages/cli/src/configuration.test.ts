@@ -7,7 +7,34 @@ import { PassThrough } from 'node:stream'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { loadConfig, matchesConfigFile, userConfigPaths } from '@jacob-z/jt-harness/memo/config'
+import { configureHooks, memoLocatorPath } from '@jacob-z/jt-harness/codex-hooks'
 import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, promptConfigValue } from './configuration.ts'
+
+test('standalone Memo hook resolves custom configuration from nested cwd without embedding paths', async () => {
+  const fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-memo-location-')))
+  const root = resolve(import.meta.dirname, '../../..'), workspace = resolve(fixture, 'project'), envFile = resolve(fixture, 'custom.env')
+  const environment: NodeJS.ProcessEnv = { ...process.env, JTH_CONFIG_DIR: resolve(fixture, 'unused-default') }
+  try {
+    await mkdir(resolve(workspace, 'nested'), { recursive: true })
+    await mkdir(resolve(workspace, 'bin'))
+    await symlink(resolve(root, 'bin/jth.ts'), resolve(workspace, 'bin/jth'))
+    environment.PATH = `${workspace}/bin:${process.env.PATH ?? ''}`
+    await writeFile(envFile, 'JTH_DATA_DIR=./state\nJTH_DATABASE_URL=postgresql://127.0.0.1:1/test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=test\nEMBEDDING_API_KEY=test\n')
+    const config = await loadConfig(root, envFile, environment)
+    await configureHooks(root, config, workspace, { project_ids: ['fixture'], business_ids: [] }, resolve(fixture, 'codex'))
+    const command = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')).hooks.Stop[0].hooks[0].command
+    assert.equal(command, "'jth' '--' 'memo' 'codex' 'declare'")
+    assert.equal((await loadWorkspaceConfig(root, undefined, resolve(workspace, 'nested'), environment)).envFile, config.envFile)
+    const captured = await new Promise<{ stdout: string, stderr: string }>((done, reject) => {
+      const child = execFile('/bin/sh', ['-c', command], { cwd: resolve(workspace, 'nested'), env: environment, timeout: 10000 },
+        (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
+      child.stdin!.end(JSON.stringify({ hook_event_name: 'Stop', session_id: 'standalone', cwd: workspace, last_assistant_message: 'No declaration.' }))
+    })
+    assert.deepEqual(captured, { stdout: '', stderr: '' })
+    await configureHooks(root, config, workspace, undefined, resolve(fixture, 'codex'))
+    await assert.rejects(readFile(memoLocatorPath(workspace)), { code: 'ENOENT' })
+  } finally { await rm(fixture, { recursive: true, force: true }) }
+})
 
 test('user configuration survives source removal and reuses old repository bindings without changing scope', async () => {
   const fixture = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-config-migration-')))

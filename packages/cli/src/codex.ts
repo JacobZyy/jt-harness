@@ -2,10 +2,10 @@ import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
-import { safeError } from '@jacob-z/jt-harness/memo/config'
-import { loadWorkspaceConfig } from './configuration.ts'
+import { matchesConfigFile, safeError } from '@jacob-z/jt-harness/memo/config'
+import { findInstalledWorkspace, loadWorkspaceConfig } from './configuration.ts'
 import type { Config } from '@jacob-z/jt-harness/memo/config'
-import { captureSettingsSchema, captureDeclaration, captureStatus, configureHooks } from '@jacob-z/jt-harness/codex-hooks'
+import { captureSettingsSchema, captureDeclaration, captureStatus, configureHooks, installationPath, readJson } from '@jacob-z/jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
 import { openDatabase, MemoStorage } from '@jacob-z/jt-harness/memo'
 import { memoryCues } from '@jacob-z/jt-harness/codex-hooks'
@@ -30,12 +30,20 @@ export async function codexMain(root: string, args: string[]) {
     }
     const invalid = Object.keys(values).filter(name => !['env-file', 'help', ...allowed[positionals[0]]].includes(name))
     if (invalid.length) throw new Error(`${positionals[0]} 不支持：${invalid.join(', ')}`)
-    const workspace = await realpath(resolve(values.workspace ?? process.cwd()))
+    const hookAction = ['capture', 'declare', 'cue'].includes(positionals[0])
+    const workspace = values.workspace ? await realpath(resolve(values.workspace))
+      : hookAction ? findInstalledWorkspace(process.cwd()) : await realpath(process.cwd())
     config = await loadWorkspaceConfig(root, values['env-file'], workspace)
     const home = resolve(values['codex-home'] ?? process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
     const scope = { project_ids: values.project ?? [], business_ids: values.business ?? [] }
-    if (['capture', 'declare', 'cue'].includes(positionals[0])) {
-      const settings = captureSettingsSchema.parse({ workspace, codex_home: home, env_file: config.envFile, enabled_at: values.since, scope })
+    if (hookAction) {
+      const explicit = values.since !== undefined || values.project !== undefined || values.business !== undefined || values['codex-home'] !== undefined
+      const installed = explicit ? undefined : await readJson(installationPath(config, workspace)) as { disabled?: boolean, settings?: unknown } | undefined
+      if (!explicit && (installed?.disabled || !installed?.settings)) throw new Error('Memo Hook 未安装或已卸载；运行 jth init')
+      const settings = captureSettingsSchema.parse(explicit
+        ? { workspace, codex_home: home, env_file: config.envFile, enabled_at: values.since, scope }
+        : installed!.settings)
+      if (settings.workspace !== workspace || !matchesConfigFile(config, settings.env_file)) throw new Error('Memo Hook 安装范围或配置不匹配；运行 jth init')
       const chunks: Buffer[] = []
       let bytes = 0
       for await (const chunk of process.stdin) {

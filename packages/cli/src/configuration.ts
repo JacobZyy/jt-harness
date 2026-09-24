@@ -1,24 +1,36 @@
 import { chmod, link, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual, parseEnv } from 'node:util'
 import { createInterface } from 'node:readline'
 import { Writable } from 'node:stream'
 import { stdin, stderr } from 'node:process'
-import { findFlowWorkspace, flowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
-import { readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { flowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
+import { memoLocatorPath, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { loadConfig, readConfigAliases, userConfigPaths, type Config } from '@jacob-z/jt-harness/memo/config'
 
 const readEnv = (path: string) => readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
 
+export function findInstalledWorkspace(start: string) {
+  let path = realpathSync(start)
+  const original = path
+  while (!existsSync(flowPath(path)) && !existsSync(memoLocatorPath(path))) {
+    const parent = dirname(path)
+    if (parent === path) return original
+    path = parent
+  }
+  return path
+}
+
 export async function loadWorkspaceConfig(root: string, envFile?: string, workspace = process.cwd(), environment: NodeJS.ProcessEnv = process.env) {
   if (envFile !== undefined || environment.JTH_ENV_FILE !== undefined) return loadConfig(root, envFile, environment)
-  const installed = findFlowWorkspace(workspace, true)
-  const locator = installed ? await readJson(flowPath(installed)) : undefined
+  const installed = findInstalledWorkspace(workspace)
+  const locator = await readJson(flowPath(installed)) ?? await readJson(memoLocatorPath(installed))
   if (!locator) return loadConfig(root, undefined, environment)
   const saved = locatorSchema.parse(locator)
-  if (saved.workspace !== installed) throw new Error('流程连接配置的工作区不一致')
+  if (saved.workspace !== installed) throw new Error('项目连接配置的工作区不一致')
   return loadConfig(root, saved.envFile, environment)
 }
 

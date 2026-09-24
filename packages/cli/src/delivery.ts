@@ -34,9 +34,9 @@ export function isManagedHook(hook: NativeHook, workspace: string, settings: Cap
   const events: Record<string, string[]> = { 'jth flow entry': ['userPromptSubmit'], 'jth memo declaration': ['stop'],
     'jth memo cues': ['sessionStart', 'userPromptSubmit'],
     'jth monitor': monitoring ? ['userPromptSubmit', 'stop', 'interrupt'] : [] }
-  const commands: Record<string, string> = { 'jth flow entry': hookCommand('flow', 'prompt', '--workspace', workspace),
+  const commands: Record<string, string> = { 'jth flow entry': hookCommand('flow', 'prompt'),
     'jth memo declaration': memoHookCommand(settings, 'declare'), 'jth memo cues': memoHookCommand(settings, 'cue'),
-    'jth monitor': hookCommand('monitor', 'capture', '--workspace', workspace) }
+    'jth monitor': hookCommand('monitor', 'capture') }
   return hook.source === 'project' && hook.sourcePath === resolve(workspace, '.codex/hooks.json')
     && Boolean(events[hook.statusMessage ?? '']?.includes(hook.eventName) && hook.command === commands[hook.statusMessage ?? ''])
 }

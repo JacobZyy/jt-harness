@@ -69,12 +69,16 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert.deepEqual(JSON.parse((await cli('context')).stdout), status)
     assert.deepEqual(await hook(), { stdout: '{}\n', stderr: '' })
     const entryCommand = handlers.find(handler => handler.statusMessage === 'jth flow entry')!.command
-    assert(entryCommand.startsWith("'jth' '--' 'flow' 'prompt' "))
-    assert(!entryCommand.includes(resolve(root, 'bin')))
+    assert.equal(entryCommand, "'jth' '--' 'flow' 'prompt'")
+    for (const handler of handlers.filter(handler => handler.statusMessage?.startsWith('jth '))) {
+      assert(!handler.command.includes(workspace), `${handler.statusMessage} contains workspace path`)
+      assert(!handler.command.includes(envFile), `${handler.statusMessage} contains config path`)
+    }
     await mkdir(resolve(workspace, 'bin'))
     await symlink(resolve(root, 'bin/jth.ts'), resolve(workspace, 'bin/jth'))
+    await mkdir(resolve(workspace, 'nested'))
     const viaPath = await new Promise<{ stdout: string, stderr: string }>((done, reject) => {
-      const child = execFile('sh', ['-c', entryCommand], { cwd: workspace, env: { ...process.env, PATH: `${workspace}/bin:${process.env.PATH}` } },
+      const child = execFile('sh', ['-c', entryCommand], { cwd: resolve(workspace, 'nested'), env: { ...process.env, PATH: `${workspace}/bin:${process.env.PATH}` } },
         (error, stdout, stderr) => error ? reject(error) : done({ stdout, stderr }))
       child.stdin!.end(JSON.stringify(event))
     })

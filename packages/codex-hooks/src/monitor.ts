@@ -28,7 +28,7 @@ async function usageBefore(path: string, end: number): Promise<MonitorUsage | un
 }
 
 export async function configureMonitorHooks(root: string, workspace: string, enabled: boolean) {
-  const command = enabled ? hookCommand('monitor', 'capture', '--workspace', workspace) : undefined
+  const command = enabled ? hookCommand('monitor', 'capture') : undefined
   await updateHookConfig(resolve(workspace, '.codex/hooks.json'), resolve(workspace, '.jth/backups'), document => mergeHooks(document, command, { marker: 'jth monitor', events: monitorEvents }))
 }
 

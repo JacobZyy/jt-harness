@@ -20,7 +20,7 @@ test('trust selection excludes foreign markers, events, commands and ancestor pr
   const settings: CaptureSettings = { workspace, codex_home: '/codex', env_file: '/config/.env', enabled_at: '2026-01-01T00:00:00Z',
     scope: { project_ids: ['project'], business_ids: [] } }
   const hook = { key: 'fixture', source: 'project', sourcePath: '/project/.codex/hooks.json', eventName: 'userPromptSubmit', currentHash: 'hash',
-    statusMessage: 'jth flow entry', command: hookCommand('flow', 'prompt', '--workspace', workspace), enabled: true, trustStatus: 'untrusted' }
+    statusMessage: 'jth flow entry', command: hookCommand('flow', 'prompt'), enabled: true, trustStatus: 'untrusted' }
   assert(isManagedHook(hook, workspace, settings, false))
   for (const changed of [{ statusMessage: 'jth unknown' }, { eventName: 'preToolUse' }, { sourcePath: '/parent/.codex/hooks.json' },
     { command: `echo ${hook.command}` }, { command: `${hook.command}; echo injected` }, { statusMessage: 'jth monitor' }]) {

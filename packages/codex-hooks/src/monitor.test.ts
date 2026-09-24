@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { captureMonitor } from './monitor.ts'
+import { captureMonitor, configureMonitorHooks } from './monitor.ts'
 import { monitorMetrics } from './monitor-metrics.ts'
 
 test('monitor captures only new native metadata, counts cache separately, and preserves disabled/outside boundaries', async () => {
@@ -40,5 +40,8 @@ test('monitor captures only new native metadata, counts cache separately, and pr
     await assert.rejects(captureMonitor({ ...input, session_id: 'wrong' }, workspace, home), /会话不匹配/)
     await writeFile(resolve(workspace, '.jth/monitor.json'), '{"enabled":false}')
     assert.equal(await captureMonitor(input, workspace, home), null)
+    await configureMonitorHooks(workspace, workspace, true)
+    const hooks = JSON.parse(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8')).hooks
+    assert.equal(hooks.UserPromptSubmit[0].hooks[0].command, "'jth' '--' 'monitor' 'capture'")
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
