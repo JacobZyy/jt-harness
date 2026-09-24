@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { PlanDraft, PolicyDecision } from '@jt-harness/flow'
+import type { PlanDraft, PolicyDecision } from '@jacob-z/jt-harness/flow'
 import type { CodexContext } from './plan-adapters/codex.ts'
 
 export const codexGoalSchema = z.strictObject({

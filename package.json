@@ -3,39 +3,52 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24.21.0"
+    "bun": ">=1.3.14"
   },
   "packageManager": "pnpm@10.12.4",
   "scripts": {
-    "setup:worktree": "node scripts/setup-worktree.ts",
-    "memo:extract": "node packages/memo/src/agents/run.ts",
-    "memo:eval": "node packages/memo/src/agents/evaluation/run.ts",
-    "test": "node scripts/test.mjs",
-    "test:live": "DSH_MEMORY_LIVE=1 node --test packages/memo/src/agents/*.test.ts",
+    "setup:worktree": "bun scripts/setup-worktree.ts",
+    "memo:extract": "bun packages/memo/src/agents/run.ts",
+    "memo:eval": "bun packages/memo/src/agents/evaluation/run.ts",
+    "test": "bun test --isolate --parallel=1 --path-ignore-patterns=artifacts packages/flow/src packages/memo/src packages/codex-hooks/src packages/cli/src tests",
+    "test:live": "DSH_MEMORY_LIVE=1 bun test --isolate --parallel=1 --path-ignore-patterns=artifacts packages/memo/src/agents/*.test.ts",
     "typecheck": "node scripts/typecheck.mjs",
-    "build": "node scripts/build.mjs",
-    "bundle": "node scripts/bundle.mjs",
-    "jth": "node bin/jth.mjs",
-    "prepack": "pnpm build",
-    "test:postgres": "pnpm build && node scripts/test-postgres.mjs"
+    "bundle": "bun scripts/bundle.mjs",
+    "jth": "bun bin/jth.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs"
   },
   "dependencies": {
-    "@jt-harness/cli": "workspace:*"
+    "@decimalturn/toml-patch": "3.1.0",
+    "@inquirer/search": "^4.3.3",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.222.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "pg": "8.23.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "link:../deepseek-harness/node_modules/@types/node",
-    "@types/pg": "8.23.1",
-    "typescript": "link:../deepseek-harness/node_modules/typescript",
-    "@jt-harness/memo": "workspace:*",
-    "@jt-harness/codex-hooks": "workspace:*",
-    "pg": "8.23.0",
-    "zod": "4.4.3",
     "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
     "@deepseek-ai/dsh-sdk-client": "link:../deepseek-harness/packages/sdk/client",
-    "@jt-harness/flow": "workspace:*"
+    "@jt-harness/codex-hooks": "workspace:*",
+    "@jt-harness/flow": "workspace:*",
+    "@jt-harness/memo": "workspace:*",
+    "@types/node": "link:../deepseek-harness/node_modules/@types/node",
+    "@types/pg": "8.23.1",
+    "typescript": "link:../deepseek-harness/node_modules/typescript"
   },
   "bin": {
     "jth": "bin/jth.mjs"
+  },
+  "exports": {
+    ".": "./packages/cli/src/index.ts",
+    "./codex-hooks": "./packages/codex-hooks/src/index.ts",
+    "./flow": "./packages/flow/src/index.ts",
+    "./flow/migrate": "./packages/flow/src/migrate.ts",
+    "./memo": "./packages/memo/src/index.ts",
+    "./memo/config": "./packages/memo/src/config.ts",
+    "./memo/contracts": "./packages/memo/src/public-contracts.ts",
+    "./memo/legacy": "./packages/memo/src/legacy.ts",
+    "./memo/models": "./packages/memo/src/models.ts"
   },
   "files": [
     "bin/",
@@ -43,7 +56,8 @@
     "README.md",
     "docs/",
     ".env.example",
-    "examples/"
+    "examples/",
+    "tsconfig.json"
   ],
   "version": "0.3.7",
   "publishConfig": {

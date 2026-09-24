@@ -4,8 +4,8 @@ import { basename, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jt-harness/memo'
-import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, configureSkill, readJson, writeJson, quote } from '@jt-harness/codex-hooks'
+import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jacob-z/jt-harness/memo'
+import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, configureSkill, readJson, writeJson, quote } from '@jacob-z/jt-harness/codex-hooks'
 import { installFlow } from './flow.ts'
 import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { phoenixStatus } from './phoenix.ts'
@@ -84,6 +84,9 @@ export async function installCli(source: string, prefix: string, envFile?: strin
     try {
       await cp(packageRoot, staging, { recursive: true, verbatimSymlinks: true, filter: path => path !== resolve(packageRoot, '.env') })
       await symlink(userConfig.envFile, resolve(staging, '.env'))
+      if (Object.keys(manifest.dependencies ?? {}).length && !await access(resolve(staging, 'node_modules')).then(() => true, () => false)) {
+        await execute('bun', ['install', '--production', '--ignore-scripts', '--no-save'], { cwd: staging, timeout: 120000 })
+      }
       await execute(process.execPath, ['--', resolve(staging, 'bin/jth.mjs'), '--help'], { timeout: 15000 })
       await rename(staging, target)
     } finally { await rm(staging, { recursive: true, force: true }) }
@@ -99,7 +102,7 @@ export async function installCli(source: string, prefix: string, envFile?: strin
 async function inspectProject(root: string, workspace: string, config: Config) {
   const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   const checks: { name: string, status: string, detail?: unknown }[] = []
-  checks.push({ name: 'cli', status: 'ok', detail: { version: manifest.version, node: process.version, standalone: Boolean(manifest.jthDistribution) } })
+  checks.push({ name: 'cli', status: 'ok', detail: { version: manifest.version, bun: process.versions.bun, standalone: Boolean(manifest.jthDistribution) } })
   checks.push({ name: 'configuration', status: missingConfiguration(config).length ? 'error' : 'ok', detail: { ...await configurationScope(config), missing: missingConfiguration(config), embeddingConfigured: Boolean(config.embedding.space && config.embedding.apiKey) } })
   try {
     const pool = openDatabase(config, true)

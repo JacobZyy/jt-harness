@@ -1,8 +1,8 @@
 import { readdir, stat, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { evidenceSchema, recordDraftSchema, recordId, declarationId, parseExtraction, submissionSchema } from '@jt-harness/memo/contracts'
-import type { Evidence, RecordDraft, Submission } from '@jt-harness/memo/contracts'
-import { matchesConfigFile } from '@jt-harness/memo/config'
+import { evidenceSchema, recordDraftSchema, recordId, declarationId, parseExtraction, submissionSchema } from '@jacob-z/jt-harness/memo/contracts'
+import type { Evidence, RecordDraft, Submission } from '@jacob-z/jt-harness/memo/contracts'
+import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { captureSchema, codexDirectory, hash, inside, readJson, retainTranscript, writeJson } from './capture.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
 

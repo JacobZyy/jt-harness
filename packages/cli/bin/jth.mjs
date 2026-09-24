@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --
+#!/usr/bin/env bun
 import {fileURLToPath} from 'node:url'
-import {run} from '../dist/index.js'
+import {run} from '../src/index.ts'
 await run(fileURLToPath(new URL('../../../',import.meta.url)))

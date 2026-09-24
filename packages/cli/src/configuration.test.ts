@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { loadConfig, matchesConfigFile, userConfigPaths } from '@jt-harness/memo/config'
+import { loadConfig, matchesConfigFile, userConfigPaths } from '@jacob-z/jt-harness/memo/config'
 import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, promptConfigValue } from './configuration.ts'
 
 test('user configuration survives source removal and upgrades old repository bindings without changing scope', async () => {

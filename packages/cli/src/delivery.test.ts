@@ -12,7 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { installCli, isManagedHook } from './delivery.ts'
 import { configureProjectCodex, withCodex } from './codex-client.ts'
 import { parse } from '@decimalturn/toml-patch'
-import { quote } from '@jt-harness/codex-hooks'
+import { quote } from '@jacob-z/jt-harness/codex-hooks'
 import { readPrimaryInstallation } from '../../../scripts/setup-worktree.ts'
 
 test('trust selection excludes foreign markers, events, commands and ancestor projects', () => {
@@ -33,10 +33,16 @@ test('versioned CLI install/upgrade preserves credentials and refuses an unrelat
     for (const build of ['first-build', 'second-build']) {
       const source = resolve(root, build)
       await mkdir(resolve(source, 'bin'), { recursive: true })
-      await writeFile(resolve(source, 'bin/jth.mjs'), '#!/usr/bin/env node\nconsole.log("fixture CLI")\n')
-      await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'jt-harness', version: '0.1.0', jthDistribution: { build } }))
+      await writeFile(resolve(source, 'bin/jth.mjs'), '#!/usr/bin/env bun\nconsole.log("fixture CLI")\n')
+      if (build === 'first-build') {
+        await mkdir(resolve(source, 'fixture-runtime'))
+        await writeFile(resolve(source, 'fixture-runtime/package.json'), JSON.stringify({ name: 'fixture-runtime', version: '1.0.0' }))
+      }
+      await writeFile(resolve(source, 'package.json'), JSON.stringify({ name: 'jt-harness', version: '0.1.0', jthDistribution: { build },
+        dependencies: build === 'first-build' ? { 'fixture-runtime': 'file:./fixture-runtime' } : {} }))
       const installed = await installCli(source, prefix, envFile, environment)
       assert.equal(await realpath(installed.binary), resolve(installed.root, 'bin/jth.mjs'))
+      if (build === 'first-build') assert((await readFile(resolve(installed.root, 'node_modules/fixture-runtime/package.json'), 'utf8')).includes('fixture-runtime'))
       assert.equal(await realpath(resolve(installed.root, '.env')), resolve(environment.JTH_CONFIG_DIR, '.env'))
       assert.notEqual(installed.envFile, envFile)
       assert((await readFile(installed.envFile, 'utf8')).includes('keep-private'))

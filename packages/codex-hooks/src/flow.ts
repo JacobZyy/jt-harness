@@ -2,7 +2,7 @@ import { readFile, unlink, realpath, appendFile, readdir } from 'node:fs/promise
 import { randomUUID } from 'node:crypto'
 import { relative, resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
-import { FlowStore, renderFlowContext } from '@jt-harness/flow'
+import { FlowStore, renderFlowContext } from '@jacob-z/jt-harness/flow'
 import { configureSkill, mergeHooks, quote, updateHookConfig } from './install.ts'
 import { writeJson, readJson } from './capture.ts'
 import { flowEntryMarker } from './flow-entry.ts'

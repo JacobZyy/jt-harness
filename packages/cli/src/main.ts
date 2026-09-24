@@ -1,24 +1,24 @@
 import { createReadStream } from 'node:fs'
 import { parseArgs } from 'node:util'
-import { runIndexWorker } from '@jt-harness/memo'
+import { runIndexWorker } from '@jacob-z/jt-harness/memo'
 import { connectDatabase } from './postgres.ts'
 import { loadWorkspaceConfig } from './configuration.ts'
-import type { Pool } from '@jt-harness/memo'
-import { optionsSchema, submissionSchema, timestampSchema } from '@jt-harness/memo/contracts'
-import { executionProfile, loadConfig, safeError } from '@jt-harness/memo/config'
-import type { Config } from '@jt-harness/memo/config'
-import { scopeFilterSchema } from '@jt-harness/memo'
-import { prepareDatabase } from '@jt-harness/memo'
-import { embedTexts } from '@jt-harness/memo'
-import { enqueue, jobStatus, retryJob } from '@jt-harness/memo'
-import { MemoStorage } from '@jt-harness/memo'
-import { listManagedEntries, manageEntry, storageStats } from '@jt-harness/memo'
-import { storageDoctor } from '@jt-harness/memo'
+import type { Pool } from '@jacob-z/jt-harness/memo'
+import { optionsSchema, submissionSchema, timestampSchema } from '@jacob-z/jt-harness/memo/contracts'
+import { executionProfile, loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
+import type { Config } from '@jacob-z/jt-harness/memo/config'
+import { scopeFilterSchema } from '@jacob-z/jt-harness/memo'
+import { prepareDatabase } from '@jacob-z/jt-harness/memo'
+import { embedTexts } from '@jacob-z/jt-harness/memo'
+import { enqueue, jobStatus, retryJob } from '@jacob-z/jt-harness/memo'
+import { MemoStorage } from '@jacob-z/jt-harness/memo'
+import { listManagedEntries, manageEntry, storageStats } from '@jacob-z/jt-harness/memo'
+import { storageDoctor } from '@jacob-z/jt-harness/memo'
 import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
-import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jt-harness/memo'
-import { rememberEntryRead } from '@jt-harness/codex-hooks'
-import { readMemory, memoryUses, retrievalInputSchema } from '@jt-harness/memo'
+import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jacob-z/jt-harness/memo'
+import { rememberEntryRead } from '@jacob-z/jt-harness/codex-hooks'
+import { readMemory, memoryUses, retrievalInputSchema } from '@jacob-z/jt-harness/memo'
 
 const help = `jth init  问答式初始化：目录名默认项目、复用全局配置、自动建表与接入检查
 jth install|upgrade|doctor|uninstall  项目接入、独立安装升级和运行诊断；运行 jth install --help
@@ -199,7 +199,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
         if (values.legacy && values.index) throw new Error('--legacy 和 --index 不可同时使用')
         const capture = values.legacy ? await receiveDshCaptures(pool, config, controller.signal) : await receiveRecords(pool, config)
         const counts = values.legacy
-          ? await (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
+          ? await (await import('@jacob-z/jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal)
           : await runIndexWorker(pool, file => loadConfig(root, file), controller.signal)
         if (counts.failed > 0 || (capture?.errors.length ?? 0) > 0 || ('declaration_errors' in capture && capture.declaration_errors.length > 0)) process.exitCode = 1
         result = { ...counts, capture }
@@ -250,7 +250,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
           if (Boolean(values.provider) !== Boolean(values.model)) throw new Error('retry 切换模型须同时指定 --provider 和 --model')
           if (indexOnly && values.provider) throw new Error('索引任务不调用 DSH，不能覆盖 Provider 或模型')
           if (values.provider && values.model) {
-            const { withModelCatalog } = await import('@jt-harness/memo/models')
+            const { withModelCatalog } = await import('@jacob-z/jt-harness/memo/models')
             await withModelCatalog(config, (_catalog, check) => check(values.provider!, values.model!))
           }
         }
@@ -260,7 +260,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
           : await retryJob(pool, operands[0], values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']),
             values.provider && values.model ? { provider: values.provider, model: values.model } : undefined)
         if (values.wait) {
-          await (indexOnly ? runIndexWorker(pool, file => loadConfig(root, file), controller.signal) : (await import('@jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal))
+          await (indexOnly ? runIndexWorker(pool, file => loadConfig(root, file), controller.signal) : (await import('@jacob-z/jt-harness/memo/legacy')).runLegacyWorker(pool, root, controller.signal))
           result = await jobStatus(pool, receipt.submission_id)
           if (!['complete', 'partial'].includes((result as { status: string }).status)) process.exitCode = 1
         } else if (receipt.status === 'queued' || receipt.status === 'running') {

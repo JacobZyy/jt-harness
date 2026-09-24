@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, mkdir, rm, appendFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, appendFile, lstat, symlink, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -17,8 +17,15 @@ const directory = await mkdtemp(resolve('/tmp', 'jth-pg-test-'))
 const data = resolve(directory, 'data')
 const socket = resolve(directory, 'socket')
 let started = false
+const selfLink = resolve(root, 'node_modules/@jacob-z/jt-harness')
+let linked = false
 const pg = (command, args) => execFileSync(resolve(binary, command), args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 try {
+  if (!await lstat(selfLink).then(() => true, () => false)) {
+    await mkdir(resolve(root, 'node_modules/@jacob-z'), { recursive: true })
+    await symlink(root, selfLink, 'dir')
+    linked = true
+  } else if (await realpath(selfLink) !== root) throw new Error('本地 JTH 包链接指向其他目录')
   await mkdir(socket, { mode: 0o700 })
   pg('initdb', ['-D', data, '--auth-local=peer', '--auth-host=scram-sha-256', '--encoding=UTF8', '--locale=C'])
   await appendFile(resolve(data, 'postgresql.conf'), `\nlisten_addresses=''\nunix_socket_directories='${socket}'\n`)
@@ -33,6 +40,9 @@ try {
   })
   process.exitCode = await new Promise((done, reject) => { child.once('error', reject); child.once('exit', code => done(code ?? 1)) })
 } finally {
-  if (started) pg('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'])
-  await rm(directory, { recursive: true, force: true })
+  try { if (started) pg('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop']) }
+  finally {
+    if (linked) await rm(selfLink)
+    await rm(directory, { recursive: true, force: true })
+  }
 }

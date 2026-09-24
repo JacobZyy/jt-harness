@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFile, writeFile, readdir, rm, realpath, unlink, rename, cp } from 'node:fs/promises'
+import { readFile, writeFile, readdir, rm, realpath, unlink, rename } from 'node:fs/promises'
 import { resolve, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,10 +8,11 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const output = resolve(root, 'artifacts/distribution'), target = resolve(output, 'jt-harness')
 const digest = createHash('sha256')
 digest.update(await readFile(resolve(root, 'pnpm-lock.yaml')))
-execFileSync(process.execPath, [resolve(root, 'scripts/build.mjs')], { cwd: root, stdio: 'inherit' })
 await rm(target, { recursive: true, force: true })
 execFileSync('pnpm', ['--filter', '@jacob-z/jt-harness', 'deploy', '--prod', '--no-optional', '--legacy', target], { cwd: root, stdio: 'inherit' })
-await writeFile(resolve(target, 'bin/jth.entry.mjs'), "import { run } from '@jt-harness/cli'\nimport { fileURLToPath } from 'node:url'\nawait run(fileURLToPath(new URL('../', import.meta.url)))\n")
+for (const name of ['cli', 'codex-hooks', 'flow', 'memo']) {
+  await rm(resolve(target, 'packages', name, 'dist'), { recursive: true, force: true })
+}
 // The normal distribution deliberately omits optional, source-linked legacy DSH SDKs.
 async function inspect(directory) {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -40,12 +41,6 @@ const manifest = JSON.parse(await readFile(resolve(target, 'package.json'), 'utf
 manifest.jthDistribution = { format: 1, build: `${manifest.version.replaceAll('.', '-')}-${digest.digest('hex').slice(0, 16)}` }
 manifest.private = false
 delete manifest.scripts
-delete manifest.dependencies
-// npm excludes node_modules; ship a self-contained bundled entry instead.
-execFileSync('pnpm', ['dlx', 'esbuild', resolve(target, 'bin/jth.entry.mjs'), '--bundle', '--platform=node', '--format=esm',
-  '--outfile=' + resolve(target, 'bin/jth.mjs'), "--banner:js=#!/usr/bin/env -S node --\nimport{createRequire}from'node:module';const require=createRequire(import.meta.url);", '--external:pg-cloudflare', '--external:pg-native', '--log-level=warning'], { cwd: root, stdio: 'inherit' })
-await rm(resolve(target, 'bin/jth.entry.mjs'))
-await cp(resolve(target, 'packages/memo/dist/agents'), resolve(target, 'bin/agents'), { recursive: true })
 await writeFile(resolve(target, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
 execFileSync(process.execPath, [resolve(target, 'bin/jth.mjs'), '--help'], { cwd: target, stdio: 'ignore' })
 const archive = resolve(output, `jt-harness-${manifest.version}.tar.gz`)

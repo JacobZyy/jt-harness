@@ -86,7 +86,6 @@ jth flow legacy context
 ## 验证
 
 ```sh
-pnpm build
 pnpm typecheck
 pnpm test
 pnpm test:postgres

@@ -2,13 +2,13 @@ import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
-import { safeError } from '@jt-harness/memo/config'
+import { safeError } from '@jacob-z/jt-harness/memo/config'
 import { loadWorkspaceConfig } from './configuration.ts'
-import type { Config } from '@jt-harness/memo/config'
-import { captureSettingsSchema, captureDeclaration, captureStatus, configureHooks } from '@jt-harness/codex-hooks'
+import type { Config } from '@jacob-z/jt-harness/memo/config'
+import { captureSettingsSchema, captureDeclaration, captureStatus, configureHooks } from '@jacob-z/jt-harness/codex-hooks'
 import { startWorker } from './background.ts'
-import { openDatabase, MemoStorage } from '@jt-harness/memo'
-import { memoryCues } from '@jt-harness/codex-hooks'
+import { openDatabase, MemoStorage } from '@jacob-z/jt-harness/memo'
+import { memoryCues } from '@jacob-z/jt-harness/codex-hooks'
 
 export async function codexMain(root: string, args: string[]) {
   let config: Config | undefined

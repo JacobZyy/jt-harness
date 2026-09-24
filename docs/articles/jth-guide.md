@@ -40,7 +40,7 @@
 
 开始前，准备好以下环境：
 
-- **Node.js 24.21.0 或以上**，用于运行 JTH。
+- **Bun 1.3.14 或以上**，用于直接运行 JTH TypeScript 源码。
 - **Codex**，能够打开你的项目，并使用项目 Hooks。Hook 是宿主在特定时机调用的小型入口，例如收到用户输入或回复结束时执行一段命令。
 - **PostgreSQL 和 pgvector**：准备一个可连接的数据库，例如 `jth`，服务端已安装 pgvector。首次初始化需要创建 schema 和启用 `vector` 扩展的权限。
 - **Embedding 服务配置**：包括服务地址、模型、向量维度和 API Key。Embedding 将记忆正文转换为供语义检索使用的向量；模型和维度需要与服务实际支持的配置一致。
@@ -50,7 +50,7 @@ JTH 不会替你安装 PostgreSQL 软件或创建数据库实例。已有数据�
 先检查基础命令是否可用：
 
 ```sh
-node --version
+bun --version
 codex --version
 ```
 
@@ -72,7 +72,7 @@ command -v jth
 
 ```sh
 tar -xzf jt-harness-0.3.3.tar.gz
-node -- ./jt-harness/bin/jth.mjs install --cli
+bun -- ./jt-harness/bin/jth.mjs install --cli
 export PATH="$HOME/.local/bin:$PATH"
 command -v jth
 jth --version

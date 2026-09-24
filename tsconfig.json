@@ -10,7 +10,18 @@
     "skipLibCheck": true,
     "types": [
       "node"
-    ]
+    ],
+    "paths": {
+      "@jacob-z/jt-harness": ["./packages/cli/src/index.ts"],
+      "@jacob-z/jt-harness/codex-hooks": ["./packages/codex-hooks/src/index.ts"],
+      "@jacob-z/jt-harness/flow": ["./packages/flow/src/index.ts"],
+      "@jacob-z/jt-harness/flow/migrate": ["./packages/flow/src/migrate.ts"],
+      "@jacob-z/jt-harness/memo": ["./packages/memo/src/index.ts"],
+      "@jacob-z/jt-harness/memo/config": ["./packages/memo/src/config.ts"],
+      "@jacob-z/jt-harness/memo/contracts": ["./packages/memo/src/public-contracts.ts"],
+      "@jacob-z/jt-harness/memo/legacy": ["./packages/memo/src/legacy.ts"],
+      "@jacob-z/jt-harness/memo/models": ["./packages/memo/src/models.ts"]
+    }
   },
   "include": [
     "packages/*/src/**/*.ts",

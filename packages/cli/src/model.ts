@@ -2,10 +2,10 @@ import { readFile } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import search from '@inquirer/search'
 import { stdin, stdout } from 'node:process'
-import { safeError } from '@jt-harness/memo/config'
+import { safeError } from '@jacob-z/jt-harness/memo/config'
 import { loadWorkspaceConfig } from './configuration.ts'
-import type { Config } from '@jt-harness/memo/config'
-import { envVersion, saveModel, withModelCatalog } from '@jt-harness/memo/models'
+import type { Config } from '@jacob-z/jt-harness/memo/config'
+import { envVersion, saveModel, withModelCatalog } from '@jacob-z/jt-harness/memo/models'
 
 export async function modelMain(root: string, args: string[]) {
   let config: Config | undefined

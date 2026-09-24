@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { evaluatePolicy, planDraftSchema, policyRequestSchema } from '@jt-harness/flow'
+import { evaluatePolicy, planDraftSchema, policyRequestSchema } from '@jacob-z/jt-harness/flow'
 import { prepareCodexPlan } from './plan-adapters/codex.ts'
 import { codexGoalSchema, prepareCodexGoal } from './codex-goal.ts'
 

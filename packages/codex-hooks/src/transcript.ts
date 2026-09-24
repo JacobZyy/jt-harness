@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { z } from 'zod'
-import { timestampSchema } from '@jt-harness/memo/contracts'
-import type { Submission } from '@jt-harness/memo/contracts'
+import { timestampSchema } from '@jacob-z/jt-harness/memo/contracts'
+import type { Submission } from '@jacob-z/jt-harness/memo/contracts'
 import { hash } from './capture.ts'
 
 export type Message = Submission['messages'][number]

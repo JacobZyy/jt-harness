@@ -1,5 +1,5 @@
 import { Pool } from 'pg'
-import { prepareFlowDatabase } from '@jt-harness/flow'
+import { prepareFlowDatabase } from '@jacob-z/jt-harness/flow'
 import assert from 'node:assert/strict'
 import { mkdtemp, realpath, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'

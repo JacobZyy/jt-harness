@@ -1,6 +1,6 @@
-import { recordMemories, recordDeclaration, withIntakeLock, enqueue, executionProfile } from '@jt-harness/memo'
-import type { Config, Pool } from '@jt-harness/memo'
-import { deliverRecords, drainCaptureFiles, collectDeclarations } from '@jt-harness/codex-hooks'
+import { recordMemories, recordDeclaration, withIntakeLock, enqueue, executionProfile } from '@jacob-z/jt-harness/memo'
+import type { Config, Pool } from '@jacob-z/jt-harness/memo'
+import { deliverRecords, drainCaptureFiles, collectDeclarations } from '@jacob-z/jt-harness/codex-hooks'
 
 export function receiveRecords(pool: Pool, config: Config) {
   return withIntakeLock(pool, async () => {

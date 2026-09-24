@@ -6,7 +6,7 @@
 
 项目接入只需运行 `jth init`：问卷默认用当前文件夹名，复用完整的全局配置，缺项才询问。确认后自动准备记忆表、安装项目指引和 Hooks、处理信任并检查接入。默认开启原生 `update_plan`、关闭本项目 Codex 原生记忆读写；高级参数 `--codex-memory inherit` 可改为跟随上层记忆设置。
 
-开始前准备 Node.js 24.21.0 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后，进入项目目录运行 `jth init`，按问卷填写并重新打开 Codex 任务即可。后续项目仍运行同一命令，不重复配置全局凭据。
+开始前准备 Bun 1.3.14 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后，进入项目目录运行 `jth init`，按问卷填写并重新打开 Codex 任务即可。后续项目仍运行同一命令，不重复配置全局凭据。
 
 其他交付命令为 `jth install / upgrade / doctor / uninstall`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
 
@@ -83,7 +83,6 @@ DSH 使用独立的模型材料视图，数据库继续保留完整来源。用�
 手动验证两条独立用例，不安装 Hook、不读取生产队列：
 
 ```sh
-pnpm build
 node scripts/test-postgres.mjs --memory-live --env-file /absolute/path/to/.env
 ```
 
@@ -151,22 +150,21 @@ jth db stop
 
 本机已验证密码认证、表与向量可读、写操作拒绝。`entry_states` 视图展示每条记忆的当前状态，`entry_relations` 保存更正、补充和冲突关系；`entries` 保留全部历史正文。监听地址通过 PostgreSQL 原生 `ALTER SYSTEM` 配置；账号拥有当前表的 SELECT 权限，并自动获得 `jacobzha` 后续在 `jt_memo` 中创建的表的 SELECT 权限。
 
-## 本地构建与配置
+## 本地源码运行与配置
 
-Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness` 本地环境。参考已有项目的 setup 模式，创建工作树时执行 `node scripts/setup-worktree.ts`；已经存在或手动创建的工作树运行 `pnpm setup:worktree`。
+Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness` 本地环境。参考已有项目的 setup 模式，创建工作树时执行 `bun scripts/setup-worktree.ts`；已经存在或手动创建的工作树运行 `pnpm setup:worktree`。
 
-设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和已选配置（通常为用户目录 `.env`），为当前工作树单独安装依赖、构建，并重新生成 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 链接。不会复制主工作区绑定了绝对路径的 Hook 或任务状态；Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
+设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和已选配置（通常为用户目录 `.env`），为当前工作树单独安装依赖，并重新生成 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 链接。不会复制主工作区绑定了绝对路径的 Hook 或任务状态；Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
 
-工作树 `.env` 链接到主配置，密钥更新立即共享，不提交 Git；相对运行路径以源配置所在目录解析。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 和构建产物保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成下方构建与 `jth flow install`，作为可用的配置来源。
+工作树 `.env` 链接到主配置，密钥更新立即共享，不提交 Git；相对运行路径以源配置所在目录解析。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成依赖安装与 `jth flow install`，作为可用的配置来源。
 
-源码开发需要 Node.js ≥ 24.21.0、pnpm 10；开发工具及可选 DSH SDK 仍链接到相邻 `../deepseek-harness` 工作区。普通使用者安装 npm 包或独立发行包即可，默认 Flow/Memo 不依赖该源码目录。发行包不捆绑显式 legacy 路径需要的 DSH SDK。
+JTH 命令使用 Bun ≥ 1.3.14 直接运行 TypeScript 源码，不需要构建。源码开发的 pnpm 与检查脚本另需 Node.js ≥ 24.21.0、pnpm 10；开发工具及可选 DSH SDK 仍链接到相邻 `../deepseek-harness` 工作区。普通使用者安装 npm 包或独立发行包即可，默认 Flow/Memo 不依赖该源码目录。发行包不捆绑显式 legacy 路径需要的 DSH SDK。
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm build
-node bin/jth.mjs --help
+bun bin/jth.mjs --help
 # 问卷补齐共享配置，自动建表并接入当前项目。
-node -- bin/jth.mjs init
+bun -- bin/jth.mjs init
 ```
 
 `init` 自动调用现有建表与迁移逻辑，创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v8，保留原材料、条目、向量与回执。高级手动入口 `memo init` 继续保留。v8 只在 v7 上增加采用记录，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL 或创建数据库实例；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。

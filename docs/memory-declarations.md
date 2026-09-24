@@ -122,7 +122,6 @@ Hook 只保存本地事件与来源指针，后台负责解析、数据库和 Em
 复跑命令：
 
 ```sh
-pnpm build
 node scripts/test-postgres.mjs --declaration-live --env-file /absolute/path/to/.env
 ```
 

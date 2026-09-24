@@ -6,9 +6,9 @@ import { isDeepStrictEqual, parseEnv } from 'node:util'
 import { createInterface } from 'node:readline'
 import { Writable } from 'node:stream'
 import { stdin, stderr } from 'node:process'
-import { findFlowWorkspace, flowPath, locatorSchema } from '@jt-harness/flow'
-import { readJson, writeJson } from '@jt-harness/codex-hooks'
-import { loadConfig, readConfigAliases, userConfigPaths, type Config } from '@jt-harness/memo/config'
+import { findFlowWorkspace, flowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
+import { readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { loadConfig, readConfigAliases, userConfigPaths, type Config } from '@jacob-z/jt-harness/memo/config'
 
 const readEnv = (path: string) => readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
 

@@ -3,9 +3,9 @@ import { promisify, parseArgs } from 'node:util'
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { openDatabase, safeError } from '@jt-harness/memo'
+import { openDatabase, safeError } from '@jacob-z/jt-harness/memo'
 import { loadWorkspaceConfig } from './configuration.ts'
-import type { Config } from '@jt-harness/memo'
+import type { Config } from '@jacob-z/jt-harness/memo'
 
 const execute = promisify(execFile)
 function managed(config: Config) {

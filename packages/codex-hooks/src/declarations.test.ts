@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, appendFile, readFile, readlink, readdir, rm 
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { parseDeclaration } from '@jt-harness/memo/contracts'
+import { parseDeclaration } from '@jacob-z/jt-harness/memo/contracts'
 import { captureDeclaration, collectDeclarations, rememberEntryRead } from './declarations.ts'
 import { readEvidence, deliverRecords } from './evidence.ts'
 import { configureHooks } from './install.ts'

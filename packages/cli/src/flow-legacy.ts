@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, relative, isAbsolute } from 'node:path'
 import { parseArgs } from 'node:util'
-import { FlowStore, findFlowWorkspace, renderFlowContext, taskView, verifyTask, workspaceSnapshot, flowPath, legacyFlowPath, locatorSchema, prepareFlowDatabase } from '@jt-harness/flow'
-import { configureFlowHooks, configureHooks, flowHook, stageFlowEvent, drainFlowEvents, readJson, writeJson } from '@jt-harness/codex-hooks'
-import { openDatabase } from '@jt-harness/memo'
-import { loadConfig, safeError } from '@jt-harness/memo/config'
+import { FlowStore, findFlowWorkspace, renderFlowContext, taskView, verifyTask, workspaceSnapshot, flowPath, legacyFlowPath, locatorSchema, prepareFlowDatabase } from '@jacob-z/jt-harness/flow'
+import { configureFlowHooks, configureHooks, flowHook, stageFlowEvent, drainFlowEvents, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { openDatabase } from '@jacob-z/jt-harness/memo'
+import { loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
 import { recallTask, scheduleRecall } from './flow-memory.ts'
 import { connectDatabase } from './postgres.ts'
 import { startBackground } from './background.ts'
@@ -62,7 +62,7 @@ export async function flowLegacyMain(root: string, args: string[]) {
     const sessionId = values.session ?? process.env.CODEX_THREAD_ID
     const output = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n')
     if (command === 'migrate') {
-      const { legacySettings, migrateFlow } = await import('@jt-harness/flow/migrate')
+      const { legacySettings, migrateFlow } = await import('@jacob-z/jt-harness/flow/migrate')
       const settings = legacySettings(workspace), config = await loadConfig(root, settings.envFile)
       const pool = await connectDatabase(config)
       store = new FlowStore(workspace, pool)

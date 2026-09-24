@@ -1,7 +1,7 @@
 import { access, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
-import { flowEntryContext } from '@jt-harness/flow'
+import { flowEntryContext } from '@jacob-z/jt-harness/flow'
 import { writeJson } from './capture.ts'
 
 export const flowEntryMarker = 'jth flow entry'

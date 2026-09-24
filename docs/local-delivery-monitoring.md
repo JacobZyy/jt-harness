@@ -1,6 +1,6 @@
 # 本地安装、升级和 Phoenix 观测
 
-本版提供可搬离源码目录的 Node.js 发行包。运行需要 Node.js 24.21 或以上；普通 Flow/Memo 不依赖旁边的 DSH 源码。开发目录中的显式 legacy 路径保留，发行包不捆绑可选的 DSH SDK。现有记忆、旧队列和凭据不会因安装升级而删除。
+本版提供可搬离源码目录的 Bun TypeScript 源码发行包。运行需要 Bun 1.3.14 或以上，无需预先编译；普通 Flow/Memo 不依赖旁边的 DSH 源码。开发目录中的显式 legacy 路径保留，发行包不捆绑可选的 DSH SDK。现有记忆、旧队列和凭据不会因安装升级而删除。
 
 ## 安装工具本体
 
@@ -13,15 +13,15 @@ jth --version
 
 使用其他包管理器时，由该包管理器负责全局包的安装和版本更新。更新工具后，在已接入的项目执行 `jth upgrade --trust` 同步 Hook 和 Skill；裸 `jth upgrade` 不下载 npm 新版本。
 
-开发者也可运行 `pnpm bundle`，得到当前版本的 `artifacts/distribution/jt-harness-<版本>.tar.gz` 及 SHA-256 文件。构建复用 pnpm deploy，包含生产依赖、编译结果和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
+开发者也可运行 `pnpm bundle`，得到当前版本的 `artifacts/distribution/jt-harness-<版本>.tar.gz` 及 SHA-256 文件。打包复用 pnpm deploy，包含生产依赖、TypeScript 源码和 Skill；排除 `.env`、数据库、运行日志及开发者目录外的链接。
 
-发布 npm 时从 `artifacts/distribution/jt-harness` 目录发布构建产物；仓库根目录包含 `workspace:*` 开发依赖，不可直接发布。根包设为 private，防止误发源码包。
+发布 npm 时从 `artifacts/distribution/jt-harness` 目录发布源码发行包；仓库根包设为 private，防止误发开发目录。
 
 解压后安装：
 
 ```sh
 tar -xzf jt-harness-0.3.7.tar.gz
-node -- jt-harness/bin/jth.mjs install --cli --env-file /absolute/path/to/.env
+bun -- jt-harness/bin/jth.mjs install --cli --env-file /absolute/path/to/.env
 jth --version
 ```
 
@@ -122,11 +122,10 @@ Phoenix 使用受管后台进程，启动/停止检查进程身份；不注册�
 ## 验证
 
 ```sh
-pnpm build
 pnpm typecheck
 pnpm test
 pnpm test:postgres
-node scripts/verify-monitor.ts
+bun scripts/verify-monitor.ts
 ```
 
 最后一条需要本机 Codex 和运行中的 Phoenix。它在独立 CODEX_HOME 中使用本地 Responses 模拟服务，验证真实 Codex Hook、后台导出和 PostgreSQL 持久化；不调用付费模型。测试 Token 是明确的协议样例，不代表用户真实账单。原始验证报告位于忽略目录 `artifacts/delivery/`。

@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
-import { memoryKey } from '@jt-harness/flow'
-import type { FlowStore } from '@jt-harness/flow'
-import { loadConfig, safeError } from '@jt-harness/memo/config'
-import type { Config } from '@jt-harness/memo/config'
+import { memoryKey } from '@jacob-z/jt-harness/flow'
+import type { FlowStore } from '@jacob-z/jt-harness/flow'
+import { loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
+import type { Config } from '@jacob-z/jt-harness/memo/config'
 import { startBackground } from './background.ts'
 import { connectDatabase } from './postgres.ts'
 
@@ -27,7 +27,7 @@ export async function recallTask(root: string, store: FlowStore, taskId: string,
   let pool
   try {
     config = await loadConfig(root, settings.envFile)
-    const { MemoStorage, embedTexts, prepareDatabase } = await import('@jt-harness/memo')
+    const { MemoStorage, embedTexts, prepareDatabase } = await import('@jacob-z/jt-harness/memo')
     const [vector] = await embedTexts([JSON.stringify({ goal: task.goal, constraints: task.constraints })], config.embedding, AbortSignal.timeout(45000))
     pool = await connectDatabase(config)
     await prepareDatabase(pool, false)

@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile, readlink, symlink, unlink, writeFile } fro
 import { dirname, resolve } from 'node:path'
 import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
-import { matchesConfigFile } from '@jt-harness/memo/config'
+import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { cueMarker } from './cues.ts'
 
 const marker = 'jth memo capture'

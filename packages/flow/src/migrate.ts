@@ -1,13 +1,21 @@
-import { DatabaseSync, backup } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { mkdir, chmod } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import type { Pool } from 'pg'
 import { settingsSchema, taskSchema } from './contracts.ts'
 import { legacyFlowPath, prepareFlowDatabase } from './store.ts'
 
+const bun = 'bun' in process.versions
+const require = createRequire(import.meta.url)
+const sqlite = bun ? require('bun:sqlite') : require('node:sqlite')
+const openLegacy = (path: string): DatabaseSync => bun
+  ? new sqlite.Database(path, { readonly: true })
+  : new sqlite.DatabaseSync(path, { readOnly: true })
+
 export function legacySettings(workspace: string) {
-  const db = new DatabaseSync(legacyFlowPath(workspace), { readOnly: true })
+  const db = openLegacy(legacyFlowPath(workspace))
   try { return settingsSchema.parse(JSON.parse(String(db.prepare('SELECT value FROM settings WHERE id=1').get()?.value))) } finally { db.close() }
 }
 
@@ -16,10 +24,13 @@ export async function migrateFlow(workspace: string, pool: Pool) {
   const directory = resolve(workspace, '.jth/backups')
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const path = resolve(directory, `flow-${Date.now()}.sqlite`)
-  const source = new DatabaseSync(legacyFlowPath(workspace), { readOnly: true })
-  try { await backup(source, path) } finally { source.close() }
+  const source = openLegacy(legacyFlowPath(workspace))
+  try {
+    if (bun) source.prepare('VACUUM main INTO ?').run(path)
+    else await sqlite.backup(source, path)
+  } finally { source.close() }
   await chmod(path, 0o600)
-  const db = new DatabaseSync(path, { readOnly: true })
+  const db = openLegacy(path)
   let snapshot
   try {
     const settings = settingsSchema.parse(JSON.parse(String(db.prepare('SELECT value FROM settings WHERE id=1').get()?.value)))

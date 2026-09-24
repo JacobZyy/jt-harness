@@ -3,12 +3,12 @@ import { appendFile, mkdtemp, mkdir, readFile, readdir, rm, stat, unlink, writeF
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { parseExtraction, submissionSchema } from '@jt-harness/memo/contracts'
-import type { Submission } from '@jt-harness/memo/contracts'
+import { parseExtraction, submissionSchema } from '@jacob-z/jt-harness/memo/contracts'
+import type { Submission } from '@jacob-z/jt-harness/memo/contracts'
 import { captureEvent, captureStatus, configureHooks, hookEvents, mergeHooks } from './index.ts'
 import type { CaptureSettings } from './index.ts'
 import { drainCaptureFiles } from './dsh-ingest.ts'
-import { loadConfig } from '@jt-harness/memo/config'
+import { loadConfig } from '@jacob-z/jt-harness/memo/config'
 import { fileURLToPath } from 'node:url'
 
 const time = (second: number) => `2026-09-16T00:00:${String(second).padStart(2, '0')}.000Z`

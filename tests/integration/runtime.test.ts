@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, mkdir, realpath, writeFile, readFile, rm, stat, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -13,6 +12,8 @@ import { migrateFlow } from '@jt-harness/flow/migrate'
 import { loadConfig } from '@jt-harness/memo'
 import { postgresStatus, startPostgres } from '../../packages/cli/src/postgres.ts'
 
+const sqlite = 'bun' in process.versions ? await import('bun:sqlite' as string) : await import('node:sqlite')
+const DatabaseSync = sqlite.DatabaseSync ?? sqlite.Database
 const execute = promisify(execFile), root = process.cwd(), databaseUrl = process.env.JTH_TEST_DATABASE_URL
 
 test('SQLite migration preserves tasks, ownership and event sequence; PG serializes concurrent updates and isolates workspaces', { skip: !databaseUrl }, async () => {

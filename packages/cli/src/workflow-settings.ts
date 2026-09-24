@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
 import { z } from 'zod'
-import { policyModeSchema, type PolicyMode } from '@jt-harness/flow'
-import { readJson, writeJson } from '@jt-harness/codex-hooks'
-import { userConfigPaths } from '@jt-harness/memo/config'
+import { policyModeSchema, type PolicyMode } from '@jacob-z/jt-harness/flow'
+import { readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { userConfigPaths } from '@jacob-z/jt-harness/memo/config'
 
 const settingsSchema = z.strictObject({ mode: policyModeSchema.optional() })
 export function workflowSettingsPaths(workspace: string, environment: NodeJS.ProcessEnv = process.env) {

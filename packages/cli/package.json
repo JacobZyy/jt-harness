@@ -8,8 +8,8 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
     }
   },
   "dependencies": {
@@ -24,8 +24,7 @@
     "zod": "4.4.3"
   },
   "scripts": {
-    "build": "node ../../scripts/build-package.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts"
+    "test": "bun test --isolate --parallel=1 src"
   }
 }

@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises'
 import { resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
-import type { MemoStorage, ScopeFilter } from '@jt-harness/memo'
+import type { MemoStorage, ScopeFilter } from '@jacob-z/jt-harness/memo'
 import { codexDirectory, hash, inside, installationPath, readJson, writeJson, type CaptureSettings } from './capture.ts'
 import { memoEntryContext } from './instructions.ts'
 

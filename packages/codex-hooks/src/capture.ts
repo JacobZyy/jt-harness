@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
-import { submissionSchema, timestampSchema } from '@jt-harness/memo/contracts'
+import { submissionSchema, timestampSchema } from '@jacob-z/jt-harness/memo/contracts'
 
 export const hookEvents = ['SessionStart', 'Stop', 'Interrupt', 'SessionEnd', 'SubagentStart', 'SubagentStop'] as const
 const identifier = z.string().trim().min(1).max(200)

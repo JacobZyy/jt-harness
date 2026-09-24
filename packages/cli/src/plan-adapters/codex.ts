@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { workItemIdSchema, type PlanDraft, type PolicyDecision } from '@jt-harness/flow'
+import { workItemIdSchema, type PlanDraft, type PolicyDecision } from '@jacob-z/jt-harness/flow'
 
 export const codexProgressSchema = z.array(z.strictObject({
   id: workItemIdSchema,

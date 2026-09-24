@@ -5,24 +5,24 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
     },
     "./contracts": {
-      "types": "./dist/public-contracts.d.ts",
-      "import": "./dist/public-contracts.js"
+      "types": "./src/public-contracts.ts",
+      "import": "./src/public-contracts.ts"
     },
     "./config": {
-      "types": "./dist/config.d.ts",
-      "import": "./dist/config.js"
+      "types": "./src/config.ts",
+      "import": "./src/config.ts"
     },
     "./legacy": {
-      "types": "./dist/legacy.d.ts",
-      "import": "./dist/legacy.js"
+      "types": "./src/legacy.ts",
+      "import": "./src/legacy.ts"
     },
     "./models": {
-      "types": "./dist/models.d.ts",
-      "import": "./dist/models.js"
+      "types": "./src/models.ts",
+      "import": "./src/models.ts"
     }
   },
   "dependencies": {
@@ -35,9 +35,8 @@
     "@deepseek-ai/dsh-sdk-protocol": "link:../../../deepseek-harness/packages/sdk/protocol"
   },
   "scripts": {
-    "build": "node ../../scripts/build-package.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts src/agents/*.test.ts src/agents/evaluation/*.test.ts src/storage/*.test.ts"
+    "test": "bun test --isolate --parallel=1 src"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../../../deepseek-harness/vendor/cordis"
