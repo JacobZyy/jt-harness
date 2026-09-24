@@ -9,7 +9,7 @@ import { configurationScope, loadWorkspaceConfig } from './configuration.ts'
 import { resolveWorkflowPolicy } from './workflow-settings.ts'
 
 const help = `jth flow install --project <id> [--business <id>] [--env-file <path>]
-jth flow policy <file.json|->     评估显式意图、返回规划模板与宿主记录参数；不保存任务
+jth flow policy <file.json|->     评估显式意图，准备原生 Goal 与计划参数；不保存任务
 jth flow config                  查看或覆盖 adaptive/strict；运行 jth flow config --help
 jth flow status                  查看入口安装、最近输出记录与 Memo 范围，不连接任务数据库
 jth flow context                 查看原生执行职责，不读取旧任务或缓存记忆
@@ -89,7 +89,7 @@ export async function flowMain(root: string, args: string[]) {
       entry_hook: { installed: handlers.some(handler => handler.statusMessage === flowEntryMarker), event: 'UserPromptSubmit',
         receipt_path: flowEntryReceiptPath(workspace), last_emission: await readJson(flowEntryReceiptPath(workspace)) ?? null },
       ...(legacyHooks ? { action: '重新运行 flow install，移除旧任务注入 Hook' } : {}),
-      native: { goal: '由宿主管理；在 Codex 查看 /goal', task_list: '由宿主实际暴露的原生计划工具管理；此 CLI 不读写或冒充原生列表',
+      native: { goal: 'planned 入口要求主 Agent 调用 get_goal/create_goal；状态以宿主回执为准，此 CLI 不读取或启动 Goal', task_list: '由宿主实际暴露的原生计划工具管理；此 CLI 不读写或冒充原生列表',
         resume: '使用 Codex 会话恢复', verification: '直接运行项目测试并保留实际结果' },
       history: 'jth flow legacy status --all',
     })

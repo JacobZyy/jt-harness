@@ -6,16 +6,16 @@ JTH 的流程控制只补充项目约定和 Memo 接入。目标续跑、任务�
 
 | 内容 | 当前负责人 |
 | --- | --- |
-| 长任务持续推进 | Codex 原生 Goal；遵守宿主启用条件及用户授权 |
+| 长任务持续推进 | planned 入口明确要求原生 Goal；主 Agent 实际调用 `get_goal/create_goal`，已有目标复用 |
 | 待办、进行中、完成 | 宿主真实计划工具；主 Agent 主动更新 |
 | 用户反馈与恢复 | 当前会话、原生 Goal 和计划；保留原目标，更新相关步骤 |
 | 机器检查 | 已有命令或适用 Hook，保留实际结果与产物 |
 | 任务验收 | 主 Agent 在交付项完成时及整体收口时核对交付、范围和适用约定，复用机器检查证据 |
 | 长期经验 | `jth memo search/read` 与主会话短声明 |
 
-普通问答不创建计划。实质任务按 [Workflow Policy](workflow-policy.md) 选择 guarded 或 planned；小改完成后聚焦验证，需要规划时再使用原生计划，步骤状态随执行更新。反馈改变的是相关约束或步骤，只有用户明确改变目标才切换总目标。恢复时读取同一会话、Goal 和计划，不从旧 Flow 数据库里自动选一个目标。
+普通问答不创建计划或 Goal。实质任务按 [Workflow Policy](workflow-policy.md) 选择 guarded 或 planned；小改完成后聚焦验证，planned 由主 Agent 同时处理原生 Goal 和计划。受信任入口提供明确的 Goal 使用指令，用户明确停用时不创建；没有这一入口或其他明确授权时，不从普通任务推断 Goal 授权。反馈改变相关约束或步骤，恢复时读取同一会话、Goal 和计划，不从旧 Flow 数据库里自动选目标。
 
-主 Agent 读取 Skill 并建立或接续实际计划后，在对话中输出一行 `JTH Flow｜已进入/已恢复｜当前步骤`。没有原生工具时明确标注会话步骤；入口 Hook 本身不能证明主 Agent 已执行流程。超过 10 分钟的任务，有效反馈间隔不超过 15 分钟，阶段反馈重置计时，每条不超过 200 字。必要回执不因精简风格省略。
+主 Agent 读取 Skill 并取得实际 Goal 和计划结果后，在对话中输出一行 `JTH Flow｜已进入/已恢复｜Goal 已创建/已复用（或未启用原因）｜当前步骤`。没有原生计划工具时明确标注会话步骤；入口 Hook 本身不能证明主 Agent 已执行流程。超过 10 分钟的任务，有效反馈间隔不超过 15 分钟，阶段反馈重置计时，每条不超过 200 字。必要回执不因精简风格省略。
 
 检查点沿用原生计划和会话记录；需要可回溯的结论时，保存小份证据文件或 Git 提交。没有额外的逐工具回执、后台调度器或第二份进度状态。完成前运行项目检查，并核对真实交付与验收条件；工具调用成功或任务列表打勾都不能单独证明需求完成。
 
@@ -49,7 +49,7 @@ jth flow uninstall
 
 `install` 管理项目 Skill、`UserPromptSubmit` 短入口提示和 Memo Stop 声明入口，移除旧 `jth flow context` Hook。项目 `.jth/flow.json` 仅定位 workspace 和 `.env`；Memo 的安装记录提供 `memo_scope`，不复制到第二张配置表。卸载 Flow 移除 Skill 与入口 Hook，保留 Memo、第三方 Hook 和历史数据。
 
-入口执行 `jth flow prompt --workspace <项目目录>`，接收 Codex 的 Hook JSON，只输出固定流程提醒和 Skill 路径。它不读取用户正文、聊天记录、旧目标或记忆，不连接数据库或模型；普通问答由主 Agent 直接回答，实质任务按 Skill 进入与验收。Hook 定义设置 512 的 `additionalContextLimit`，异常输出诊断并放行，防止入口故障阻塞会话。
+入口执行 `jth flow prompt --workspace <项目目录>`，接收 Codex 的 Hook JSON，只输出短 Skill 入口及 planned 使用原生 Goal 的明确指令。它不读取用户正文、聊天记录、旧目标或记忆，不连接数据库或模型；任务分类和工具调用由主 Agent 执行。Hook 定义设置 512 的 `additionalContextLimit`，异常输出诊断并放行，防止入口故障阻塞会话。
 
 `.jth/flow-entry.json` 仅保留最近一次输出的时间、会话/回合 ID、工作目录和字符数。`flow status/context` 的 `entry_hook` 展示安装与最近输出记录；这不是任务状态表，也不能单独证明模型遵守流程。Codex 必须同时信任项目层和当前 Hook 定义；仅写入 hooks.json 不代表已激活。已有会话重新加载后，同会话恢复的下一次用户输入会再次收到短提示。
 
@@ -59,13 +59,15 @@ Memo 通过 Stop 保存主会话声明及采用反馈，后台处理存储与新
 
 ## 原生工具边界
 
-原生 Goal 和计划工具由当前宿主提供，不由 `jth` 模拟。Skill 要求实际工具可用时主动创建/更新计划；未暴露工具时明确说明，并继续当前任务，不用 Markdown 清单或旧 Flow Task 冒充原生 UI。
+原生 Goal 和计划工具由当前宿主提供，不由 `jth` 模拟。主 Agent 根据入口指令、实际授权和 `get_goal` 结果启动或复用 Goal，并独立调用 `update_plan`；只在全部验收后调用 `update_goal` 完成。未暴露工具时明确说明，并继续可执行工作，不用 Markdown 清单或旧 Flow Task 冒充原生 UI。两组工具互不替代，`flow status` 的安装信息也不证明 Goal 已启动。
 
 Codex CLI 0.152.0 起计划工具默认关闭。`jth init` 会在项目 `.codex/config.toml` 设置 `tools.update_plan.enabled = true`；`install` 和 `upgrade` 保留已有选择。新配置由重新加载的受信任项目会话读取，是否实际提供工具仍以宿主工具清单为准。
 
 `turn/plan/updated` 是宿主发出的计划通知，不是可以写入的公共计划接口。本版不伪造这些通知、不修改 Codex 私有数据库，也不为适配原生功能添加一个新服务。
 
 2026-09-20 切换原生 Flow 时，实际使用了 `create_goal/get_goal`；当时会话及 Codex CLI 0.155.0 的隔离探测均未暴露计划更新工具，因此没有伪造任务列表。后来 `init` 已加入项目计划工具开启配置，Workflow Policy 也已提供原生参数适配；是否可用仍以当前宿主实际工具清单为准，不能把当时的 unavailable 当成现行限制。
+
+2026-09-24 核对发现，切换时删除了 Goal 的具体启动约定，后续只补齐计划链路。本次恢复明确入口、Goal 参数准备与生命周期约定；历史证据和误改判断见 [Goal 触发回归分析](native-goal-regression.md)。
 
 ## 历史与恢复
 

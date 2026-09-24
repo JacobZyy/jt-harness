@@ -1,6 +1,6 @@
 ---
 name: jth-flow
-description: 在安装了 JTH 的项目中，用 Codex 原生 Goal、任务列表与恢复能力推进长任务；补充目标边界、项目验收与按需 Memo 约定。按 Workflow Policy 区分直接回答、有界小改与多步规划；Codex 使用原生 update_plan 记录进度。
+description: 在安装了 JTH 的项目中，按入口指令为 planned 任务启动或复用 Codex 原生 Goal，用 update_plan 记录进度；普通问答直接回答，有界小改 guarded。补充目标边界、项目验收与按需 Memo 约定。
 ---
 
 # JTH Flow
@@ -11,11 +11,12 @@ description: 在安装了 JTH 的项目中，用 Codex 原生 Goal、任务列�
 
 - 先读取当前会话、Goal、任务列表和已有计划。已有 Goal 或任务直接复用；不要因补充要求创建第二个目标。
 - 开始实质工作或工作边界改变时，按 [Workflow Policy](references/workflow-policy.md) 声明意图、关系与规划理由。默认 adaptive：普通问答直接回答，有界小任务 guarded，多阶段/依赖/重要影响等任务 planned。不要把每次操作都升级为计划。
+- planned 同时处理原生 Goal 和计划，不能只调用 `update_plan` 就声称已进入目标循环。按下方“原生 Goal”执行；`jth flow policy` 的 `goal` 与 `recording` 分别准备两类工具参数。
 - 规划和进度记录分层：主 Agent 按模板细化可验收工作项；Codex 适配器只准备原生参数，主 Agent 实际调用 `update_plan`。其他宿主不得冒用 Codex 工具；子 Agent 只交回分派结果。
 - 实质任务沿用[任务验收约定](references/acceptance.md)和适用项目检查；planned 在各交付项内验证，全部完成后复核整体需求；guarded 在完成动作中验收。不把收口复核单列为任务。只运行相关检查并复用有效结果，不增加固定多轮审查或模型评审。
 - 优先复用原生任务 ID；宿主没有逐项 ID 时，在计划步骤中使用稳定标签（如 T1），让反馈、结果和验收证据对应同一项。不要另建任务库或复制一份任务列表。
 - 没有原生计划工具时如实说明，按当前任务继续；不要用 `jth flow start` 冒充宿主计划。
-- guarded 执行时输出一行“JTH Flow｜guarded｜交付结果｜聚焦验证”。planned 建立或接续实际计划后输出一行，例如 `JTH Flow｜已进入｜原生计划 2 步｜当前 T1：用户配置独立可用`；恢复时使用“已恢复”。原生计划工具不可用时保留会话步骤，并明确标为“会话步骤”，不声称创建了原生计划。每次实质任务开始或恢复输出一次；普通问答不输出。
+- guarded 执行时输出一行“JTH Flow｜guarded｜交付结果｜聚焦验证”。planned 取得实际 Goal 和计划结果后输出一行，例如 `JTH Flow｜已进入｜Goal 已创建｜原生计划 2 步｜当前 T1：用户配置独立可用`；恢复时使用“已恢复”和“Goal 已复用”。未启用 Goal 时说明真实原因；原生计划工具不可用时明确标为“会话步骤”。每次实质任务开始或恢复输出一次；普通问答不输出。
 - 上下文压缩或新会话恢复时，读取原生会话、Goal 和计划，接续当前未完成步骤；`jth flow status` 只提供安装配置，不保存任务进度。
 - 反馈只调整计划、约束或当前步骤；只有用户明确更换目标时才改变目标。同步调整受影响的验收条件，保留仍然适用的条件。
 
@@ -31,6 +32,14 @@ jth flow uninstall
 安装后，`UserPromptSubmit` 只注入短入口提示，促使主 Agent 按本技能执行；它不替代语义验收、不读取旧任务或聊天全文。`jth flow status` 的 `entry_hook.last_emission` 证明最近一次 Hook 输出，不证明模型已执行验收。
 
 旧数据库任务仅通过 `jth flow legacy ...` 使用。默认不创建或同步第二份 PostgreSQL 任务；除已安装的入口提示外，不注册重复生命周期 Hook。没有用户安装要求时，不主动安装、迁移或开启 Hook。
+
+## 原生 Goal
+
+- 已安装且受信任的 Flow 入口明确要求主 Agent 的 planned 任务使用 Codex 原生 Goal；当前用户明确停用时不创建。宿主将该入口作为系统/开发者指令交付时，这就是创建依据，不要求用户每轮再说一次 `/goal`。仅有 Skill 文件、planned 分类或 `plan.goal` 字段不构成宿主要求的明确指令；手动使用 Skill 时按当前用户或系统/开发者授权执行，不从普通任务推断授权。
+- 工具可用时实际调用 `get_goal`。同一未完成 Goal 直接复用；没有 Goal 或上一 Goal 已完成，且有上述明确指令时，实际调用 `create_goal`，objective 保留用户的完整总目标。`token_budget` 仅在用户明确指定数值时传入；“时间和 token 充足”不是预算数值。
+- 创建后用 `get_goal` 核对结果，再报告已创建。其他未完成 Goal 不覆盖；暂停、阻塞、预算或额度限制不当作“无 Goal”，不靠新建绕过。不能为切换任务虚报完成。恢复或用户反馈沿用同一个 Goal，不按步骤重建。
+- Goal 与计划工具独立：`update_plan` 不会启动 Goal，计划工具不可用也不妨碍已授权且可用的 Goal。工具缺失或创建失败时如实说明并继续可执行工作，不伪造原生状态，不自建 runner。
+- 全部必需交付和项目验收完成后，才实际调用 `update_goal`，状态为 `complete`；单项完成、测试通过或当前回复结束都不代表总目标完成。暂停、blocked 和预算仍遵守宿主工具规则。
 
 ## 执行与检查点
 

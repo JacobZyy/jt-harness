@@ -1,6 +1,6 @@
 # Workflow Policy：规划与宿主记录分层
 
-默认 `adaptive`。JTH 提供确定性策略和规划模板；主 Agent 生成具体工作项。当前记录适配器面向 Codex，准备 `update_plan` 参数，由当前会话实际调用原生工具。JTH 不保存第二份任务进度。
+默认 `adaptive`。JTH 提供确定性策略和规划模板；主 Agent 生成具体工作项。Codex 适配分别准备 `get_goal/create_goal` 和 `update_plan` 参数，由当前会话实际调用原生工具。JTH 不保存第二份 Goal 或任务进度。
 
 ## 代码边界
 
@@ -9,6 +9,7 @@
 | 策略 | `packages/flow/src/policy.ts` | 校验显式语义，选择 noop/direct/guarded/planned、创建或复用计划、恢复上下文及验证范围 |
 | 规划内容 | `packages/flow/src/planning.ts` | 提供模板维度；工作项包含结果、依赖、完成条件、验证方式；校验 ID 和依赖图，不持有完成状态 |
 | 宿主记录 | `packages/cli/src/plan-adapters/codex.ts` | 将草稿和调用者提供的当前进度映射为 Codex 参数；处理工具不可用、委派回传及已有进度保护 |
+| 原生目标 | `packages/cli/src/codex-goal.ts` | 根据明确授权、实际 Goal 读取结果和工具可用性准备读取或创建参数；同一未完成目标复用，冲突不覆盖 |
 | 接入 | `packages/cli/src/flow-policy.ts`、`workflow-settings.ts` | CLI 参数、配置来源、JSON 输入输出；不执行模型或任务 |
 | Hook 与 Skill | 既有 Flow 入口、`references/workflow-policy.md` | 提醒主 Agent 按真实上下文调用策略、创建计划、执行和验收 |
 
@@ -21,7 +22,7 @@ jth flow config
 jth flow config --scope user --mode adaptive
 jth flow config --scope project --mode strict
 jth flow config --scope project --mode inherit
-jth flow policy request.json --plan-tool available
+jth flow policy request.json --plan-tool available --goal-tools available
 ```
 
 配置只使用非敏感的 `{ "mode": "adaptive" }` 或 `{ "mode": "strict" }`：
@@ -43,6 +44,8 @@ jth flow policy request.json --plan-tool available
 - `planningReasons` 指定真实的依赖、重要影响、未确定方案或明确规划要求。模板不固定任务数量；每项应是可独立验收的用户目标部分，不把调研、开发、测试和收口复核机械拆成顶层步骤。用户明确要求的报告或诊断结果可以成为独立交付项。
 - strict 只提高规划要求；验证仍用现有项目检查和主 Agent 的收口核对，不引入 Superpowers 多轮审查、评审 Agent 或 Jev。
 - 原生工具可用性由当前 Agent 根据实际工具清单声明。`applied=false` 始终表示 JTH 只准备了参数；调用者取得真实工具结果后才能报告已更新。
+- planned 的受信任入口明确要求使用原生 Goal；该指令由宿主作为系统/开发者指令交付时，可作为创建依据，不要求用户每次重复 `/goal`。仅有 planned 分类或 Skill 文件不构成授权。用户明确停用时不创建；guarded 仅在用户明确要求时使用 Goal。
+- `goal` 与 `recording` 独立返回；缺少计划工具不禁用已授权的 Goal，计划更新也不能替代 Goal 创建。`current` 来自主 Agent 最近一次真实 `get_goal` 结果，不是 CLI 推测。暂停、阻塞或额度限制均不等于无 Goal；只复用同一未完成目标，恢复遵守宿主规则。
 - 接续参数必须携带所有任务的当前状态，防止默认 pending 重置进度。完成项要有实际证据引用，推进项的前置任务须已完成。这些结构检查不证明证据语义正确，也不拦截 Agent 直接调用宿主工具。
 
 ## AIOS 参考与后续同步

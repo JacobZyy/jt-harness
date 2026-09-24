@@ -48,6 +48,12 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     assert(handlers.some(handler => handler.statusMessage === 'jth flow entry' && handler.command.includes("'prompt'")))
     assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-flow')), resolve(root, 'packages/flow/skills/jth-flow'))
     assert.equal(await readlink(resolve(workspace, '.agents/skills/jth-memo')), resolve(root, 'packages/memo/skills/jth-memo'))
+    const flowSkill = await readFile(resolve(workspace, '.agents/skills/jth-flow/SKILL.md'), 'utf8')
+    for (const name of ['get_goal', 'create_goal', 'update_goal', 'update_plan']) assert(flowSkill.includes(name), `Installed Flow must explain ${name}`)
+    for (const name of ['workflow-policy.md', 'acceptance.md']) {
+      assert(flowSkill.includes(`references/${name}`))
+      assert((await readFile(resolve(workspace, '.agents/skills/jth-flow/references', name), 'utf8')).length > 0)
+    }
     assert((await readFile(resolve(workspace, '.agents/skills/jth-memo/SKILL.md'), 'utf8')).includes('references/declarations.md'))
     assert.equal(await readFile(resolve(workspace, 'AGENTS.md'), 'utf8'), originalAgent)
     await cli('install', '--env-file', envFile, '--project', 'fixture')
@@ -70,7 +76,8 @@ test('native flow installs without PG or model calls, retires old hooks and pres
     const context = JSON.parse(injected.stdout).hookSpecificOutput
     assert.equal(context.hookEventName, 'UserPromptSubmit')
     assert(context.additionalContext.includes('jth-flow Skill'))
-    assert(Buffer.byteLength(context.additionalContext) < 2000)
+    for (const name of ['planned', 'get_goal', 'create_goal']) assert(context.additionalContext.includes(name), `Trusted entry must request ${name}`)
+    assert(Buffer.byteLength(context.additionalContext) <= 512, 'Goal instruction must fit the installed hook context limit')
     const receipt = await readFile(resolve(workspace, '.jth/flow-entry.json'), 'utf8')
     assert.equal(JSON.parse(receipt).turn_id, 'turn-one')
     assert(!`${injected.stdout}${receipt}`.includes('PRIVATE_USER_TEXT'))

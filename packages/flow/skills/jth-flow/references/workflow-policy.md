@@ -18,22 +18,38 @@
 普通问答不必运行 CLI。开始实质工作或工作边界改变时，使用 `jth flow policy`。无需每个工具调用或步骤更新都重新评估。只声明本轮实际成立的事实，不补造默认理由。
 
 ```sh
-jth flow policy - --plan-tool available <<'JSON'
+jth flow policy - --plan-tool available --goal-tools available <<'JSON'
 {
   "request": {
     "intent": "ops",
     "relationship": "new",
     "planningReasons": ["dependent-work", "significant-impact"]
-  }
+  },
+  "goal": { "authorization": "instruction", "current": "unknown" }
 }
 JSON
 ```
 
-只有实际工具列表中存在 `update_plan` 才传 `--plan-tool available`；未提供为 unknown。工具不可用时保留会话步骤，并说明不能更新原生 UI。子 Agent 使用 `--role delegate`，只交回分派结果，由主 Agent 整合。
+只有实际工具列表中存在 `update_plan` 才传 `--plan-tool available`；`get_goal/create_goal/update_goal` 均可用才传 `--goal-tools available`。两者独立，未提供均为 unknown。工具不可用时明确说明未启用的能力。子 Agent 使用 `--role delegate`，只交回分派结果，由主 Agent 整合。
 
-策略返回 `decision`、`template`、`recording`。template 是规划维度；主 Agent 先列用户要求的可交付结果，再按能独立验收的结果细化、增删或合并工作项。每个任务写清：稳定 id、outcome、dependsOn、doneWhen、verifyWith。`outcome` 说明哪部分用户目标成为事实；`doneWhen` 写完成条件；`verifyWith` 写该结果的证据。只填写真实依赖，不按文件数量或固定阶段凑步骤。
+策略返回 `decision`、`template`、`recording` 和 `goal`。template 是规划维度；主 Agent 先列用户要求的可交付结果，再按能独立验收的结果细化、增删或合并工作项。每个任务写清：稳定 id、outcome、dependsOn、doneWhen、verifyWith。`outcome` 说明哪部分用户目标成为事实；`doneWhen` 写完成条件；`verifyWith` 写该结果的证据。只填写真实依赖，不按文件数量或固定阶段凑步骤。
 
 理解、调研、设计、编码、测试、回归和收口验收通常是交付项内的动作，不单列顶层任务；如果用户明确要求调研报告、设计方案或验收报告，它们才是独立交付结果。例如“实现批量取消并逐笔反馈”，可拆成“批量取消 API 返回逐笔结果”和“页面展示逐笔结果”，各自附检查；不要拆成“调研、开发、测试”。根因未知且用户要求排障时，可先列可验证的诊断结果，取得证据后细化修复项。全部交付后主 Agent 复核整体需求，这是收口动作，不另占一个计划步骤。
+
+## 准备与启动原生 Goal
+
+输出中的 `goal` 与 `recording` 独立。前者准备 `get_goal/create_goal`，后者准备 `update_plan`；两者的 `applied=false` 均表示尚未调用原生工具。Goal 生命周期由宿主维护，CLI 不读取私有状态、不执行这些工具，也不保存另一份 Goal。
+
+输入 `goal` 是主 Agent 对实际授权和最近原生结果的声明：
+
+- `authorization`：用户明确要求使用 Goal 填 `user`；系统/开发者明确要求（包括以该角色交付的受信任 Flow 入口）填 `instruction`；没有则填 `none`，也是默认值。不能因为任务大或有计划就填已授权；用户明确停用时不创建。
+- `current`：尚未读取为 `unknown`；实际无 Goal 为 `none`；同一未完成目标为 `same`；其他未完成目标为 `other`；上一目标已完成为 `complete`。暂停、阻塞或额度限制仍是未完成目标，不能填 `none/complete`。
+- `objective`：用户的完整总目标；省略时复用 `plan.goal`。这只是目标文本，不证明原生 Goal 已创建。
+- `tokenBudget`：只有用户明确指定正整数预算时提供，否则省略。
+
+上例返回 `goal.toolCall.name=get_goal`。主 Agent 实际调用后，若无目标，把 `current` 改成 `none`，提供 `objective` 或完整 `plan`，再准备 `create_goal`；也可直接按同一约定调用原生工具，不必为每个动作重复运行策略。创建后核对 `get_goal`，后续填 `same` 复用。
+
+planned 默认入口要求 Goal；普通问答不创建，guarded 小改仅在用户另有明确 Goal 要求时创建。缺授权、工具不可用、目标冲突或上下文缺失分别返回原因；不通过 `update_plan`、Hook 输出或 CLI 的退出码冒充 Goal 已启动。所有交付和验收通过后，由主 Agent 实际调用 `update_goal({status:"complete"})`，不能由此参数适配器推断完成。
 
 ## 准备与更新原生列表
 
@@ -47,6 +63,7 @@ CLI 可接收完整 `plan` 及当前 `progress`，输出 Codex 原生 `update_pl
     "contextAvailable": true,
     "activePlan": true
   },
+  "goal": { "authorization": "instruction", "current": "same" },
   "plan": {
     "goal": "完成配置迁移并接入当前仓库",
     "tasks": [
@@ -61,7 +78,7 @@ CLI 可接收完整 `plan` 及当前 `progress`，输出 Codex 原生 `update_pl
 }
 ```
 
-将真实内容交给 `jth flow policy <file|-> --plan-tool available`。`recording.kind=tool-request` 时，由当前 Agent 调用实际 `update_plan`，参数取 `toolCall.arguments`。`applied=false` 表示 CLI 从未调用原生工具；不能把准备参数当成更新成功。
+将真实内容交给 `jth flow policy <file|-> --plan-tool available --goal-tools available`。上例的 `current=same` 仅在已读取同一未完成 Goal 时成立。`recording.kind=tool-request` 时，由当前 Agent 调用实际 `update_plan`，参数取 `toolCall.arguments`；同时处理 `goal` 结果。`applied=false` 表示 CLI 从未调用原生工具；不能把准备参数当成更新成功。
 
 接续必须显式传入完整当前进度；完成项必须附实际证据引用，不得重置已完成项。依赖和 ID 检查只校验结构，不是语义验收。当前原生接口最多一个进行中项；即使存在并行子工作，主计划仍可用一个进行中的交付项汇总。
 
@@ -70,7 +87,7 @@ CLI 可接收完整 `plan` 及当前 `progress`，输出 Codex 原生 `update_pl
 ## 回执与验收
 
 - guarded：`JTH Flow｜guarded｜当前交付结果｜聚焦验证`。
-- planned：建立或接续真实计划后输出 `JTH Flow｜planned｜原生计划 N 步｜当前 T1：交付结果`。
+- planned：取得真实结果后输出 `JTH Flow｜planned｜Goal 已创建/已复用（或未启用原因）｜原生计划 N 步｜当前 T1：交付结果`。
 - delegate：只返回分派任务 ID、结果、证据、阻塞和下一步，不宣告主任务完成。
 - 不可用：如实说明会话步骤或缺失上下文，不伪报原生更新。
 
