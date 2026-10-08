@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Config } from '../config.ts'
 import { MemoStorageError, vectorSchema } from './contract.ts'
+import { sanitizeMemoryText } from '../memory-context.ts'
 
 const responseSchema = z.object({
   model: z.string(),
@@ -16,11 +17,12 @@ export async function embedTexts(texts: string[], config: Config['embedding'], s
   // batch row in live testing. One text per call avoids guessing associations;
   // batch only after the provider supplies verified unique input indices.
   for (const text of texts) {
+    const safeText = sanitizeMemoryText(text)
     const response = await fetch(`${baseUrl}/embeddings`, {
       method: 'POST',
       redirect: 'error',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: space.model, input: [text], dimensions: space.dimensions, encoding_format: 'float' }),
+      body: JSON.stringify({ model: space.model, input: [safeText], dimensions: space.dimensions, encoding_format: 'float' }),
       signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
     }).catch((error: unknown) => {
       signal?.throwIfAborted()

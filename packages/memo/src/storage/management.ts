@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg'
 import { z } from 'zod'
 import { transaction } from './database.ts'
 import type { StateEntry } from './relations.ts'
+import { assertDerivationApprovable } from './derivations.ts'
 
 const note = z.string().trim().min(1).max(2000)
 export const actionSchema = z.strictObject({
@@ -32,6 +33,7 @@ export async function manageEntry(database: Pool, input: z.input<typeof actionSc
     const receipts = []
     for (const entry of entries.rows) {
       if ((action.action === 'archive' && entry.archived) || (action.action === 'restore' && !entry.archived)) continue
+      if (action.action === 'approve') await assertDerivationApprovable(client, entry.id)
       const receipt = await client.query(`
         INSERT INTO jt_memo.entry_actions(id,entry_id,action,origin,reason,evidence_ref)
         VALUES ($1,$2,$3,'local_cli',$4,$5) RETURNING id,entry_id,action,actor,reason,evidence_ref,acted_at

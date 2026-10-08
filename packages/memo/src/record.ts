@@ -12,6 +12,7 @@ import { transaction } from './storage/database.ts'
 import { entryVersion } from './version.ts'
 import { entryMetadata } from './storage/metadata.ts'
 import { declarationId } from './declaration-contract.ts'
+import { validateDerivations } from './storage/derivations.ts'
 
 type Fact = Extraction['memories'][number] | Extraction['proposals'][number]
 export interface DeclarationReceipt {
@@ -42,13 +43,24 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
     const targets: { entryId?: string, collection: 'memories' | 'proposals', index: number }[] = []
     const fingerprints = new Map<string, number>()
     const memoryIndexes = new Map<number, number>()
+    const proposalIndexes = new Map<number, number>()
+    const derivations = draft.derivations ?? []
+    const derivationByProposal = new Map(derivations.map(item => [item.proposal_index, item]))
     for (const { fact, collection, index } of facts) {
       const changed = collection === 'memories' && draft.changes.some(change => change.current_memory_index === index)
       const metadata = entryMetadata(fact, evidence.submission)
-      const fingerprint = JSON.stringify([collection, fact.content, fact.basis, fact.scope, metadata.entities.toSorted(), metadata.valid_from, metadata.valid_until])
+      const derivation = collection === 'proposals' ? derivationByProposal.get(index) : undefined
+      const fingerprint = JSON.stringify([collection, fact.content, fact.basis, fact.scope, metadata.entities.toSorted(), metadata.valid_from, metadata.valid_until,
+        derivation ? derivation.sources.toSorted((a, b) => a.entry_id.localeCompare(b.entry_id)) : null])
       const same = changed ? undefined : fingerprints.get(fingerprint)
-      if (same !== undefined) { targets.push(targets[same]); continue }
-      const match = changed || fact.scope === 'unspecified' ? undefined : (await client.query<{ id: string }>(`
+      if (same !== undefined) {
+        const target = targets[same]
+        targets.push(target)
+        if (collection === 'proposals' && target.collection === 'proposals' && !target.entryId) proposalIndexes.set(index, target.index)
+        continue
+      }
+      const hasDerivation = Boolean(derivation)
+      const match = changed || fact.scope === 'unspecified' || hasDerivation ? undefined : (await client.query<{ id: string }>(`
         SELECT e.id FROM jt_memo.entry_states e JOIN jt_memo.entries locked_entry ON locked_entry.id=e.id
         WHERE e.content_sha256=$1 AND e.content=$2 AND e.collection=$3 AND e.basis=$4 AND e.scope=$5
           AND e.valid_from IS NOT DISTINCT FROM $6::timestamptz AND e.valid_until IS NOT DISTINCT FROM $7::timestamptz
@@ -58,6 +70,7 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
             OR ($5='current_task' AND e.source_session_id=$11) OR $5='user')
           AND ((e.state IN ('active','conflicted','scheduled') AND EXISTS (SELECT 1 FROM jt_memo.embeddings v WHERE v.entry_id=e.id AND v.space_id=$12))
             OR (e.state='pending' AND EXISTS (SELECT 1 FROM jt_memo.jobs j WHERE j.id=e.submission_id AND j.kind='index' AND j.status IN ('queued','running') AND j.execution->'space'->>'id'=$12)))
+          AND NOT EXISTS (SELECT 1 FROM jt_memo.entry_derivations d WHERE d.derived_entry_id=e.id)
         ORDER BY e.received_at,e.id LIMIT 1 FOR UPDATE OF locked_entry
       `, [sha256(fact.content), fact.content, collection, fact.basis, fact.scope, metadata.valid_from, metadata.valid_until, metadata.entities,
         evidence.submission.scope.project_ids, evidence.submission.scope.business_ids, evidence.submission.source.session_id, config.embedding.space!.id])).rows[0]
@@ -66,15 +79,18 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
       const position = fresh[collection].length
       targets.push({ collection, index: position })
       if (collection === 'memories') { memoryIndexes.set(index, position); fresh.memories.push(fact as Extraction['memories'][number]) }
-      else fresh.proposals.push(fact as Extraction['proposals'][number])
+      else { proposalIndexes.set(index, position); fresh.proposals.push(fact as Extraction['proposals'][number]) }
     }
     let jobId: string | null = null
     let entryIds: string[] = []
     if (fresh.memories.length || fresh.proposals.length || fresh.revisions.length) {
       const { used: _used, ...factDraft } = draft
+      const freshDerivations = [...new Map(derivations.filter(item => proposalIndexes.has(item.proposal_index))
+        .map(item => ({ ...item, proposal_index: proposalIndexes.get(item.proposal_index)! }))
+        .map(item => [item.proposal_index, item] as const)).values()]
       const reduced: RecordDraft = { ...factDraft, extraction: fresh, changes: draft.changes.map(change => ({ ...change,
         current_memory_index: change.current_memory_index === null ? null : memoryIndexes.get(change.current_memory_index)!,
-      })) }
+      })), ...(derivations.length ? { derivations: freshDerivations } : {}) }
       await recordMemories(client, reduced, evidence, config)
       jobId = recordId(reduced)
       entryIds = (await client.query<{ id: string }>('SELECT id FROM jt_memo.entries WHERE submission_id=$1 ORDER BY position', [jobId])).rows.map(row => row.id)
@@ -98,6 +114,7 @@ export async function recordMemories(database: Pool | PoolClient, input: RecordD
   if (draft.evidence_id !== evidence.id) throw new Error('候选引用的证据回执不一致')
   const submission = submissionSchema.parse({ ...evidence.submission, submission_id: recordId(draft) })
   const extraction = parseExtraction(JSON.stringify(draft.extraction), submission)
+  const derivations = draft.derivations ?? []
   if (!config.embedding.space) throw new Error('需要配置 Embedding 模型和向量空间；材料仍保留在本地待投递区')
   const execution = { envFile: config.envFile, dataDir: config.dataDir, space: config.embedding.space }
   return transaction(database, async client => {
@@ -107,13 +124,20 @@ export async function recordMemories(database: Pool | PoolClient, input: RecordD
       if (existing.rows[0].kind !== 'index' || existing.rows[0].content_hash !== sha256(JSON.stringify(submission))) throw new MemoStorageError('SUBMISSION_CONFLICT', '该提交 ID 已绑定其他来源材料')
       return { status: 'accepted', submission_id: submission.submission_id, index_status: existing.rows[0].status, duplicate: true }
     }
-    const ids = [...new Set(draft.changes.map(change => change.previous_entry_id))].sort()
+    const ids = [...new Set([...draft.changes.map(change => change.previous_entry_id), ...derivations.flatMap(item => item.sources.map(source => source.entry_id))])].sort()
     await client.query('SELECT id FROM jt_memo.entries WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids])
     for (const change of draft.changes) {
       if (change.expected_version !== await entryVersion(client, change.previous_entry_id)) throw new MemoStorageError('VERSION_CONFLICT', '旧记忆版本已变化；请重新 read 后提交，未修改旧事实')
     }
+    const checkedDerivations = await validateDerivations(client, derivations, extraction, submission)
     const storage = new MemoStorage(client)
     const stored = await storage.store({ submission, extraction, run: evidence.run })
+    for (const derivation of checkedDerivations) {
+      const derivedEntryId = stored.entry_ids[extraction.memories.length + derivation.proposal_index]
+      for (const source of derivation.sources) {
+        await client.query('INSERT INTO jt_memo.entry_derivations(derived_entry_id,source_entry_id,read_version) VALUES ($1,$2,$3)', [derivedEntryId, source.entry_id, source.read_version])
+      }
+    }
     const saved = await storage.getSubmission(submission.submission_id)
     const relations = draft.changes.map(({ current_memory_index, expected_version, ...change }) => {
       if (current_memory_index !== null && current_memory_index >= extraction.memories.length) throw new Error('current_memory_index 必须引用本批 memories 中的条目')

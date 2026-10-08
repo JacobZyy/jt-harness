@@ -10,9 +10,10 @@ import { publishRelations, readRelations } from './revision-storage.ts'
 import type { Relation, StateEntry } from './relations.ts'
 import { entryMetadata, entrySnapshot } from './metadata.ts'
 import { readActions } from './management.ts'
-import { entryVersion, versionExpression } from '../version.ts'
+import { entryVersion, versionExpression, versionExpressionFor } from '../version.ts'
 import type { IntakeIssue } from '../intake.ts'
 import { rankMemories, retrievalInputSchema, type RetrievalInput } from '../retrieval.ts'
+import { derivationSnapshotStale, readDerivations } from './derivations.ts'
 
 interface SubmissionRow {
   id: string
@@ -187,6 +188,7 @@ export class MemoStorage {
     if (!row) throw new MemoStorageError('NOT_FOUND', '记忆条目不存在')
     const { source, version_data, ...entry } = row
     const commits = await this.pool.query<IndexRow>('SELECT * FROM jt_memo.index_commits WHERE submission_id = $1 AND indexed_at<=COALESCE($2::timestamptz,CURRENT_TIMESTAMP) ORDER BY indexed_at, id', [entry.submission_id, asOf ?? null])
+    const derivation = entry.collection === 'proposals' ? await readDerivations(this.pool, entry.id, asOf) : null
     return {
       ...entry, source: source.source, version: asOf ? null : sha256(JSON.stringify(version_data)),
       messages: source.messages.filter(message => entry.source_message_ids.includes(message.message_id)),
@@ -197,6 +199,7 @@ export class MemoStorage {
           AND r.result->>'submission_id' IS DISTINCT FROM $3::text ORDER BY r.received_at DESC LIMIT 20`, [entry.id, asOf ?? null, entry.submission_id])).rows,
       index_receipts: commits.rows.map(indexReceipt),
       as_of: asOf ?? null,
+      ...(derivation && derivation.sources.length ? { derivation } : {}),
       ...await readRelations(this.pool, [entry.id], undefined, asOf),
       ...await readActions(this.pool, [entry.id], asOf),
     }
@@ -228,22 +231,32 @@ export class MemoStorage {
     const scopeIds = scope.kind === 'project' ? scope.project_ids : scope.kind === 'business' ? scope.business_ids : []
     const sourceId = scope.kind === 'current_task' ? scope.source_session_id : scope.kind === 'unspecified' ? scope.submission_id : ''
     // ponytail: scan the authorized personal corpus; add indexed lexical/ANN retrieval when measured volume requires it.
-    const matches = await this.pool.query<StateEntry & { distance: number | null }>(`
-      WITH snapshot AS (${entrySnapshot('$9')})
-      SELECT e.*, v.embedding OPERATOR(public.<=>) $2::public.vector AS distance
+    const matches = await this.pool.query<StateEntry & { distance: number | null, derivation_data: unknown | null }>(`
+      WITH snapshot AS (${entrySnapshot('$8')}), derivation_snapshot AS (
+        SELECT d.derived_entry_id, jsonb_agg(jsonb_build_object('read_version',d.read_version,
+          'version_data',(SELECT ${versionExpressionFor('source_entry', '$8', false)}
+            FROM snapshot source_entry
+            WHERE source_entry.id=d.source_entry_id)) ORDER BY d.source_entry_id) AS dependencies
+        FROM jt_memo.entry_derivations d GROUP BY d.derived_entry_id
+      )
+      SELECT e.*, v.embedding OPERATOR(public.<=>) $2::public.vector AS distance, ds.dependencies AS derivation_data
       FROM snapshot e LEFT JOIN jt_memo.embeddings v ON e.id = v.entry_id AND v.space_id = $1
-      WHERE ($11::boolean OR v.space_id IS NOT NULL) AND e.scope = $3
+        LEFT JOIN derivation_snapshot ds ON ds.derived_entry_id=e.id
+      WHERE ($10::boolean OR v.space_id IS NOT NULL) AND e.scope = $3
         AND (e.claim_status IN ('asserted','observed','verified') OR ($6::boolean AND e.claim_status='candidate'))
-        AND ($8::boolean OR e.state IN ('active','conflicted')) AND e.state<>'pending'
-        AND ($10::boolean OR NOT e.archived)
+        AND ($7::boolean OR e.state IN ('active','conflicted')) AND e.state<>'pending'
+        AND ($9::boolean OR NOT e.archived)
         AND (($3 = 'project' AND e.project_ids <@ $4::text[])
           OR ($3 = 'business' AND e.business_ids <@ $4::text[])
           OR ($3 = 'current_task' AND e.source_session_id = $5)
           OR ($3 = 'unspecified' AND e.submission_id = $5)
           OR $3 = 'user')
-      ORDER BY distance NULLS LAST, e.id LIMIT CASE WHEN $11 THEN NULL ELSE $7::int END
-    `, [query.space_id ?? null, query.vector ? JSON.stringify(query.vector) : null, scope.kind, scopeIds, sourceId, query.include_candidates, query.limit, query.include_history, query.as_of ?? null, query.include_archived, all])
-    return { space, entries: matches.rows }
+      ORDER BY distance NULLS LAST, e.id
+    `, [query.space_id ?? null, query.vector ? JSON.stringify(query.vector) : null, scope.kind, scopeIds, sourceId, query.include_candidates, query.include_history, query.as_of ?? null, query.include_archived, all])
+    const entries = matches.rows.filter(entry => query.include_history || !derivationSnapshotStale(entry.derivation_data))
+      .slice(0, all ? undefined : query.limit)
+      .map(({ derivation_data: _derivationData, ...entry }) => entry)
+    return { space, entries }
   }
 
   private async submission(client: PoolClient, id: string, lock = false, asOf?: string): Promise<SubmissionRow> {

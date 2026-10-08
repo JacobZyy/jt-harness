@@ -5,6 +5,8 @@ import type { MemoryEntry, PublicationNote } from './contract.ts'
 import { validateRelations, comparisonLimits } from './relations.ts'
 import type { Relation, StateEntry } from './relations.ts'
 import { entrySnapshot } from './metadata.ts'
+import { derivationSnapshotStale } from './derivations.ts'
+import { versionExpressionFor } from '../version.ts'
 
 interface RelationRow extends Omit<Relation, 'resolved_revision_conflict_ids'> {
   id: string
@@ -146,18 +148,28 @@ export async function readRelations(database: Pool | PoolClient, ids: string[], 
 export async function findRelatedEntries(database: Pool | PoolClient, submission: Submission, spaceId: string, probes: { vector: number[], scope: MemoryEntry['scope'] | null }[]) {
   const found = new Map<string, StateEntry & { similarity: number }>()
   for (const probe of probes) {
-    const result = await database.query<StateEntry & { similarity: number }>(`
-      SELECT e.*, 1 - (v.embedding OPERATOR(public.<=>) $2::public.vector) AS similarity FROM jt_memo.entry_states e JOIN jt_memo.embeddings v ON v.entry_id = e.id
+    // ponytail: scan authorized comparison corpus; narrow by dependency candidates if volume requires it.
+    const result = await database.query<StateEntry & { similarity: number, derivation_data: unknown | null }>(`
+      WITH snapshot AS (${entrySnapshot('NULL')}), derivation_snapshot AS (
+        SELECT d.derived_entry_id, jsonb_agg(jsonb_build_object('read_version',d.read_version,
+          'version_data',(SELECT ${versionExpressionFor('source_entry', 'NULL', false)}
+            FROM snapshot source_entry
+            WHERE source_entry.id=d.source_entry_id)) ORDER BY d.source_entry_id) AS dependencies
+        FROM jt_memo.entry_derivations d GROUP BY d.derived_entry_id
+      )
+      SELECT e.*, 1 - (v.embedding OPERATOR(public.<=>) $2::public.vector) AS similarity, ds.dependencies AS derivation_data
+      FROM snapshot e JOIN jt_memo.embeddings v ON v.entry_id = e.id
+        LEFT JOIN derivation_snapshot ds ON ds.derived_entry_id=e.id
       WHERE v.space_id = $1 AND e.claim_status IN ('asserted','observed','verified') AND NOT e.archived AND e.state IN ('active', 'conflicted', 'scheduled')
         AND e.submission_id <> $3 AND ($4::text IS NULL OR e.scope = $4)
         AND (e.scope = 'user'
           OR (e.scope = 'project' AND e.project_ids <@ $5::text[] AND e.project_ids @> $5::text[])
           OR (e.scope = 'business' AND e.business_ids <@ $6::text[] AND e.business_ids @> $6::text[])
           OR (e.scope = 'current_task' AND e.source_session_id = $7))
-      ORDER BY v.embedding OPERATOR(public.<=>) $2::public.vector, e.id LIMIT 5
+      ORDER BY v.embedding OPERATOR(public.<=>) $2::public.vector, e.id
     `, [spaceId, JSON.stringify(probe.vector), submission.submission_id, probe.scope,
       submission.scope.project_ids, submission.scope.business_ids, submission.source.session_id])
-    for (const entry of result.rows) {
+    for (const { derivation_data: dependencyData, ...entry } of result.rows.filter(entry => !derivationSnapshotStale(entry.derivation_data)).slice(0, 5)) {
       if (entry.similarity < comparisonLimits.minimumSimilarity) continue
       if (!found.has(entry.id) || found.get(entry.id)!.similarity < entry.similarity) found.set(entry.id, entry)
     }

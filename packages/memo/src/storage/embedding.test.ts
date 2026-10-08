@@ -63,3 +63,20 @@ test('transport failures identify the Embedding stage and retain the cause; call
     await assert.rejects(embedTexts(['fact'], config, AbortSignal.abort(reason)), error => error === reason)
   } finally { globalThis.fetch = originalFetch }
 })
+
+test('Embedding sanitizes credentials at transport boundary without changing caller input', async () => {
+  const originalFetch = globalThis.fetch
+  const input = 'Bearer test-bearer-token password=secret-value 中文😀'
+  let sent = ''
+  globalThis.fetch = (async (_url, init) => {
+    sent = JSON.parse(String(init?.body)).input[0]
+    return Response.json({ model: 'test', data: [{ index: 0, embedding: [1, 0.1] }] })
+  }) as typeof fetch
+  try {
+    await embedTexts([input], config)
+    assert.equal(input, 'Bearer test-bearer-token password=secret-value 中文😀')
+    assert(!sent.includes('test-bearer-token'))
+    assert(!sent.includes('secret-value'))
+    assert(sent.includes('中文😀'))
+  } finally { globalThis.fetch = originalFetch }
+})

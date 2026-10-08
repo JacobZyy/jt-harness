@@ -12,6 +12,7 @@ export const declarationSchema = z.strictObject({
     basis: z.enum(['user_statement', 'user_confirmed', 'tool_observation', 'assistant_proposal', 'agent_inference']),
     quote: z.string().trim().min(1).max(240),
     confirmation_quote: z.string().trim().min(1).max(240).optional(),
+    derived_from: z.array(z.uuid()).min(1).max(10).optional(),
     change: z.strictObject({ kind: z.enum(['correction', 'supplement', 'conflict']), target: z.uuid() }).optional(),
   })).max(3),
   used: z.array(z.uuid()).max(10).optional(),
@@ -26,6 +27,14 @@ export const declarationSchema = z.strictObject({
   }
   if (value.items.some(item => item.confirmation_quote && item.basis !== 'user_confirmed')) {
     context.addIssue({ code: 'custom', message: 'confirmation_quote 仅用于 user_confirmed 声明' })
+  }
+  for (const item of value.items) {
+    if (item.derived_from && !['assistant_proposal', 'agent_inference'].includes(item.basis)) {
+      context.addIssue({ code: 'custom', message: 'derived_from 仅用于候选建议或推断；不能替代用户或工具证据' })
+    }
+    if (item.derived_from && new Set(item.derived_from).size !== item.derived_from.length) {
+      context.addIssue({ code: 'custom', message: '派生来源 ID 不得重复' })
+    }
   }
 })
 export type MemoryDeclaration = z.infer<typeof declarationSchema>

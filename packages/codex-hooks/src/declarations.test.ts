@@ -176,6 +176,49 @@ test('usage-only declarations require a prior read and do not create memory fact
   } finally { await f.cleanup() }
 })
 
+test('recalled tool output and earlier declaration blocks cannot echo into fresh facts', async () => {
+  const f = await fixture()
+  try {
+    const output = JSON.stringify({ memory_context: { kind: 'jth_memory_context', source: 'jth-memo', channel: 'cli', trust: 'untrusted' },
+      entries: [{ preview: '项目使用 pnpm' }] })
+    await appendFile(f.source, row('event_msg', { type: 'item_completed', thread_id: 'parent', item: {
+      type: 'CommandExecution', id: 'recall', command: 'jth memo recall pnpm', aggregated_output: output,
+    } }) + message('old-declaration', 'AgentMessage', declaration()) + message('final', 'AgentMessage', declaration({ basis: 'tool_observation' })))
+    await f.capture(declaration({ basis: 'tool_observation' }))
+    assert.match((await collectDeclarations(f.config)).errors[0].error, /真实来源/)
+    await appendFile(f.source, message('real-user', 'UserMessage', '项目使用 pnpm，当前确认。') + message('new-final', 'AgentMessage', declaration()))
+    await f.capture(declaration())
+    assert.equal((await collectDeclarations(f.config)).received, 1)
+    const file = (await readdir(resolve(f.config.dataDir, 'codex/records')))[0]
+    const staged = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/records', file), 'utf8'))
+    const evidence = await readEvidence(f.config, staged.evidence_id)
+    assert.equal(evidence.submission.messages[0].role, 'user')
+  } finally { await f.cleanup() }
+})
+
+test('derived candidates bind evidence-level reads in this session and cannot masquerade as facts', async () => {
+  const f = await fixture(), source = randomUUID(), version = 'd'.repeat(64)
+  const text = declaration({ text: '建议统一项目依赖安装入口。', basis: 'agent_inference', quote: '统一项目依赖安装入口', derived_from: [source] })
+  try {
+    assert.throws(() => parseDeclaration(declaration({ derived_from: [source] })), /仅用于候选/)
+    assert.throws(() => parseDeclaration(declaration({ basis: 'agent_inference', derived_from: [source, source] })), /不得重复/)
+    await rememberEntryRead(f.config, 'another-session', source, version, 'full')
+    await rememberEntryRead(f.config, 'parent', source, version, 'summary')
+    await appendFile(f.source, message('proposal', 'AgentMessage', '建议统一项目依赖安装入口，尚待确认。') + message('final', 'AgentMessage', text))
+    await f.capture(text)
+    assert.match((await collectDeclarations(f.config)).errors[0].error, /--level evidence/)
+    await rememberEntryRead(f.config, 'parent', source, version, 'evidence')
+    await f.capture(text)
+    assert.equal((await collectDeclarations(f.config)).received, 1)
+    const file = (await readdir(resolve(f.config.dataDir, 'codex/records')))[0]
+    const staged = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/records', file), 'utf8'))
+    assert.deepEqual(staged.draft.extraction.memories, [])
+    assert.equal(staged.draft.extraction.proposals.length, 1)
+    assert.deepEqual(staged.draft.derivations, [{ proposal_index: 0, sources: [{ entry_id: source, read_version: version }] }])
+    await readEvidence(f.config, staged.evidence_id)
+  } finally { await f.cleanup() }
+})
+
 test('installation replaces legacy capture with declaration and bounded cue hooks', async () => {
   const f = await fixture()
   const root = resolve(import.meta.dirname, '../../..')
@@ -190,7 +233,9 @@ test('installation replaces legacy capture with declaration and bounded cue hook
     await configureHooks(root, f.config, f.directory, f.settings.scope, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
     assert((await lstat(resolve(f.directory, '.agents/skills/jth-memo'))).isDirectory())
-    assert((await readFile(resolve(f.directory, '.agents/skills/jth-memo/references/declarations.md'), 'utf8')).includes('confirmation_quote'))
+    const installedDeclaration = await readFile(resolve(f.directory, '.agents/skills/jth-memo/references/declarations.md'), 'utf8')
+    assert(installedDeclaration.includes('confirmation_quote'))
+    assert(installedDeclaration.includes('derived_from'))
     await configureHooks(root, f.config, f.directory, f.settings.scope, f.home)
     assert.equal(await readFile(resolve(f.directory, 'AGENTS.md'), 'utf8'), original)
     const hooks = JSON.parse(await readFile(resolve(f.directory, '.codex/hooks.json'), 'utf8')).hooks

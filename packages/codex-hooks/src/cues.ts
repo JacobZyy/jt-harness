@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises'
 import { resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
-import type { MemoStorage, ScopeFilter } from '@jacob-z/jt-harness/memo'
+import { boundedMemoryContext, sanitizeMemoryText, truncateUnicode, type MemoStorage, type ScopeFilter } from '@jacob-z/jt-harness/memo'
 import { codexDirectory, hash, inside, installationPath, readJson, writeJson, type CaptureSettings } from './capture.ts'
 import { memoEntryContext } from './instructions.ts'
 
@@ -26,8 +26,10 @@ export async function memoryCues(input: unknown, settings: CaptureSettings, conf
     return {}
   }
   const prior = await readJson(path)
-  const output = (lines: string[] = []): CueOutput => ({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit',
-    additionalContext: [memoEntryContext, ...(lines.length ? ['记忆线索（未读取）：', ...lines] : [])].join('\n'),
+  const output = (entries: Array<{ id: string, preview: string }> = []): CueOutput => ({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit',
+    additionalContext: boundedMemoryContext({ instructions: memoEntryContext, cues: entries.map(entry => ({
+      ...entry, preview: truncateUnicode(sanitizeMemoryText(entry.preview), 140), next: `jth memo read ${entry.id} --level evidence`,
+    })) }, 1600),
   } })
   if (prior && !cueStateSchema.parse(prior).pending) return output()
   const query = [...(event.prompt ?? '').trim()].slice(0, 2000).join('')
@@ -43,14 +45,17 @@ export async function memoryCues(input: unknown, settings: CaptureSettings, conf
     const results = await Promise.all(scopes.map(scope => storage.retrieve({ query, scope, mode: 'keyword', limit: 3 })))
     const entries = [...new Map(results.flatMap(result => result.entries).map(entry => [entry.id, entry])).values()]
       .sort((a, b) => b.match.rank_score - a.match.rank_score || a.id.localeCompare(b.id)).slice(0, 3)
-    const shown = [], lines: string[] = []
+    const shown = [], cues: Array<{ id: string, preview: string }> = []
     for (const entry of entries) {
-      const line = JSON.stringify({ id: entry.id, preview: [...entry.content].slice(0, 140).join('') })
-      if (lines.join('\n').length + line.length > 1200) break
-      shown.push(entry); lines.push(line)
+      const cue = { id: entry.id, preview: truncateUnicode(sanitizeMemoryText(entry.content), 140) }
+      if (JSON.stringify(cues.concat(cue)).length > 1200) break
+      shown.push(entry); cues.push(cue)
     }
-    await writeJson(path, { ...receipt, status: shown.length ? 'shown' : 'no-match', entries: shown.map(entry => ({ id: entry.id, state: entry.state, match: entry.match })) })
-    return output(lines)
+    const cueOutput = output(cues)
+    const emittedCues = JSON.parse(cueOutput.hookSpecificOutput!.additionalContext).cues as Array<{ id: string }>
+    const emittedIds = new Set(emittedCues.map(cue => cue.id))
+    await writeJson(path, { ...receipt, status: emittedIds.size ? 'shown' : 'no-match', entries: shown.filter(entry => emittedIds.has(entry.id)).map(entry => ({ id: entry.id, state: entry.state, match: entry.match })) })
+    return cueOutput
   } catch (error) {
     await writeJson(path, { ...receipt, status: 'unavailable', error: error instanceof Error ? error.name : 'Error' })
     return output()

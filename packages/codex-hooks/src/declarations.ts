@@ -2,7 +2,7 @@ import { readdir, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { declarationMarker, parseDeclaration, evidenceSchema, recordDraftSchema } from '@jacob-z/jt-harness/memo/contracts'
+import { declarationMarker, parseDeclaration, evidenceSchema, recordDraftSchema, isRecalledMemory } from '@jacob-z/jt-harness/memo/contracts'
 import type { Submission } from '@jacob-z/jt-harness/memo/contracts'
 import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { captureEvent, captureSchema, codexDirectory, hash, hookEventSchema, readJson, writeJson } from './capture.ts'
@@ -33,16 +33,34 @@ export async function rememberEntryRead(config: CapturePaths, sessionId: string,
   await writeJson(resolve(codexDirectory(config), 'reads', hash(sessionId), `${entryId}-${randomUUID()}.json`), receipt)
 }
 
-async function readVersion(config: CapturePaths, sessionId: string, target: string, before: string, requireFull = true) {
+async function readVersion(config: CapturePaths, sessionId: string, target: string, before: string, minimum: 'summary' | 'evidence' | 'full' = 'full') {
   const receipts = []
   for (const file of await jsonFiles(resolve(codexDirectory(config), 'reads', hash(sessionId)))) {
     const receipt = readReceiptSchema.parse(await readJson(file))
     if (receipt.session_id === sessionId && receipt.entry_id === target && receipt.read_at <= before
-      && (!requireFull || !receipt.level || receipt.level === 'full')) receipts.push(receipt)
+      && (minimum === 'summary' || !receipt.level || receipt.level === 'full' || (minimum === 'evidence' && receipt.level === 'evidence'))) receipts.push(receipt)
   }
   const latest = receipts.sort((a, b) => a.read_at.localeCompare(b.read_at)).at(-1)
-  if (!latest) throw new Error('记忆尚无本会话所需的读取回执；先 read，更正关系需要 --level full')
+  if (!latest) throw new Error(`记忆尚无本会话所需的读取回执；先 read，当前要求 --level ${minimum}`)
   return latest.version
+}
+
+/** Tool envelopes may contain serialized CLI JSON; recalled text cannot become fresh evidence. */
+function recalledOutput(value: unknown): boolean {
+  if (isRecalledMemory(value)) return true
+  if (typeof value === 'string') {
+    try { return recalledOutput(JSON.parse(value)) }
+    catch { return /"memory_context"\s*:\s*\{[^}]*"kind"\s*:\s*"jth_memory_context"/.test(value.replace(/\\"/g, '"')) }
+  }
+  return Boolean(value && typeof value === 'object' && Object.values(value).some(recalledOutput))
+}
+
+function sourceText(message: Submission['messages'][number]) {
+  if (message.role !== 'assistant') return message.text
+  try { if (!parseDeclaration(message.text)) return message.text }
+  catch { /* A previous malformed declaration is not evidence either. */ }
+  const marker = message.text.lastIndexOf(declarationMarker)
+  return marker < 0 ? message.text : message.text.slice(0, marker)
 }
 
 async function prepareDeclaration(capture: Capture, config: CapturePaths) {
@@ -61,16 +79,20 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
   if (!declaration) return null
   const quotes = new Set(declaration.items.flatMap(item => item.confirmation_quote ? [item.quote, item.confirmation_quote] : [item.quote]))
   const matches = new Map<string, Submission['messages']>()
+  const recalledIds = new Set<string>()
   for await (const row of readTranscript({ ...options, end: last.start })) {
+    if (row.messages[0]?.role === 'tool' && recalledOutput(row.messages.map(message => message.text).join(''))) {
+      for (const message of row.messages) recalledIds.add(message.message_id)
+    }
     for (const message of row.messages) for (const quote of quotes) {
-      if (!message.text.includes(quote)) continue
+      if (!sourceText(message).includes(quote)) continue
       const sources = matches.get(quote) ?? []
       sources.push({ ...message, location: { path: snapshot.original_path, start: row.start, end: row.end } })
       matches.set(quote, sources)
     }
   }
   const itemSources = declaration.items.map(item => {
-    const sources = matches.get(item.quote)
+    const sources = matches.get(item.quote)?.filter(message => !message.context_only && (!recalledIds.has(message.message_id) || item.derived_from?.length))
     if (!sources?.length) throw new Error('声明引文未出现在本次回复之前的真实来源中；不会用声明自身充当证据')
     if (!item.confirmation_quote) return [sources.at(-1)!]
     const confirmation = matches.get(item.confirmation_quote)?.findLast(message => message.role === 'user')
@@ -89,12 +111,21 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
   await writeJson(resolve(codexDirectory(config), 'evidence', `${id}.json`), { ...evidence, snapshots: [{ path: snapshot.path, original_path: snapshot.original_path }] })
   const draft = recordDraftSchema.parse({ evidence_id: id, extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, changes: [] })
   if (declaration.used?.length) draft.used = await Promise.all(declaration.used.map(async entry_id => ({
-    entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, false),
+    entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, 'summary'),
   })))
   for (const [itemIndex, item] of declaration.items.entries()) {
     const sourceIds = itemSources[itemIndex].map(message => message.message_id)
     const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds }
-    if (item.basis === 'assistant_proposal' || item.basis === 'agent_inference') draft.extraction.proposals.push({ ...fact, basis: item.basis })
+    if (item.basis === 'assistant_proposal' || item.basis === 'agent_inference') {
+      const proposal_index = draft.extraction.proposals.length
+      draft.extraction.proposals.push({ ...fact, basis: item.basis })
+      if (item.derived_from) {
+        draft.derivations ??= []
+        draft.derivations.push({ proposal_index, sources: await Promise.all(item.derived_from.map(async entry_id => ({
+          entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, 'evidence'),
+        }))) })
+      }
+    }
     else {
       const index = draft.extraction.memories.length
       draft.extraction.memories.push({ ...fact, basis: item.basis })

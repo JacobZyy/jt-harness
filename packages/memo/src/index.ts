@@ -31,3 +31,9 @@ export { recordMemories, recordDeclaration } from './record.ts'
 export { runIndexWorker, processIndexJob } from './index-worker.ts'
 export { readMemory } from './reading.ts'
 export { memoryUses } from './usage.ts'
+export {
+  memoryContextKind, memoryNotice, createMemoryContext, isMemoryContext, isRecalledMemory,
+  withMemoryContext, sanitizeMemoryText, sanitizeMemoryValue, unicodeLength, truncateUnicode,
+  boundMemoryEntries, boundedMemoryContext,
+} from './memory-context.ts'
+export type { MemoryContext, MemoryContextChannel } from './memory-context.ts'

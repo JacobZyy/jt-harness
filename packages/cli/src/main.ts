@@ -18,7 +18,7 @@ import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jacob-z/jt-harness/memo'
 import { rememberEntryRead } from '@jacob-z/jt-harness/codex-hooks'
-import { readMemory, memoryUses, retrievalInputSchema } from '@jacob-z/jt-harness/memo'
+import { boundMemoryEntries, readMemory, memoryUses, retrievalInputSchema, sanitizeMemoryValue, truncateUnicode, withMemoryContext } from '@jacob-z/jt-harness/memo'
 
 const help = `jth init  问答式初始化：目录名默认项目、复用全局配置、自动建表与接入检查
 jth install|doctor|uninstall  独立安装、项目接入和运行诊断；运行 jth install --help
@@ -182,11 +182,15 @@ export async function main(root: string, args = process.argv.slice(2)) {
         break
       }
       case 'stats': result = await storageStats(pool); break
-      case 'archives': result = await listManagedEntries(pool, 'archives', limit); break
+      case 'archives': result = boundMemoryEntries(await listManagedEntries(pool, 'archives', limit), {
+        maxChars: 12_000, next: '使用 jth memo read <entry-id> --level evidence 展开条目；需要更多归档时调整 --limit。',
+      }); break
       case 'review': {
         if (operands[0] === 'list') {
           if (values.reason || values.evidence) throw new Error('review list 不接受 --reason 或 --evidence')
-          result = await listManagedEntries(pool, 'candidates', limit)
+          result = boundMemoryEntries(await listManagedEntries(pool, 'candidates', limit), {
+            maxChars: 12_000, next: '使用 jth memo read <entry-id> --level evidence 展开候选；需要更多候选时调整 --limit。',
+          })
         } else {
           if (values.limit) throw new Error('审核操作不接受 --limit')
           result = await manageEntry(pool, { action: operands[0] as 'approve' | 'reject', entry_id: operands[1], reason: values.reason ?? '', evidence_ref: values.evidence })
@@ -206,12 +210,12 @@ export async function main(root: string, args = process.argv.slice(2)) {
         break
       }
       case 'read': {
-        if (values.submission) result = await storage.getSubmission(values.submission, asOf)
+        if (values.submission) result = withMemoryContext(sanitizeMemoryValue(await storage.getSubmission(values.submission, asOf)), 'cli')
         else {
           const entry = await storage.getEntry(operands[0], asOf)
           const sessionId = values['source-session'] ?? process.env.CODEX_THREAD_ID
+          result = withMemoryContext(sanitizeMemoryValue(readMemory(entry, values.level)), 'cli')
           if (sessionId && entry.version) await rememberEntryRead(config, sessionId, entry.id, entry.version, values.level ?? 'full')
-          result = readMemory(entry, values.level)
         }
         break
       }
@@ -229,14 +233,14 @@ export async function main(root: string, args = process.argv.slice(2)) {
         const query = retrievalInputSchema.parse({ query: queryText, mode, ...vectors, scope, min_similarity: minSimilarity,
           include_history: values.history, include_candidates: values.candidates || values.proposals, include_archived: values.archived, as_of: asOf, limit })
         const found = await storage.retrieve(query)
-        result = { space: found.space, mode: found.mode, query: query.query, min_similarity: mode === 'keyword' ? null : query.min_similarity,
+        result = boundMemoryEntries({ space: found.space, mode: found.mode, query: query.query, min_similarity: mode === 'keyword' ? null : query.min_similarity,
           notice: '分数表示检索匹配，不是正确性或采用评分；候选不够相关时可为空。', entries: found.entries.map(entry => ({
           id: entry.id, submission_id: entry.submission_id, collection: entry.collection, scope: entry.scope,
-          preview: entry.content.slice(0, 400), distance: entry.distance, match: entry.match,
+          preview: truncateUnicode(entry.content, 400), distance: entry.distance, match: entry.match,
           state: entry.state,
           claim_status: entry.claim_status, archived: entry.archived, entities: entry.entities,
           source_occurred_at: entry.source_occurred_at, valid_from: entry.valid_from, valid_until: entry.valid_until,
-        })) }
+        })) }, { maxChars: 12_000, next: '使用返回的 entry.id 执行 jth memo read <entry-id> --level evidence；需要更多候选时重新执行并调整 --limit。' })
         break
       }
       case 'send':

@@ -14,6 +14,7 @@ import { configureProjectCodex, withCodex } from './codex-client.ts'
 import { parse } from '@decimalturn/toml-patch'
 import { hookCommand, memoHookCommand, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
 import { readPrimaryInstallation } from '../../../scripts/setup-worktree.ts'
+import { schemaVersion } from '@jacob-z/jt-harness/memo'
 
 test('trust selection excludes foreign markers, events, commands and ancestor projects', () => {
   const workspace = '/project'
@@ -98,7 +99,7 @@ test('init refreshes project setup; uninstall removes project configuration with
     await assert.rejects(cli('init'), /配置不完整：缺少 EMBEDDING_API_KEY/)
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), first)
     await writeFile(envFile, originalConfig)
-    if (process.env.JTH_TEST_DATABASE_URL) assert.equal((await cli('init')).database.schema_version, 8)
+    if (process.env.JTH_TEST_DATABASE_URL) assert.equal((await cli('init')).database.schema_version, schemaVersion)
     else await assert.rejects(cli('init'))
     assert.equal(await readFile(resolve(workspace, '.codex/hooks.json'), 'utf8'), first)
     assert.deepEqual(await readPrimaryInstallation(workspace), { envFile, projectIds: ['fixture'], businessIds: [] })
@@ -129,7 +130,7 @@ test('init refreshes project setup; uninstall removes project configuration with
     if (process.env.JTH_TEST_DATABASE_URL) {
       const reinitialized = await cli('init', '--env-file', envFile)
       assert.deepEqual(reinitialized.memo.settings.scope.project_ids, ['fixture'])
-      assert.equal(reinitialized.database.schema_version, 8)
+      assert.equal(reinitialized.database.schema_version, schemaVersion)
     }
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
@@ -167,7 +168,7 @@ test('init replaces stale JTH Skill links and copies without matching old Hooks'
     await rm(memoSkill, { recursive: true })
     await mkdir(memoSkill)
     await writeFile(resolve(memoSkill, 'SKILL.md'), 'old copy')
-    assert.equal((await cli('init')).database.schema_version, 8)
+    assert.equal((await cli('init')).database.schema_version, schemaVersion)
     for (const kind of ['flow', 'memo']) {
       assert((await lstat(resolve(workspace, `.agents/skills/jth-${kind}`))).isDirectory())
     }
@@ -243,7 +244,7 @@ test('init sets fresh project defaults; repeated init preserves user choices', {
     assert.equal(result.codex_memory.path, path)
     assert.equal(result.codex_plan.enabled, true)
     assert.equal(result.codex_plan.path, path)
-    assert.equal(result.database.schema_version, 8)
+    assert.equal(result.database.schema_version, schemaVersion)
     assert.equal(result.verification.checks.find((check: { name: string }) => check.name === 'database').status, 'ok')
     assert.deepEqual({ ...parse(await readFile(path, 'utf8')).memories }, { use_memories: false, generate_memories: false })
     assert.equal(parse(await readFile(path, 'utf8')).tools.update_plan.enabled, true)
@@ -252,7 +253,7 @@ test('init sets fresh project defaults; repeated init preserves user choices', {
     await writeFile(path, changed)
     await cli('install')
     assert.equal(await readFile(path, 'utf8'), changed)
-    assert.equal(JSON.parse((await cli('init')).stdout).database.schema_version, 8)
+    assert.equal(JSON.parse((await cli('init')).stdout).database.schema_version, schemaVersion)
     assert.equal(await readFile(path, 'utf8'), changed)
     await cli('install', '--codex-memory', 'off')
     assert.equal(parse(await readFile(path, 'utf8')).tools.update_plan.enabled, false)
@@ -304,7 +305,7 @@ test('bare init completes a real terminal questionnaire and reuses global config
     assert(first.includes('初始化完成'), first.slice(-1500))
     assert(first.includes('项目：first-project'))
     assert(!first.includes('private-wizard-key'))
-    assert.equal((await pool.query('SELECT version FROM jt_memo.schema_version')).rows[0].version, 8)
+    assert.equal((await pool.query('SELECT version FROM jt_memo.schema_version')).rows[0].version, schemaVersion)
     const saved = await readFile(envFile, 'utf8')
     assert.equal(parseEnv(saved).EMBEDDING_API_KEY, 'private-wizard-key')
     assert.equal((await stat(envFile)).mode & 0o777, 0o600)
