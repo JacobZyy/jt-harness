@@ -56,7 +56,7 @@ jth flow legacy migrate
 
 ## 当前本机使用
 
-工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，可显式选择本机覆盖配置。安装、版本更新与用户入口同步见[本地交付](docs/local-delivery-monitoring.md)。
+工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，可显式选择本机覆盖配置。用户级 `SessionStart` 会检查当前绑定目录，备份并清理旧分支重新带回的 JTH 接入；干净目录跳过，团队配置及历史数据保留。安装、版本更新与用户入口同步见[本地交付](docs/local-delivery-monitoring.md)。
 
 ```sh
 jth --help

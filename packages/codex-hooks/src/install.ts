@@ -1,9 +1,10 @@
-import { cp, lstat, mkdir, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import type { CaptureSettings } from './capture.ts'
-import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, userInstallationPath, readJson, writeJson } from './capture.ts'
+import { captureSettingsSchema, codexDirectory, hash, hookEvents, inside, installationPath, userInstallationPath, readJson, writeJson } from './capture.ts'
 import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { cueMarker } from './cues.ts'
 
@@ -52,6 +53,8 @@ async function removeDeclarationInstructions(workspace: string, backupDirectory:
 }
 export const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 export const hookCommand = (...args: string[]) => ['jth', '--', ...args].map(quote).join(' ')
+export const legacyCleanupMarker = 'jth legacy cleanup'
+export const legacyCleanupCommand = hookCommand('migrate', '--session-start')
 export const memoHookCommand = (_settings: CaptureSettings, action: 'declare' | 'cue') => hookCommand('memo', 'codex', action)
 export const memoLocatorPath = (workspace: string) => resolve(workspace, '.jth/memo.json')
 type HookHandler = { statusMessage?: string, command?: string, [key: string]: unknown }
@@ -65,6 +68,7 @@ const ownedCommands: Record<string, readonly string[][]> = {
   'jth flow context': [['flow', 'legacy', 'hook'], ['flow', 'hook']],
   'jth flow entry': [['flow', 'prompt']],
   'jth monitor': [['monitor', 'capture']],
+  [legacyCleanupMarker]: [['migrate', '--session-start']],
 }
 const ownedEvents: Record<string, readonly string[]> = {
   'jth memo capture': hookEvents,
@@ -73,11 +77,13 @@ const ownedEvents: Record<string, readonly string[]> = {
   'jth flow context': [...hookEvents, 'UserPromptSubmit'],
   'jth flow entry': ['UserPromptSubmit'],
   'jth monitor': ['UserPromptSubmit', 'Stop', 'Interrupt'],
+  [legacyCleanupMarker]: ['SessionStart'],
 }
 
 /** Ownership requires the JTH command and its marker; status text alone belongs to nobody. */
 export function ownsHook(handler: HookHandler, marker = handler.statusMessage, event?: string) {
   if (!marker || handler.statusMessage !== marker || !handler.command || !ownedCommands[marker]) return false
+  if (marker === legacyCleanupMarker) return event === 'SessionStart' && handler.command === legacyCleanupCommand
   if (event && !ownedEvents[marker].includes(event)) return false
   return ownedCommands[marker].some(args => handler.command === hookCommand(...args)
     || handler.command === `jth ${args.join(' ')}`
@@ -145,6 +151,7 @@ export async function configureUserHooks(root: string, config: { dataDir: string
     if (!enabled) return next
     next = mergeHooks(next, hookCommand('memo', 'codex', 'declare'), { marker: declarationHookMarker, events: ['Stop'] })
     next = mergeHooks(next, hookCommand('memo', 'codex', 'cue'), { marker: cueMarker, events: ['SessionStart', 'UserPromptSubmit'], additionalContextLimit: 2400 })
+    next = mergeHooks(next, legacyCleanupCommand, { marker: legacyCleanupMarker, events: ['SessionStart'], additionalContextLimit: 512 })
     return mergeHooks(next, hookCommand('flow', 'prompt'), { marker: 'jth flow entry', events: ['UserPromptSubmit'], additionalContextLimit: 512 })
   })
   const settings = { enabled_at, codex_home: codexHome, env_file: config.envFile }
@@ -181,39 +188,66 @@ async function ownedSkill(path: string, kind: 'flow' | 'memo') {
   return new RegExp(`^name: jth-${kind}\\s*$`, 'm').test(content) && content.includes(`jth ${kind}`)
 }
 
+type CleanupFile = { path: string, info: Stats | null, content: string }
+type CleanupSkill = { path: string, kind: 'flow' | 'memo', info: Stats, content: string, link: string | null }
+
+async function cleanupPathInfo(workspace: string, path: string, allowSymlink = false) {
+  let parent = dirname(path)
+  while (!await lstat(parent).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })) parent = dirname(parent)
+  if (!inside(workspace, await realpath(parent))) throw new Error(`清理路径的父目录不在项目内；保留内容：${path}`)
+  const info = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
+  if (info?.isSymbolicLink() && !allowSymlink) throw new Error(`清理配置是符号链接；保留内容：${path}`)
+  return info
+}
+
+async function cleanupFile(workspace: string, path: string): Promise<CleanupFile> {
+  const info = await cleanupPathInfo(workspace, path)
+  return { path, info, content: info ? await readFile(path, 'utf8') : '' }
+}
+
+function sameCleanupIdentity(original: Stats | null, current: Stats | null) {
+  if (!original || !current) return original === current
+  return (['dev', 'ino', 'mode', 'size', 'mtimeMs', 'ctimeMs'] as const).every(key => original[key] === current[key])
+}
+
+async function assertCleanupFile(workspace: string, file: CleanupFile) {
+  const current = await cleanupFile(workspace, file.path)
+  if (!sameCleanupIdentity(file.info, current.info) || file.content !== current.content) throw new Error(`清理配置被其他进程更新；保留内容，请重试：${file.path}`)
+}
+
+async function assertCleanupSkill(workspace: string, skill: CleanupSkill) {
+  const info = await cleanupPathInfo(workspace, skill.path, true)
+  const link = info?.isSymbolicLink() ? await readlink(skill.path) : null
+  const content = await readFile(resolve(skill.path, 'SKILL.md'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+  if (!sameCleanupIdentity(skill.info, info) || skill.link !== link || skill.content !== content) throw new Error(`清理 Skill 被其他进程更新；保留内容，请重试：${skill.path}`)
+}
+
 /** Remove only installed project entrances; archived queues, tasks and runtime evidence stay intact. */
-export async function cleanupProjectInstallation(workspace: string, options: { dataDir: string, dryRun?: boolean, registered?: boolean }) {
+export async function cleanupProjectInstallation(workspace: string, options: { dataDir: string, dryRun?: boolean, registered?: boolean, existingOnly?: boolean }) {
+  const canonicalWorkspace = await realpath(workspace)
   const backups = resolve(codexDirectory(options), 'backups', `project-${hash(workspace)}-${Date.now()}-${randomUUID()}`)
-  const removed: string[] = [], handlers: string[] = []
-  const hooksPath = resolve(workspace, '.codex/hooks.json')
-  const hookText = await readFile(hooksPath, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
-  if (hookText) {
-    const document: HookConfig = JSON.parse(hookText)
+  const removed: string[] = [], handlers: string[] = [], skills: CleanupSkill[] = []
+  const changes: { file: CleanupFile, next: string | HookConfig | null }[] = []
+  const hooks = await cleanupFile(canonicalWorkspace, resolve(workspace, '.codex/hooks.json'))
+  if (hooks.content) {
+    const document: HookConfig = JSON.parse(hooks.content)
     for (const [event, groups] of Object.entries(document.hooks ?? {})) for (const group of groups) for (const handler of group.hooks ?? []) if (ownsHook(handler, handler.statusMessage, event)) handlers.push(handler.command!)
     const remaining = Object.keys(ownedCommands).reduce((next, ownedMarker) => mergeHooks(next, undefined, { marker: ownedMarker, events: Object.keys(next.hooks ?? {}) }), document)
     const removeFile = handlers.length > 0 && !Object.keys(remaining.hooks ?? {}).length && Object.keys(remaining).every(key => key === 'hooks')
-    if (removeFile) removed.push(hooksPath)
-    if (handlers.length && !options.dryRun) {
-      await writeJson(resolve(backups, `${hash(hooksPath)}.json`), { path: hooksPath, content: hookText })
-      await updateHookConfig(hooksPath, backups, document => Object.keys(ownedCommands).reduce((next, ownedMarker) => mergeHooks(next, undefined, { marker: ownedMarker, events: Object.keys(next.hooks ?? {}) }), document))
-      if (removeFile) {
-        const current = await readJson(hooksPath)
-        if (JSON.stringify(current) !== JSON.stringify(remaining)) throw new Error('Hook 配置被其他进程更新；保留内容，请重试')
-        await rm(hooksPath)
-      }
-    }
+    if (removeFile) removed.push(hooks.path)
+    if (handlers.length) changes.push({ file: hooks, next: removeFile ? null : remaining })
   }
   for (const directory of ['.agents/skills', '.codex/skills', '.claude/skills']) for (const kind of ['flow', 'memo'] as const) {
-    const path = resolve(workspace, directory, `jth-${kind}`)
-    if (!await ownedSkill(path, kind)) continue
+    const path = resolve(workspace, directory, `jth-${kind}`), info = await cleanupPathInfo(canonicalWorkspace, path, true)
+    if (!info || !await ownedSkill(path, kind)) continue
+    const content = await readFile(resolve(path, 'SKILL.md'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+    skills.push({ path, kind, info, content, link: info.isSymbolicLink() ? await readlink(path) : null })
     removed.push(path)
-    if (!options.dryRun) { await mkdir(backups, { recursive: true }); await cp(path, resolve(backups, `${hash(path)}-jth-${kind}`), { recursive: true, dereference: false, verbatimSymlinks: true }); await rm(path, { recursive: true, force: true }) }
   }
   for (const name of ['memo.json', 'flow.json', 'workflow.json', 'monitor.json']) {
-    const path = resolve(workspace, '.jth', name)
-    const content = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
-    if (!content) continue
-    const document = JSON.parse(content)
+    const file = await cleanupFile(canonicalWorkspace, resolve(workspace, '.jth', name))
+    if (!file.content) continue
+    const document = JSON.parse(file.content)
     const locator = document.version === 2 && Object.keys(document).every(key => ['version', 'workspace', 'envFile'].includes(key)) && typeof document.workspace === 'string' && typeof document.envFile === 'string'
       || document.version === 3 && Object.keys(document).every(key => ['version', 'scope'].includes(key)) && document.scope && Object.keys(document.scope).every(key => ['project_ids', 'business_ids'].includes(key)) && Array.isArray(document.scope.project_ids) && Array.isArray(document.scope.business_ids)
     const owned = name === 'memo.json' ? locator
@@ -221,28 +255,44 @@ export async function cleanupProjectInstallation(workspace: string, options: { d
       : name === 'workflow.json' ? Object.keys(document).every(key => key === 'mode') && (document.mode === undefined || ['adaptive', 'strict'].includes(document.mode))
       : Object.keys(document).every(key => ['enabled', 'url'].includes(key)) && typeof document.enabled === 'boolean'
     if (!owned || (!options.registered && !locator && name !== 'flow.json')) continue
-    removed.push(path)
-    if (!options.dryRun) { await writeJson(resolve(backups, `${hash(path)}.json`), { path, content }); await rm(path) }
+    removed.push(file.path)
+    changes.push({ file, next: null })
   }
-  const agentsPath = resolve(workspace, 'AGENTS.md'), agents = await readFile(agentsPath, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
-  if (agents.includes('<!-- JTH_MEMORY_START -->') !== agents.includes('<!-- JTH_MEMORY_END -->')) throw new Error('已有 JTH 记忆说明区间不完整；未覆盖 AGENTS.md')
-  if (agents.includes('<!-- JTH_MEMORY_START -->')) {
-    removed.push(`${agentsPath}#JTH_MEMORY`)
-    if (!options.dryRun) await removeDeclarationInstructions(workspace, backups)
+  const agents = await cleanupFile(canonicalWorkspace, resolve(workspace, 'AGENTS.md'))
+  if (agents.content.includes('<!-- JTH_MEMORY_START -->') !== agents.content.includes('<!-- JTH_MEMORY_END -->')) throw new Error('已有 JTH 记忆说明区间不完整；未覆盖 AGENTS.md')
+  if (agents.content.includes('<!-- JTH_MEMORY_START -->')) {
+    removed.push(`${agents.path}#JTH_MEMORY`)
+    changes.push({ file: agents, next: agents.content.replace(/\n?<!-- JTH_MEMORY_START -->[\s\S]*?<!-- JTH_MEMORY_END -->\n?/u, '') })
   }
+  const ignore = await cleanupFile(canonicalWorkspace, resolve(workspace, '.gitignore'))
   if (options.registered) {
-    const path = resolve(workspace, '.gitignore'), original = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
     const entrances = new Set(['/.jth/*', '!/.jth/flow.json', '!/.jth/workflow.json', '/.agents/skills/jth-flow', '/.agents/skills/jth-memo', '/.codex/hooks.json'])
-    const preserved = original.split(/(?<=\n)/u).filter(line => !entrances.has(line.replace(/\r?\n$/u, ''))).join('')
-    const next = preserved.split(/\r?\n/u).includes('/.jth/') ? preserved : `${preserved}${preserved && !preserved.endsWith('\n') ? '\n' : ''}/.jth/\n`
-    if (original !== next) {
-      removed.push(`${path}#JTH`)
-      if (!options.dryRun) {
-        await writeJson(resolve(backups, `${hash(path)}.json`), { path, content: original })
-        const current = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
-        if (current !== original) throw new Error('.gitignore 被其他进程更新；保留内容，请重试')
-        await writeFile(path, next)
+    const preserved = ignore.content.split(/(?<=\n)/u).filter(line => !entrances.has(line.replace(/\r?\n$/u, ''))).join('')
+    if (!options.existingOnly || removed.length || handlers.length || preserved !== ignore.content) {
+      const next = preserved.split(/\r?\n/u).includes('/.jth/') ? preserved : `${preserved}${preserved && !preserved.endsWith('\n') ? '\n' : ''}/.jth/\n`
+      if (ignore.content !== next) {
+        removed.push(`${ignore.path}#JTH`)
+        changes.push({ file: ignore, next })
       }
+    }
+  }
+  if (!options.dryRun) {
+    for (const { file } of changes) await assertCleanupFile(canonicalWorkspace, file)
+    for (const skill of skills) await assertCleanupSkill(canonicalWorkspace, skill)
+    for (const { file, next } of changes) {
+      await assertCleanupFile(canonicalWorkspace, file)
+      await writeJson(resolve(backups, `${hash(file.path)}.json`), { path: file.path, content: file.content })
+      await assertCleanupFile(canonicalWorkspace, file)
+      if (next === null) await rm(file.path)
+      else if (typeof next === 'string') await writeFile(file.path, next)
+      else await writeJson(file.path, next)
+    }
+    for (const skill of skills) {
+      await assertCleanupSkill(canonicalWorkspace, skill)
+      await mkdir(backups, { recursive: true })
+      await cp(skill.path, resolve(backups, `${hash(skill.path)}-jth-${skill.kind}`), { recursive: true, dereference: false, verbatimSymlinks: true })
+      await assertCleanupSkill(canonicalWorkspace, skill)
+      await rm(skill.path, { recursive: true, force: true })
     }
   }
   return { workspace, dry_run: Boolean(options.dryRun), removed, handlers, backup_directory: !options.dryRun && (removed.length || handlers.length) ? backups : null }

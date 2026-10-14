@@ -5,13 +5,14 @@ import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jacob-z/jt-harness/memo'
-import { hookCommand, memoHookCommand, configureUserHooks, userInstallationPath, flowEntryReceiptPath, monitorDirectory, readJson, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
+import { hookCommand, memoHookCommand, legacyCleanupMarker, legacyCleanupCommand, configureUserHooks, userInstallationPath, flowEntryReceiptPath, monitorDirectory, readJson, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
 import { userConfigPaths } from '@jacob-z/jt-harness/memo/config'
 import { installFlow } from './flow.ts'
 import { inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
 import { automaticWorkspaceScope, completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration, saveUserConfigBinding } from './configuration.ts'
 import { connectDatabase } from './postgres.ts'
 import { migrateUserInstallation } from './migration.ts'
+import { cleanupSessionProjects } from './session-cleanup.ts'
 import { phoenixStatus } from './phoenix.ts'
 
 const execute = promisify(execFile)
@@ -20,11 +21,13 @@ jth install [--env-file <path>] [--trust]
 jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-file <path>]
 jth doctor [--workspace <path>] [--env-file <path>]
 jth migrate [--dry-run] [--workspace <path> ...] [--env-file <path>]
+jth migrate --session-start < SessionStart JSON stdin
 jth uninstall [--workspace <path>] [--env-file <path>]
 init 一次配置用户级 JTH：补齐连接配置、准备记忆表、安装用户 Hook 和 Skill；以后目录无需 init。
 新会话按真实绑定目录自动分组，无绑定使用 default；继承用户原生 Codex 偏好，不修改项目 TOML。
 migrate 默认发现旧安装及其 Git worktrees，迁移本机目录映射并移除旧项目 JTH 接入；--workspace 可重复。
 --dry-run 只列举变更；实际迁移保存本机备份、原 IDs/env/enabled_at，保留业务改动、队列及历史。
+--session-start 为用户 Hook 入口：仅检查当前绑定目录，干净目录跳过；备份后清理精确旧入口，不连接数据库或模型。
 doctor 只读检查用户 Hook 来源，不调用模型。uninstall 默认卸载用户 Hook/Skill；指定 --workspace 仅清理该目录的旧接入。
 用户配置默认 ~/.jt-harness/.env，Skill 为 ~/.agents/skills，Hook 为 CODEX_HOME/hooks.json。--env-file 显式覆盖；API Key 隐藏输入。
 `
@@ -35,9 +38,11 @@ const ownDistributionName = (name: string) => name === 'jt-harness' || name === 
 export function isManagedHook(hook: NativeHook, workspace: string, settings: CaptureSettings, monitoring: boolean) {
   const events: Record<string, string[]> = { 'jth flow entry': ['userPromptSubmit'], 'jth memo declaration': ['stop'],
     'jth memo cues': ['sessionStart', 'userPromptSubmit'],
+    [legacyCleanupMarker]: ['sessionStart'],
     'jth monitor': monitoring ? ['userPromptSubmit', 'stop', 'interrupt'] : [] }
   const commands: Record<string, string> = { 'jth flow entry': hookCommand('flow', 'prompt'),
     'jth memo declaration': memoHookCommand(settings, 'declare'), 'jth memo cues': memoHookCommand(settings, 'cue'),
+    [legacyCleanupMarker]: legacyCleanupCommand,
     'jth monitor': hookCommand('monitor', 'capture') }
   return (hook.source === 'project' && hook.sourcePath === resolve(workspace, '.codex/hooks.json')
     || hook.source === 'user' && hook.sourcePath === resolve(settings.codex_home, 'hooks.json'))
@@ -105,7 +110,7 @@ async function inspectUser(root: string, cwd: string, config: Config, codexHome:
     const settings: CaptureSettings = { workspace, codex_home: codexHome, env_file: config.envFile, enabled_at: new Date().toISOString(), scope: context.scope, workspaces: context.workspaces }
     const own = native.hooks.filter(hook => isManagedHook(hook, workspace, settings, true) && hook.source === 'user')
     const skillAvailable = (await Promise.all(['jth-flow', 'jth-memo'].map(name => access(resolve(homedir(), '.agents/skills', name, 'SKILL.md')).then(() => true, () => false)))).every(Boolean)
-    checks.push({ name: 'hooks', status: skillAvailable && own.filter(hook => hook.statusMessage !== 'jth monitor').length === 4 && own.every(hook => hook.enabled && hook.trustStatus === 'trusted') ? 'ok' : 'warning',
+    checks.push({ name: 'hooks', status: skillAvailable && own.filter(hook => hook.statusMessage !== 'jth monitor').length === 5 && own.every(hook => hook.enabled && hook.trustStatus === 'trusted') ? 'ok' : 'warning',
       detail: { skill_available: skillAvailable, source: 'user', hooks_path: resolve(codexHome, 'hooks.json'),
         hooks: own.map(({ statusMessage, eventName, source, sourcePath, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, source, sourcePath, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
   } catch (error) { checks.push({ name: 'hooks', status: 'warning', detail: safeError(error, config) }) }
@@ -119,14 +124,14 @@ async function inspectUser(root: string, cwd: string, config: Config, codexHome:
   return { mode: 'user', cwd: context.cwd, workspace, user_installation: await readJson(userInstallationPath(config, codexHome)) ?? null, checks }
 }
 
-export async function deliveryMain(root: string, args: string[]) {
+export async function deliveryMain(root: string, args: string[], hookInput?: unknown) {
   let config: Config | undefined
   let interactive = false
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
       workspace: { type: 'string', multiple: true }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
       'codex-home': { type: 'string' }, from: { type: 'string' }, prefix: { type: 'string' }, cli: { type: 'boolean' }, trust: { type: 'boolean' },
-      'dry-run': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      'dry-run': { type: 'boolean' }, 'session-start': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     } })
     const [command] = positionals
     if (values.help) { process.stdout.write(help); return }
@@ -135,7 +140,7 @@ export async function deliveryMain(root: string, args: string[]) {
     const allowed: Record<string, string[]> = {
       init: ['env-file', 'workspace', 'project', 'business', 'trust', 'codex-home'],
       install: ['env-file', 'workspace', 'project', 'business', 'trust', 'codex-home', 'from', 'prefix', 'cli'],
-      doctor: ['workspace', 'env-file', 'codex-home'], uninstall: ['workspace', 'env-file', 'codex-home'], migrate: ['workspace', 'env-file', 'codex-home', 'dry-run'],
+      doctor: ['workspace', 'env-file', 'codex-home'], uninstall: ['workspace', 'env-file', 'codex-home'], migrate: ['workspace', 'env-file', 'codex-home', 'dry-run', 'session-start'],
     }
     if (!allowed[command] || Object.keys(values).some(key => !allowed[command].includes(key))) throw new Error(`${command} 参数不支持；运行 jth install --help`)
     if (command !== 'migrate' && (values.workspace?.length ?? 0) > 1) throw new Error('--workspace 仅 migrate 支持重复目录')
@@ -143,6 +148,12 @@ export async function deliveryMain(root: string, args: string[]) {
     const workspace = await realpath(resolve(values.workspace?.[0] ?? process.cwd()))
     const codexHome = resolve(values['codex-home'] ?? process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
     const output = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n')
+    if (values['session-start']) {
+      if (values.workspace || values['dry-run']) throw new Error('--session-start 只使用 Hook 的当前绑定目录，不接受 --workspace 或 --dry-run')
+      config = await loadWorkspaceConfig(root, values['env-file'])
+      output(await cleanupSessionProjects(root, hookInput, config, codexHome))
+      return
+    }
     if (command === 'install' && values.cli) { output(await installCli(resolve(values.from ?? root), resolve(values.prefix ?? resolve(homedir(), '.local')), values['env-file'])); return }
     config = await loadWorkspaceConfig(root, values['env-file'])
     if (command === 'doctor') { const report = await inspectUser(root, workspace, config, codexHome); output(report); process.exitCode = report.checks.some(check => check.status === 'error') ? 1 : 0; return }
@@ -184,6 +195,7 @@ export async function deliveryMain(root: string, args: string[]) {
     if (verification) process.exitCode = verification.checks.some(check => check.status === 'error') ? 1 : 0
   } catch (error) {
     process.stderr.write(interactive ? `初始化未完成：${safeError(error, config)}\n修正后重新运行 jth init。\n` : JSON.stringify({ error: safeError(error, config) }) + '\n')
+    if (args[0] === 'migrate' && args.includes('--session-start')) { process.stdout.write('{}\n'); return }
     process.exitCode = 1
   }
 }

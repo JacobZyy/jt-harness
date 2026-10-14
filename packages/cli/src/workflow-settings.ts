@@ -4,7 +4,7 @@ import { policyModeSchema, type PolicyMode } from '@jacob-z/jt-harness/flow'
 import { hash, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { userConfigPaths } from '@jacob-z/jt-harness/memo/config'
 
-const settingsSchema = z.strictObject({ mode: policyModeSchema.optional() })
+export const workflowSettingsSchema = z.strictObject({ mode: policyModeSchema.optional() })
 export function workflowSettingsPaths(workspace: string, environment: NodeJS.ProcessEnv = process.env) {
   return {
     user: resolve(userConfigPaths(environment).directory, 'workflow.json'),
@@ -17,7 +17,7 @@ async function readSettings(file: string) {
     if (error instanceof SyntaxError) throw new Error(`Workflow Policy 配置不是有效 JSON：${file}`)
     throw error
   })
-  const result = settingsSchema.safeParse(value === undefined ? {} : value)
+  const result = workflowSettingsSchema.safeParse(value === undefined ? {} : value)
   if (!result.success) throw new Error(`Workflow Policy 配置无效：${file}`)
   return result.data
 }

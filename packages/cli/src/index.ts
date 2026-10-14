@@ -16,6 +16,7 @@ export async function readHookInput() {
 export async function run(root: string, args = process.argv.slice(2)) {
   process.umask(0o077)
   const hook = args[0] === 'monitor' && args[1] === 'capture'
+    || args[0] === 'migrate' && args.includes('--session-start')
     || args[0] === 'flow' && args[1] === 'prompt'
     || args[0] === 'memo' && args[1] === 'codex' && ['capture', 'declare', 'cue'].includes(args[2])
   let hookInput: unknown
@@ -23,7 +24,7 @@ export async function run(root: string, args = process.argv.slice(2)) {
     try { hookInput = await readHookInput() }
     catch (error) {
       process.stderr.write(JSON.stringify({ error: (error as Error).message }) + '\n')
-      if (args[0] === 'flow') process.stdout.write('{}\n')
+      if (args[0] === 'flow' || args[0] === 'migrate') process.stdout.write('{}\n')
       return
     }
   }
@@ -37,7 +38,7 @@ export async function run(root: string, args = process.argv.slice(2)) {
   }
   if (['init', 'install', 'upgrade', 'doctor', 'uninstall', 'migrate'].includes(args[0])) {
     const { deliveryMain } = await import('./delivery.ts')
-    return deliveryMain(root, args)
+    return deliveryMain(root, args, hookInput)
   }
   if (args[0] === 'db') {
     const { databaseMain } = await import('./postgres.ts')

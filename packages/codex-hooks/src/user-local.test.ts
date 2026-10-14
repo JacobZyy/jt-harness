@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { sessionWorkspaceContext } from './workspace.ts'
 import { captureSettingsSchema, readJson, userInstallationPath } from './capture.ts'
-import { cleanupProjectInstallation, configureUserHooks, hookCommand, mergeHooks, ownsHook, quote } from './install.ts'
+import { cleanupProjectInstallation, configureUserHooks, hookCommand, legacyCleanupCommand, legacyCleanupMarker, mergeHooks, ownsHook, quote } from './install.ts'
 import { captureDeclaration, collectDeclarations, rememberEntryRead } from './declarations.ts'
 import { readEvidence } from './evidence.ts'
 import { memoryCues } from './cues.ts'
@@ -54,8 +54,17 @@ test('user installation preserves third-party same-status hooks and copies refer
     const unrelated = { type: 'command', command: 'third-party', statusMessage: 'jth memo declaration' }
     const otherMarker = { command: hookCommand('memo', 'codex', 'declare'), statusMessage: 'team declaration' }
     const otherEvent = { command: hookCommand('memo', 'codex', 'declare'), statusMessage: 'jth memo declaration' }
-    const teamConfig = { description: 'team', hooks: { Stop: [{ matcher: 'team', hooks: [unrelated, otherMarker] }], SessionEnd: [{ hooks: [otherEvent] }] } }
-    await writeFile(resolve(f.home, 'hooks.json'), JSON.stringify(teamConfig))
+    const cleanupOtherCommand = { command: 'third-party', statusMessage: legacyCleanupMarker }
+    const cleanupOtherMarker = { command: legacyCleanupCommand, statusMessage: 'team cleanup' }
+    const cleanup = { type: 'command', command: legacyCleanupCommand, timeout: 3, statusMessage: legacyCleanupMarker, additionalContextLimit: 512 }
+    const teamConfig = { description: 'team', hooks: {
+      Stop: [{ matcher: 'team', hooks: [unrelated, otherMarker] }],
+      SessionStart: [{ matcher: 'team', hooks: [cleanupOtherCommand, cleanupOtherMarker] }],
+      SessionEnd: [{ hooks: [otherEvent, cleanup] }],
+    } }
+    await writeFile(resolve(f.home, 'hooks.json'), JSON.stringify({ ...teamConfig, hooks: {
+      ...teamConfig.hooks, SessionStart: [...teamConfig.hooks.SessionStart, { hooks: [cleanup, cleanup] }],
+    } }))
     const installed = await configureUserHooks(root, f.config, f.home, true, f.userHome)
     const before = await readFile(installed.hooks_path, 'utf8')
     await configureUserHooks(root, f.config, f.home, true, f.userHome)
@@ -63,7 +72,12 @@ test('user installation preserves third-party same-status hooks and copies refer
     const document = JSON.parse(before)
     assert.equal(document.description, 'team')
     assert.deepEqual(document.hooks.Stop[0], { matcher: 'team', hooks: [unrelated, otherMarker] })
-    assert.deepEqual(document.hooks.SessionEnd, [{ hooks: [otherEvent] }])
+    assert.deepEqual(document.hooks.SessionEnd, [{ hooks: [otherEvent, cleanup] }])
+    assert.deepEqual(document.hooks.SessionStart[0], teamConfig.hooks.SessionStart[0])
+    const sessionHandlers = document.hooks.SessionStart.flatMap((group: { hooks: { command: string }[] }) => group.hooks)
+    assert.deepEqual(sessionHandlers.filter((handler: { command: string, statusMessage: string }) => handler.command === legacyCleanupCommand && handler.statusMessage === legacyCleanupMarker), [cleanup])
+    assert(sessionHandlers.some((handler: { command: string }) => handler.command === hookCommand('memo', 'codex', 'cue')))
+    assert(document.hooks.UserPromptSubmit.flatMap((group: { hooks: { command: string }[] }) => group.hooks).some((handler: { command: string }) => handler.command === hookCommand('flow', 'prompt')))
     assert.equal(document.hooks.Stop.flatMap((group: { hooks: unknown[] }) => group.hooks).length, 3)
     assert((await readFile(resolve(f.userHome, '.agents/skills/jth-memo/references/declarations.md'), 'utf8')).includes('workspaces'))
     assert((await readFile(resolve(f.userHome, '.agents/skills/jth-flow/references/acceptance.md'), 'utf8')).includes('任务验收'))
@@ -81,6 +95,17 @@ test('user installation preserves third-party same-status hooks and copies refer
     assert.deepEqual(JSON.parse(await readFile(installed.hooks_path, 'utf8')), teamConfig)
     assert.deepEqual(mergeHooks({ hooks: { Stop: [{ hooks: [unrelated] }] } }, undefined, { marker: unrelated.statusMessage, events: ['Stop'] }), { hooks: { Stop: [{ hooks: [unrelated] }] } })
   } finally { await f.cleanup() }
+})
+
+test('legacy cleanup ownership requires the exact SessionStart command and marker', () => {
+  const handler = { command: legacyCleanupCommand, statusMessage: legacyCleanupMarker }
+  assert(ownsHook(handler, legacyCleanupMarker, 'SessionStart'))
+  assert(!ownsHook(handler, legacyCleanupMarker, 'UserPromptSubmit'))
+  assert(!ownsHook(handler))
+  assert(!ownsHook({ ...handler, statusMessage: 'team cleanup' }, legacyCleanupMarker, 'SessionStart'))
+  for (const command of ['jth migrate --session-start', `${legacyCleanupCommand} --workspace /project`, hookCommand('migrate'), hookCommand('migrate', '--dry-run')]) {
+    assert(!ownsHook({ ...handler, command }, legacyCleanupMarker, 'SessionStart'))
+  }
 })
 
 test('migration dry run and backup preserve teams, other Skills, AGENTS instructions and all historical runtime queues', async () => {
@@ -122,6 +147,67 @@ test('migration dry run and backup preserve teams, other Skills, AGENTS instruct
     assert(actual.backup_directory && (await readdir(actual.backup_directory)).length >= 5)
     const backedUpSkills = (await readdir(actual.backup_directory!)).filter(name => name.endsWith('-jth-memo'))
     assert(await Promise.all(backedUpSkills.map(name => lstat(resolve(actual.backup_directory!, name)))).then(stats => stats.some(info => info.isSymbolicLink())))
+  } finally { await f.cleanup() }
+})
+
+test('existing-only cleanup leaves registered clean projects alone and removes only exact legacy ignore rules', async () => {
+  const f = await fixture()
+  try {
+    const options = { ...f.config, registered: true, existingOnly: true }
+    assert.deepEqual((await cleanupProjectInstallation(f.a, options)).removed, [])
+    assert.deepEqual(await readdir(f.a), [])
+    const custom = 'node_modules/\n# /.jth/*\n /.codex/hooks.json\n/.agents/skills/jth-memo-extra\n'
+    await writeFile(resolve(f.a, '.gitignore'), custom)
+    assert.equal((await cleanupProjectInstallation(f.a, options)).backup_directory, null)
+    assert.equal(await readFile(resolve(f.a, '.gitignore'), 'utf8'), custom)
+    await writeFile(resolve(f.a, '.gitignore'), custom + '/.jth/*\n!/.jth/flow.json\n!/.jth/workflow.json\n/.agents/skills/jth-flow\n/.agents/skills/jth-memo\n/.codex/hooks.json')
+    assert.deepEqual((await cleanupProjectInstallation(f.a, options)).removed, [`${f.a}/.gitignore#JTH`])
+    assert.equal(await readFile(resolve(f.a, '.gitignore'), 'utf8'), custom + '/.jth/\n')
+    assert.equal((await cleanupProjectInstallation(f.a, options)).backup_directory, null)
+    await mkdir(resolve(f.b, '.jth'))
+    await writeFile(resolve(f.b, '.jth/memo.json'), '{"version":3,"scope":{"project_ids":["old"],"business_ids":[]}}')
+    await cleanupProjectInstallation(f.b, options)
+    assert.equal(await readFile(resolve(f.b, '.gitignore'), 'utf8'), '/.jth/\n')
+  } finally { await f.cleanup() }
+})
+
+test('cleanup preflight rejects configuration leaf symlinks before changing any owned files', async () => {
+  for (const name of ['.codex/hooks.json', '.jth/memo.json', 'AGENTS.md', '.gitignore']) {
+    const f = await fixture()
+    try {
+      await mkdir(resolve(f.a, '.codex'))
+      await mkdir(resolve(f.a, '.jth'))
+      const locator = '{"version":3,"scope":{"project_ids":["old"],"business_ids":[]}}'
+      await writeFile(resolve(f.a, '.jth/flow.json'), locator)
+      const outside = resolve(f.b, 'outside'), content = name.endsWith('hooks.json')
+        ? JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: hookCommand('memo', 'codex', 'declare'), statusMessage: 'jth memo declaration' }] }] } })
+        : name.endsWith('memo.json') ? locator : name === 'AGENTS.md' ? '<!-- JTH_MEMORY_START -->\nold\n<!-- JTH_MEMORY_END -->\n' : '/.jth/*\n'
+      await writeFile(outside, content)
+      await symlink(outside, resolve(f.a, name))
+      await assert.rejects(cleanupProjectInstallation(f.a, { ...f.config, registered: true, existingOnly: true }), /符号链接；保留内容/)
+      assert.equal(await readFile(outside, 'utf8'), content)
+      assert.equal(await readFile(resolve(f.a, '.jth/flow.json'), 'utf8'), locator)
+      assert((await lstat(resolve(f.a, name))).isSymbolicLink())
+      await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/backups')), { code: 'ENOENT' })
+    } finally { await f.cleanup() }
+  }
+})
+
+test('cleanup preflight rejects external Skill parents without deleting the other checkout or local artifacts', async () => {
+  const f = await fixture()
+  try {
+    await mkdir(resolve(f.a, '.agents'))
+    await mkdir(resolve(f.a, '.jth'))
+    await mkdir(resolve(f.b, 'jth-memo'))
+    const skill = '---\nname: jth-memo\n---\njth memo read\n'
+    await writeFile(resolve(f.b, 'jth-memo/SKILL.md'), skill)
+    await symlink(f.b, resolve(f.a, '.agents/skills'))
+    const locator = '{"version":3,"scope":{"project_ids":["old"],"business_ids":[]}}'
+    await writeFile(resolve(f.a, '.jth/memo.json'), locator)
+    await assert.rejects(cleanupProjectInstallation(f.a, { ...f.config, registered: true, existingOnly: true }), /父目录不在项目内/)
+    assert.equal(await readFile(resolve(f.b, 'jth-memo/SKILL.md'), 'utf8'), skill)
+    assert.equal(await readFile(resolve(f.a, '.jth/memo.json'), 'utf8'), locator)
+    await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/backups')), { code: 'ENOENT' })
   } finally { await f.cleanup() }
 })
 

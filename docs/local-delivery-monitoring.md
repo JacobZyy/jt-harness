@@ -42,6 +42,8 @@ jth doctor
 
 旧项目安装通过 `migrate` 全量迁移。先预览，再执行；缺漏目录可重复提供 `--workspace`。命令备份原文及目录映射，仅清理可确认属于 JTH 的入口，保留团队 Hook、业务改动、数据库和历史队列。目录策略转为本机覆盖，旧 ID 继续作为读取别名。仓库 Git 差异留待审阅，不自动推送。
 
+用户级 `SessionStart` 还会自动检查当前绑定目录，处理切换旧分支后重新出现的项目接入。干净目录不产生备份或映射写入；清理保留已有本机策略和写入 ID，不访问数据库或模型。目录锁、精确所有权和符号链接检查防止并发清理影响其他内容；失败输出诊断并放行会话。详见[启动检查](user-local-jth.md#启动时检查旧接入)。
+
 Codex 将信任绑定到 Hook 定义哈希。更新定义后，执行 `init --trust` 并用 `doctor` 确认 JTH Hook 为 `enabled: true`、`trustStatus: trusted`，再重新加载已有会话。仅安装成功或旧运行回执不能证明新入口已经触发；后续输入和回复结束后，检查 `flow status`、`memo codex status` 和 `monitor status`。没有新声明的回复不产生 Memo 入库回执。
 
 `doctor` 检查 CLI/Bun、配置完整性、数据库队列、Hook 信任和 Phoenix 状态，不调用模型或 Embedding。完整记忆一致性检查使用 `jth memo doctor`。用户 Skill 的引用文件随发行包复制到 `~/.agents/skills/`，源码目录删除不影响已安装版本。

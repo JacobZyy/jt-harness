@@ -33,7 +33,7 @@ test('native user installation and file stdin preserve project files and inject 
     assert.equal(await readFile(resolve(workspace, 'AGENTS.md'), 'utf8'), source)
     const config = await loadConfig(root, undefined, environment)
     const hooks = await readJson(resolve(codexHome, 'hooks.json')) as { hooks: Record<string, { hooks: { statusMessage: string, command: string }[] }[]> }
-    assert.equal(Object.values(hooks.hooks).flatMap(groups => groups.flatMap(group => group.hooks)).length, 4)
+    assert.equal(Object.values(hooks.hooks).flatMap(groups => groups.flatMap(group => group.hooks)).length, 5)
     for (const kind of ['flow', 'memo']) {
       const skill = await readFile(resolve(fixture, '.agents/skills', `jth-${kind}`, 'SKILL.md'), 'utf8')
       assert(skill.includes('references/'))

@@ -9,7 +9,7 @@ import { locatorSchema, settingsSchema } from '@jacob-z/jt-harness/flow'
 import { cleanupProjectInstallation, configureUserHooks, configureMonitorHooks, hash, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { userConfigPaths, type Config } from '@jacob-z/jt-harness/memo/config'
 import { importLegacyBindings, legacyInstallations, loadLegacyWorkspaceConfig, workspaceBinding } from './configuration.ts'
-import { configureWorkflowPolicy } from './workflow-settings.ts'
+import { configureWorkflowPolicy, workflowSettingsPaths, workflowSettingsSchema } from './workflow-settings.ts'
 
 /** Remove only the values written by registered JTH project setup, preserving later edits. */
 export async function removeManagedProjectPreferences(workspace: string, backupDirectory: string, dryRun = false) {
@@ -74,9 +74,9 @@ async function installedWorktrees(workspaces: string[]) {
   return related.flat()
 }
 
-export async function migrateUserInstallation(root: string, config: Config, codexHome: string, options: { workspaces?: string[], dryRun?: boolean, cleanupOnly?: boolean } = {}) {
+export async function migrateUserInstallation(root: string, config: Config, codexHome: string, options: { workspaces?: string[], dryRun?: boolean, cleanupOnly?: boolean, existingOnly?: boolean, preserveLocalPolicy?: boolean } = {}) {
   const environment = process.env, dryRun = Boolean(options.dryRun)
-  const installations = await legacyInstallations(config)
+  const installations = await legacyInstallations(config, options.cleanupOnly ? options.workspaces : undefined)
   const installed = installations.map(installation => installation.settings.workspace)
   const requested = options.workspaces?.length ? options.workspaces : [...installed, ...await installedWorktrees(installed)]
   const workspaces = [...new Set(requested.map(path => resolve(path)))]
@@ -84,11 +84,20 @@ export async function migrateUserInstallation(root: string, config: Config, code
   if (!dryRun) {
     await mkdir(backupDirectory, { recursive: true, mode: 0o700 })
     const projects = resolve(userConfigPaths(environment).directory, 'projects')
-    await cp(projects, resolve(backupDirectory, 'projects'), { recursive: true }).catch(error => { if (error.code !== 'ENOENT') throw error })
-    await cp(resolve(userConfigPaths(environment).directory, 'configuration.json'), resolve(backupDirectory, 'configuration.json')).catch(error => { if (error.code !== 'ENOENT') throw error })
+    if (options.cleanupOnly && options.workspaces) {
+      for (const workspace of options.workspaces) {
+        const available = await realpath(workspace).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+        if (!available) continue
+        const name = `${hash(available)}.json`
+        await cp(resolve(projects, name), resolve(backupDirectory, `binding-${name}`)).catch(error => { if (error.code !== 'ENOENT') throw error })
+      }
+    } else {
+      await cp(projects, resolve(backupDirectory, 'projects'), { recursive: true }).catch(error => { if (error.code !== 'ENOENT') throw error })
+      await cp(resolve(userConfigPaths(environment).directory, 'configuration.json'), resolve(backupDirectory, 'configuration.json')).catch(error => { if (error.code !== 'ENOENT') throw error })
+    }
     for (const installation of installations) await cp(installation.path, resolve(backupDirectory, `installation-${hash(installation.path)}.json`))
   }
-  const imported = await importLegacyBindings(config, environment, dryRun)
+  const imported = await importLegacyBindings(config, environment, dryRun, options.cleanupOnly ? options.workspaces : undefined)
   const projects = []
   let monitorEnabled = false
   for (const workspace of workspaces) {
@@ -96,24 +105,29 @@ export async function migrateUserInstallation(root: string, config: Config, code
     if (!available) { projects.push({ workspace, available: false, preserved: '目录不可用，旧安装和队列保留' }); continue }
     const savedLocator = await projectLocator(available), locator = savedLocator?.locator
     const registered = installations.some(installation => installation.settings.workspace === available) || locator !== undefined
-    const oldWorkflow = await readJson(resolve(available, '.jth/workflow.json')) as { mode?: 'strict' | 'adaptive' } | undefined
+    const workflow = workflowSettingsSchema.safeParse(await readJson(resolve(available, '.jth/workflow.json')))
+    const oldWorkflow = workflow.success ? workflow.data : undefined
     const oldMonitor = await readJson(resolve(available, '.jth/monitor.json')) as { enabled?: boolean } | undefined
     monitorEnabled ||= Boolean(oldMonitor?.enabled)
     const original = imported.find(entry => entry.workspace === available)?.binding
+    const sourceInstallations = locator?.version === 2 ? await legacyInstallations(config, [locator.workspace]) : []
     const historicalIds = locator?.version === 3 ? locator.scope.project_ids : locator?.version === 2
-      ? imported.flatMap(entry => entry.workspace === locator.workspace && entry.binding ? entry.binding.read_project_ids : []) : []
+      ? [...imported.flatMap(entry => entry.workspace === locator.workspace && entry.binding ? entry.binding.read_project_ids : []),
+        ...sourceInstallations.flatMap(entry => entry.settings.scope.project_ids)] : []
     const legacyConfig = savedLocator ? await loadLegacyWorkspaceConfig(root, available) : undefined
     const locatorLegacy = locator ? { workspace: locator.version === 2 ? locator.workspace : available,
       env_file: locator.version === 2 ? locator.envFile : legacyConfig!.envFile, installation_path: savedLocator!.path,
       project_ids: historicalIds, business_ids: locator.version === 3 ? locator.scope.business_ids : [] } : undefined
-    const binding = await workspaceBinding(available, environment, { dryRun, projectIds: original?.project_ids,
+    const binding = await workspaceBinding(available, environment, { dryRun, projectIds: dryRun ? original?.project_ids : undefined,
       readProjectIds: [...(original?.read_project_ids ?? []), ...historicalIds], businessIds: locator?.version === 3 ? locator.scope.business_ids : original?.business_ids,
       legacy: [...(original?.legacy ?? []), ...(locatorLegacy ? [locatorLegacy] : [])] })
-    if (!dryRun && registered && oldWorkflow?.mode) await configureWorkflowPolicy(available, 'project', oldWorkflow.mode)
-    const cleanup = await cleanupProjectInstallation(available, { dataDir: config.dataDir, dryRun, registered })
+    if (!dryRun && registered && oldWorkflow?.mode && (!options.preserveLocalPolicy || await readJson(workflowSettingsPaths(available).project) === undefined)) {
+      await configureWorkflowPolicy(available, 'project', oldWorkflow.mode)
+    }
+    const cleanup = await cleanupProjectInstallation(available, { dataDir: config.dataDir, dryRun, registered, existingOnly: options.existingOnly })
     const preferences = registered ? await removeManagedProjectPreferences(available, backupDirectory, dryRun) : { removed: [] }
     projects.push({ ...cleanup, available: true, registered, binding, legacy_locator: locator ?? null, codex_preferences: preferences,
-      ...(oldWorkflow?.mode ? { workflow_policy: oldWorkflow.mode } : {}), ...(oldMonitor?.enabled ? { monitoring: '转为用户级' } : {}) })
+      ...(oldWorkflow?.mode ? { workflow_policy: oldWorkflow.mode } : {}), ...(oldMonitor?.enabled ? { monitoring: options.cleanupOnly ? '旧设置已备份；保留用户级监控偏好' : '转为用户级' } : {}) })
   }
   const global = options.cleanupOnly ? null : dryRun ? { status: 'planned', hooks_path: resolve(codexHome, 'hooks.json'), skills: resolve(homedir(), '.agents/skills') }
     : await configureUserHooks(root, config, codexHome)
