@@ -7,10 +7,11 @@ import { createHash } from 'node:crypto'
 import { context, trace, SpanStatusCode } from '@opentelemetry/api'
 import { BasicTracerProvider, SimpleSpanProcessor, InMemorySpanExporter } from '@opentelemetry/sdk-trace-base'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto'
-import { captureMonitor, configureMonitorHooks, monitorMetrics, readJson, writeJson, type MonitorReceipt } from '@jacob-z/jt-harness/codex-hooks'
+import { captureMonitor, configureMonitorHooks, monitorDirectory, monitorMetrics, userInstallationPath, readJson, writeJson, type MonitorReceipt } from '@jacob-z/jt-harness/codex-hooks'
 import { openDatabase, safeError, type Config } from '@jacob-z/jt-harness/memo'
-import { loadWorkspaceConfig } from './configuration.ts'
-import { findFlowWorkspace } from '@jacob-z/jt-harness/flow'
+import { automaticWorkspaceScope, loadWorkspaceConfig } from './configuration.ts'
+import { userConfigPaths } from '@jacob-z/jt-harness/memo/config'
+import { readHookInput } from './index.ts'
 import { phoenixStatus, phoenixUrl, startPhoenix, stopPhoenix } from './phoenix.ts'
 import { startBackground } from './background.ts'
 import { withCodex } from './codex-client.ts'
@@ -19,11 +20,12 @@ const execute = promisify(execFile)
 const help = `jth monitor start|stop|status|open [--workspace <项目目录>] [--env-file <path>]
 jth monitor flush                重投当前项目未上报的事件，不调用模型
 jth monitor capture              Codex Hook 入口；只本地交接，后台上报
-start 启动本机 Phoenix 并接入当前项目；stop 移除当前项目采集并停止受管服务，数据保留。
+start 启动本机 Phoenix 并启用用户级采集；stop 移除用户级采集并停止受管服务，数据保留。
 首次准备：uv tool install --python 3.12 --with asyncpg arize-phoenix==20.14.0
 界面默认 http://127.0.0.1:6006；数据使用原 PostgreSQL 的 phoenix schema。
 `
 const digest = (text: string, length: number) => createHash('sha256').update(text).digest('hex').slice(0, length)
+const monitorSettingsPath = () => resolve(userConfigPaths().directory, 'monitor.json')
 
 async function exportReceipt(receipt: MonitorReceipt, goal?: { status: string, tokensUsed: number, timeUsedSeconds: number }) {
   const metrics = await monitorMetrics(receipt), memory = new InMemorySpanExporter()
@@ -73,14 +75,14 @@ async function exportReceipt(receipt: MonitorReceipt, goal?: { status: string, t
 }
 
 export async function flushMonitor(config: Config, workspace: string) {
-  const settings = await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined
+  const settings = await readJson(monitorSettingsPath()) as { enabled?: boolean } | undefined
   if (!settings?.enabled) return { skipped: 'disabled' }
   if (!(await phoenixStatus(config)).reachable) throw new Error('Phoenix 离线，待投递事件保留；运行 jth monitor start 后重试')
   const pool = openDatabase(config), client = await pool.connect()
   try {
     // Wait for the earlier exporter so a last Stop event cannot be stranded by a try-lock race.
     await client.query('SELECT pg_advisory_lock(hashtextextended($1,0))', [`jth:monitor:${workspace}`])
-    const directory = resolve(workspace, '.jth/monitor/pending')
+    const directory = resolve(monitorDirectory(workspace, config), 'pending')
     const names = (await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error })).filter(name => name.endsWith('.json'))
     let exported = 0
     for (const name of names) {
@@ -90,7 +92,7 @@ export async function flushMonitor(config: Config, workspace: string) {
         try { goal = await withCodex(async call => (await call('thread/goal/get', { threadId: receipt.sessionId })).goal) } catch { /* Goal may not be available for this native session. */ }
       }
       const result = await exportReceipt(receipt, goal)
-      await writeJson(resolve(workspace, '.jth/monitor/last-export.json'), { ...result, sessionId: receipt.sessionId, turnId: receipt.turnId, event: receipt.event, exportedAt: new Date().toISOString() })
+      await writeJson(resolve(monitorDirectory(workspace, config), 'last-export.json'), { ...result, sessionId: receipt.sessionId, turnId: receipt.turnId, event: receipt.event, exportedAt: new Date().toISOString() })
       await unlink(path)
       exported++
     }
@@ -98,41 +100,41 @@ export async function flushMonitor(config: Config, workspace: string) {
   } finally { client.release(true); await pool.end() }
 }
 
-export async function monitorMain(root: string, args: string[]) {
+export async function monitorMain(root: string, args: string[], hookInput?: unknown) {
   let config: Config | undefined
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { workspace: { type: 'string' }, 'env-file': { type: 'string' }, help: { type: 'boolean', short: 'h' } } })
     const [command] = positionals
     if (values.help || !command) { process.stdout.write(help); return }
     if (positionals.length !== 1 || !['start', 'stop', 'status', 'open', 'capture', 'flush'].includes(command)) throw new Error('未知 monitor 命令')
-    const workspace = values.workspace ? resolve(values.workspace) : command === 'capture' ? findFlowWorkspace(process.cwd()) : resolve(process.cwd())
-    const locator = await readJson(resolve(workspace, '.jth/flow.json'))
-    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
+    const input = command === 'capture' ? hookInput ?? await readHookInput() : { cwd: resolve(values.workspace ?? process.cwd()), session_id: process.env.CODEX_THREAD_ID }
+    const codexHome = resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
+    const context = await automaticWorkspaceScope(input, codexHome)
+    const workspace = context.primary ?? context.cwd
+    config = await loadWorkspaceConfig(root, values['env-file'])
+    const settings = await readJson(monitorSettingsPath()) as { enabled?: boolean } | undefined
     if (command === 'capture') {
-      const chunks: Buffer[] = []; let bytes = 0
-      for await (const chunk of process.stdin) { bytes += chunk.length; if (bytes > 512000) throw new Error('监控 Hook 输入过大'); chunks.push(Buffer.from(chunk)) }
-      let input: unknown
-      try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new Error('监控 Hook 输入不是有效 JSON') }
-      const receipt = await captureMonitor(input, workspace, process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
+      const receipt = await captureMonitor(input, workspace, codexHome, { dataDir: config.dataDir, enabled: Boolean(settings?.enabled) })
       if (receipt) await startBackground(root, ['monitor', 'flush', '--workspace', workspace, '--env-file', config.envFile], resolve(config.dataDir, 'monitor/exporter.log'))
       return
     }
     let result: unknown
     if (command === 'start') {
-      if (!locator) throw new Error('先 jth install 接入当前项目')
+      const installation = await readJson(userInstallationPath(config, codexHome)) as { disabled?: boolean } | undefined
+      if (!installation || installation.disabled) throw new Error('先 jth init 安装用户级 JTH')
       const service = await startPhoenix(config, root)
-      await writeJson(resolve(workspace, '.jth/monitor.json'), { enabled: true, url: phoenixUrl })
-      await configureMonitorHooks(root, workspace, true)
+      await writeJson(monitorSettingsPath(), { enabled: true, url: phoenixUrl })
+      await configureMonitorHooks(root, workspace, true, { dataDir: config.dataDir, codexHome })
       result = { ...service, workspace, activation: '运行 jth install --trust 审阅并信任新增的本工具采集入口；恢复会话后生效' }
     } else if (command === 'stop') {
-      await configureMonitorHooks(root, workspace, false)
-      await writeJson(resolve(workspace, '.jth/monitor.json'), { enabled: false, url: phoenixUrl })
+      await configureMonitorHooks(root, workspace, false, { dataDir: config.dataDir, codexHome })
+      await writeJson(monitorSettingsPath(), { enabled: false, url: phoenixUrl })
       result = await stopPhoenix(config)
     } else if (command === 'flush') result = await flushMonitor(config, workspace)
     else if (command === 'open') { await execute(process.platform === 'darwin' ? 'open' : 'xdg-open', [phoenixUrl]); result = { url: phoenixUrl } }
-    else result = { ...await phoenixStatus(config), workspace, capture: await readJson(resolve(workspace, '.jth/monitor.json')) ?? null,
-      lastExport: await readJson(resolve(workspace, '.jth/monitor/last-export.json')) ?? null,
-      pending: (await readdir(resolve(workspace, '.jth/monitor/pending')).catch(error => { if (error.code === 'ENOENT') return []; throw error })).filter(name => name.endsWith('.json')).length }
+    else result = { ...await phoenixStatus(config), workspace, capture: settings ?? null,
+      lastExport: await readJson(resolve(monitorDirectory(workspace, config), 'last-export.json')) ?? null,
+      pending: (await readdir(resolve(monitorDirectory(workspace, config), 'pending')).catch(error => { if (error.code === 'ENOENT') return []; throw error })).filter(name => name.endsWith('.json')).length }
     process.stdout.write(JSON.stringify(result, null, 2) + '\n')
   } catch (error) { process.stderr.write(JSON.stringify({ error: safeError(error, config) }) + '\n'); if (args[0] !== 'capture') process.exitCode = 1 }
 }

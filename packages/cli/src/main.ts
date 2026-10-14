@@ -1,8 +1,10 @@
 import { createReadStream } from 'node:fs'
 import { parseArgs } from 'node:util'
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 import { runIndexWorker } from '@jacob-z/jt-harness/memo'
 import { connectDatabase } from './postgres.ts'
-import { loadWorkspaceConfig } from './configuration.ts'
+import { automaticWorkspaceScope, loadWorkspaceConfig } from './configuration.ts'
 import type { Pool } from '@jacob-z/jt-harness/memo'
 import { optionsSchema, submissionSchema, timestampSchema } from '@jacob-z/jt-harness/memo/contracts'
 import { executionProfile, loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
@@ -138,12 +140,17 @@ export async function main(root: string, args = process.argv.slice(2)) {
       ...(values.user ? [{ kind: 'user' }] : []),
       ...(values.submission ? [{ kind: 'unspecified', submission_id: values.submission }] : []),
     ]
-    if (['search', 'recall', 'usage'].includes(command) && scopes.length !== 1) throw new Error(`${command} 必须明确指定一种范围；不会默认搜索全部记忆`)
+    if (scopes.length > 1 || command === 'usage' && scopes.length !== 1) throw new Error(`${command} 必须指定一种范围；显式范围不可混用`)
     const limit = Number(values.limit ?? (['search', 'recall'].includes(command) ? 3 : 10))
     if (['search', 'recall'].includes(command) && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw new Error('--limit 必须为 1..50 的整数')
     if (values.level && (!['summary', 'evidence', 'full'].includes(values.level) || values.submission)) throw new Error('--level 仅用于单条记忆，取 summary、evidence 或 full')
     const asOf = values['as-of'] ? timestampSchema.parse(values['as-of']) : undefined
     config = await loadWorkspaceConfig(root, values['env-file'])
+    if (['search', 'recall'].includes(command) && !scopes.length) {
+      const context = await automaticWorkspaceScope({ cwd: process.cwd(), session_id: process.env.CODEX_THREAD_ID },
+        resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
+      scopes.push({ kind: 'project', project_ids: context.scope.project_ids }, { kind: 'user' })
+    }
     if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
     pool = await connectDatabase(config)
     pool.on('error', error => { process.stderr.write(`${safeError(error, config)}\n`); controller.abort(error) })
@@ -222,7 +229,6 @@ export async function main(root: string, args = process.argv.slice(2)) {
       case 'usage': result = await memoryUses(pool, scopeFilterSchema.parse(scopes[0]), limit); break
       case 'recall':
       case 'search': {
-        const scope = scopeFilterSchema.parse(scopes[0])
         const mode = retrievalInputSchema.shape.mode.parse(command === 'recall' ? 'keyword' : values.mode)
         const queryText = retrievalInputSchema.shape.query.parse(operands[0])
         const minSimilarity = retrievalInputSchema.shape.min_similarity.parse(values['min-similarity'] === undefined ? undefined : Number(values['min-similarity']))
@@ -230,11 +236,14 @@ export async function main(root: string, args = process.argv.slice(2)) {
           space_id: executionProfile(config).space.id,
           vector: (await embedTexts([queryText], config.embedding, controller.signal))[0],
         }
-        const query = retrievalInputSchema.parse({ query: queryText, mode, ...vectors, scope, min_similarity: minSimilarity,
+        const query = retrievalInputSchema.parse({ query: queryText, mode, ...vectors, scope: scopeFilterSchema.parse(scopes[0]), min_similarity: minSimilarity,
           include_history: values.history, include_candidates: values.candidates || values.proposals, include_archived: values.archived, as_of: asOf, limit })
-        const found = await storage.retrieve(query)
+        const matches = await Promise.all(scopes.map(scope => storage.retrieve({ ...query, scope: scopeFilterSchema.parse(scope) })))
+        const found = matches[0]
+        const entries = matches.flatMap(match => match.entries).filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index)
+          .sort((a, b) => b.match.rank_score - a.match.rank_score).slice(0, limit)
         result = boundMemoryEntries({ space: found.space, mode: found.mode, query: query.query, min_similarity: mode === 'keyword' ? null : query.min_similarity,
-          notice: '分数表示检索匹配，不是正确性或采用评分；候选不够相关时可为空。', entries: found.entries.map(entry => ({
+          scopes: scopes.map(scope => scopeFilterSchema.parse(scope)), notice: '分数表示检索匹配，不是正确性或采用评分；候选不够相关时可为空。', entries: entries.map(entry => ({
           id: entry.id, submission_id: entry.submission_id, collection: entry.collection, scope: entry.scope,
           preview: truncateUnicode(entry.content, 400), distance: entry.distance, match: entry.match,
           state: entry.state,

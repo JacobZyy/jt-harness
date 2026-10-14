@@ -20,7 +20,7 @@ flowchart TD
     L --> J
 ```
 
-安装写入一段固定项目说明。每轮最多三条事实声明，记忆正文合计最多 500 个 Unicode 字符，每条原文引文最多 240 字符。来源 ID、时间和版本由程序补齐。实际采用的已读记忆可通过顶层 `used` 数组反馈，最多 10 个 ID；仅有反馈时使用 `items: []`，不新增向量任务。两类内容都没有时不输出声明。
+用户级 Skill 提供声明说明，Hook 注入简短入口，不向业务仓库写入项目说明。每轮最多三条事实声明，记忆正文合计最多 500 个 Unicode 字符，每条原文引文最多 240 字符。来源 ID、时间和版本由程序补齐。项目条目可用 `workspaces` 选择真实绑定目录，省略时归入主目录；共同条目关联多个目录，只保存一次。实际采用的已读记忆可通过顶层 `used` 数组反馈，最多 10 个 ID；仅有反馈时使用 `items: []`，不新增向量任务。两类内容都没有时不输出声明。
 
 候选建议或推断可以增加 `derived_from` UUID 数组。它只表示候选摘要的来源提示，不能把旧摘要当作事实，也不能用于 `user_statement`、`user_confirmed` 或 `tool_observation`。后台只接受本会话已经通过 `evidence` 或 `full` 读取的真实来源，自动绑定来源当前版本；不要手写版本哈希，不要用 `summary` 作为派生证据。来源必须与候选属于相同范围、仍已发布且有效，派生来源不能再依赖派生记忆；来源版本变化后候选标记 `stale`，默认不召回，也不能直接确认。
 
@@ -87,16 +87,16 @@ jth memo restore <旧ID> --reason '重新确认该历史条目的适用范围'
 
 ## 运行与恢复
 
-需要启用的项目执行：
+本机只需安装一次用户级入口：
 
 ```sh
-jth memo codex install --project <项目ID>
+jth init --trust
 jth memo codex status
 jth memo status --summary
 jth memo work
 ```
 
-安装复制项目 `jth-memo` Skill，配置一个 Memo Stop Hook，以及启动/恢复线索所需的 `SessionStart` 和 `UserPromptSubmit` Hook。每轮固定部分只注入短入口，命中时附少量线索；详细规则由 Skill 按需加载。升级时移除旧 `AGENTS.md` 记忆区块。重新安装替换旧 Memo 六阶段捕获，保留 Flow 和其他工具的 Hook。主 Agent 核对子 Agent 结果后统一声明。卸载使用 `jth memo codex uninstall`，不删除已保存的数据。
+安装复制用户级 `jth-memo` Skill，配置一个用户级 Memo Stop Hook，以及启动/恢复线索所需的 `SessionStart` 和 `UserPromptSubmit` Hook。每轮固定部分只注入短入口，命中时附少量线索；详细规则由 Skill 按需加载。旧项目通过 `jth migrate` 移除 JTH 入口和旧说明，保留团队 Hook 与无关内容。主 Agent 核对子 Agent 结果后统一声明。卸载使用 `jth uninstall`，不删除已保存的数据。
 
 Hook 只保存本地事件与来源指针，后台负责解析、数据库和 Embedding。来源暂存继续使用已有硬链接机制，来源文件与数据目录应在同一文件系统。异常处理沿用以下边界：
 

@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises'
 import { resolve, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { boundedMemoryContext, sanitizeMemoryText, truncateUnicode, type MemoStorage, type ScopeFilter } from '@jacob-z/jt-harness/memo'
-import { codexDirectory, hash, inside, installationPath, readJson, writeJson, type CaptureSettings } from './capture.ts'
+import { codexDirectory, hash, inside, installationPath, userInstallationPath, readJson, writeJson, type CaptureSettings } from './capture.ts'
 import { memoEntryContext } from './instructions.ts'
 
 export const cueMarker = 'jth memo cues'
@@ -17,8 +17,8 @@ type CueOutput = { hookSpecificOutput?: { hookEventName: 'UserPromptSubmit', add
 /** A session cue latch is delivery metadata, never task or Goal state. */
 export async function memoryCues(input: unknown, settings: CaptureSettings, config: { dataDir: string }, storage: MemoStorage): Promise<CueOutput> {
   const event = eventSchema.parse(input)
-  if (event.agent_id || !inside(await realpath(settings.workspace), await realpath(event.cwd))) return {}
-  const installation = await readJson(installationPath(config, settings.workspace)) as { disabled?: boolean } | undefined
+  if (event.agent_id || (!settings.workspaces && !inside(await realpath(settings.workspace), await realpath(event.cwd)))) return {}
+  const installation = await readJson(settings.workspaces ? userInstallationPath(config, settings.codex_home) : installationPath(config, settings.workspace)) as { disabled?: boolean } | undefined
   if (installation?.disabled) return {}
   const path = resolve(codexDirectory(config), 'cues', `${hash(`${settings.workspace}:${event.session_id}`)}.json`)
   if (event.hook_event_name === 'SessionStart') {
@@ -27,9 +27,12 @@ export async function memoryCues(input: unknown, settings: CaptureSettings, conf
   }
   const prior = await readJson(path)
   const output = (entries: Array<{ id: string, preview: string }> = []): CueOutput => ({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit',
-    additionalContext: boundedMemoryContext({ instructions: memoEntryContext, cues: entries.map(entry => ({
+    additionalContext: boundedMemoryContext({ instructions: memoEntryContext,
+      ...(settings.workspaces ? { workspace_routing: { primary: settings.workspaces[0].path, workspaces: settings.workspaces,
+        instruction: 'project 声明不写 workspaces 时归主目录；其他目录须明确填写绑定根目录绝对路径。共同结论在同一条 items 中选择多个目录。不要从工具路径猜目录。' } } : {}),
+      cues: entries.map(entry => ({
       ...entry, preview: truncateUnicode(sanitizeMemoryText(entry.preview), 140), next: `jth memo read ${entry.id} --level evidence`,
-    })) }, 1600),
+    })) }, settings.workspaces ? 2400 : 1600),
   } })
   if (prior && !cueStateSchema.parse(prior).pending) return output()
   const query = [...(event.prompt ?? '').trim()].slice(0, 2000).join('')

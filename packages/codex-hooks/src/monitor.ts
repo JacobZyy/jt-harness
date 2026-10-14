@@ -1,7 +1,8 @@
 import { open, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
-import { hash, readJson, writeJson } from './capture.ts'
+import { codexDirectory, hash, readJson, writeJson } from './capture.ts'
+import { sessionTranscriptPath } from './workspace.ts'
 import { transcriptIdentity } from './transcript.ts'
 import { hookCommand, mergeHooks, updateHookConfig } from './install.ts'
 
@@ -10,6 +11,7 @@ const eventSchema = z.object({ hook_event_name: z.enum(['UserPromptSubmit', 'Sto
   session_id: z.string().min(1).max(200), turn_id: z.string().max(200).optional(), model: z.string().max(200).optional(), cwd: z.string(), transcript_path: z.string().nullable().optional() })
 export type MonitorUsage = { input_tokens?: number, cached_input_tokens?: number, output_tokens?: number, reasoning_output_tokens?: number, total_tokens?: number }
 export interface MonitorReceipt { workspace: string, sessionId: string, turnId: string, model?: string, baseline?: MonitorUsage, event: string, receivedAt: string, transcript: string | null, start: number, end: number, startedAt: string }
+export const monitorDirectory = (workspace: string, config?: { dataDir: string }) => config ? resolve(codexDirectory(config), 'monitor', hash(workspace)) : resolve(workspace, '.jth/monitor')
 
 /** Bounded lookback avoids attributing the previous turn's cumulative usage to this turn. */
 async function usageBefore(path: string, end: number): Promise<MonitorUsage | undefined> {
@@ -27,26 +29,29 @@ async function usageBefore(path: string, end: number): Promise<MonitorUsage | un
   } finally { await file.close() }
 }
 
-export async function configureMonitorHooks(root: string, workspace: string, enabled: boolean) {
+export async function configureMonitorHooks(root: string, workspace: string, enabled: boolean, config?: { dataDir: string, codexHome: string }) {
   const command = enabled ? hookCommand('monitor', 'capture') : undefined
-  await updateHookConfig(resolve(workspace, '.codex/hooks.json'), resolve(workspace, '.jth/backups'), document => mergeHooks(document, command, { marker: 'jth monitor', events: monitorEvents }))
+  await updateHookConfig(config ? resolve(config.codexHome, 'hooks.json') : resolve(workspace, '.codex/hooks.json'), config ? resolve(codexDirectory(config), 'backups') : resolve(workspace, '.jth/backups'), document => mergeHooks(document, command, { marker: 'jth monitor', events: monitorEvents }))
 }
 
 /** Keep source locations and counters only; the background exporter reads native events locally. */
-export async function captureMonitor(input: unknown, workspace: string, codexHome: string) {
+export async function captureMonitor(input: unknown, workspace: string, codexHome: string, config?: { dataDir: string, enabled: boolean }) {
   const event = eventSchema.parse(input), cwd = await realpath(event.cwd), root = await realpath(workspace)
   const child = relative(root, cwd)
-  if (child === '..' || child.startsWith('../') || isAbsolute(child)) return null
-  const settings = await readJson(resolve(root, '.jth/monitor.json')) as { enabled?: boolean } | undefined
+  if (!config && (child === '..' || child.startsWith('../') || isAbsolute(child))) return null
+  const settings = config ?? await readJson(resolve(root, '.jth/monitor.json')) as { enabled?: boolean } | undefined
   if (!settings?.enabled) return null
   const receivedAt = new Date().toISOString(), session = hash(event.session_id)
-  const path = resolve(root, '.jth/monitor', `session-${session}.json`)
+  const directory = monitorDirectory(root, config), path = resolve(directory, `session-${session}.json`)
   const prior = await readJson(path) as MonitorReceipt | undefined
   let transcript: string | null = null, end = 0
-  if (event.transcript_path) {
-    transcript = await realpath(event.transcript_path)
-    const parent = await realpath(resolve(codexHome, 'sessions')), within = relative(parent, transcript)
-    if (within === '..' || within.startsWith('../') || isAbsolute(within)) throw new Error('监控日志必须位于 CODEX_HOME/sessions')
+  const source = config ? await sessionTranscriptPath(event, codexHome) : event.transcript_path
+  if (source) {
+    transcript = await realpath(source)
+    if (!config) {
+      const parent = await realpath(resolve(codexHome, 'sessions')), within = relative(parent, transcript)
+      if (within === '..' || within.startsWith('../') || isAbsolute(within)) throw new Error('监控日志必须位于 CODEX_HOME/sessions')
+    }
     end = (await stat(transcript)).size
     if ((await transcriptIdentity(transcript, end)).id !== event.session_id) throw new Error('监控日志会话不匹配')
   }
@@ -57,7 +62,7 @@ export async function captureMonitor(input: unknown, workspace: string, codexHom
     baseline: event.hook_event_name === 'UserPromptSubmit' && transcript ? await usageBefore(transcript, end) : prior?.turnId === turnId ? prior.baseline : undefined,
     receivedAt, transcript, start, end, startedAt: prior?.turnId === turnId ? prior.startedAt : receivedAt }
   await writeJson(path, receipt)
-  const file = resolve(root, '.jth/monitor/pending', `${hash(`${event.session_id}:${turnId}:${event.hook_event_name}`)}.json`)
+  const file = resolve(directory, 'pending', `${hash(`${event.session_id}:${turnId}:${event.hook_event_name}`)}.json`)
   await writeJson(file, receipt)
   return file
 }

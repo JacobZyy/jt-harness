@@ -22,6 +22,7 @@ import { captureEvent, prepareEvidence, readEvidence, registerCaptures } from '@
 import { recordMemories, runIndexWorker } from '@jt-harness/memo'
 import { findRelatedEntries } from '../../packages/memo/src/storage/revision-storage.ts'
 import { comparisonLimits } from '../../packages/memo/src/storage/relations.ts'
+import { workspaceBinding } from '../../packages/cli/src/configuration.ts'
 
 const execute = promisify(execFile)
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -460,13 +461,26 @@ test('native PostgreSQL + pgvector: durable queue, atomic publication, scope iso
     })
 
     await t.test('built CLI validates arguments and durably returns while a worker is blocked', async () => {
-      const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile])).stdout)
+      const home = resolve(directory, 'codex'), sessionId = 'database-cli-session'
+      const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(JTH_|EMBEDDING_|CODEX_)/.test(name))),
+        HOME: directory, CODEX_HOME: home, CODEX_THREAD_ID: sessionId, JTH_CONFIG_DIR: resolve(directory, 'user-config') }
+      await mkdir(resolve(home, 'sessions'), { recursive: true })
+      await writeFile(resolve(home, 'sessions', `rollout-${sessionId}.jsonl`), JSON.stringify({ type: 'session_meta', payload: { id: sessionId, cwd: directory, runtime_workspace_roots: [directory] } }) + '\n')
+      await workspaceBinding(directory, environment, { projectIds: ['project-a', 'project-b'] })
+      const cli = async (...args: string[]) => JSON.parse((await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile], { cwd: directory, env: environment })).stdout)
       assert.equal((await cli('status', 'batch')).status, 'complete')
       assert.equal((await cli('read', '--submission', 'batch')).extraction.revisions.length, 1)
       assert.equal((await cli('doctor')).ok, true)
       assert((await cli('stats')).counts.entries > 0)
       assert((await cli('review', 'list')).total > 0)
-      await assert.rejects(cli('search', 'query'), /必须明确指定/)
+      const automatic = await cli('search', '事实', '--mode', 'keyword', '--limit', '50')
+      assert.deepEqual(automatic.scopes, [{ kind: 'project', project_ids: ['project-a', 'project-b'] }, { kind: 'user' }])
+      assert(automatic.entries.some((entry: { scope: string }) => entry.scope === 'project'))
+      assert(automatic.entries.some((entry: { scope: string }) => entry.scope === 'user'))
+      assert(automatic.entries.every((entry: { scope: string }) => ['project', 'user'].includes(entry.scope)))
+      const user = await cli('search', '事实', '--user', '--mode', 'keyword')
+      assert.deepEqual(user.scopes, [{ kind: 'user' }])
+      assert(user.entries.length > 0 && user.entries.every((entry: { scope: string }) => entry.scope === 'user'))
       await assert.rejects(cli('retry', 'failed', '--legacy', '--provider', 'reachable-provider'), /同时指定/)
       const inputPath = resolve(directory, 'cli-source.json')
       await writeFile(inputPath, JSON.stringify(source('cli-batch')))

@@ -1,0 +1,71 @@
+# 用户级 JTH 与存量迁移
+
+JTH 是本机工具。用户 Hook 与 Skill 安装在用户目录，业务仓库只保留团队自己的 Hook。数据库、来源、队列和目录映射继续使用本机配置，不随业务仓库提交。
+
+## 一次安装
+
+```sh
+jth init --trust
+jth doctor
+```
+
+`init` 补齐用户配置、准备 Memo 表，并安装用户级入口。后续仓库无需逐个运行初始化，也无需手工填写项目 ID。`--trust` 只信任本次安装且匹配的 JTH Hook，不改变第三方 Hook 或用户的其他 Codex 设置。更新 CLI 后，再运行一次 `init` 刷新用户入口。
+
+用户 Hook 位于 `$CODEX_HOME/hooks.json`，默认是 `~/.codex/hooks.json`。用户 Skill 位于 `~/.agents/skills/jth-flow` 和 `jth-memo`。配置及本机目录映射使用 `~/.jt-harness/`；运行回执和备份使用 `JTH_DATA_DIR`，未设置时为 `~/.jth`。
+
+Codex 原生记忆、计划工具、模型和权限继续沿用宿主配置。JTH 入口提醒 Agent 使用宿主实际提供的 Goal 和计划工具，不维护第二套任务状态，也不通过后台模型执行流程。
+
+## 自动目录范围
+
+| 会话情况 | 记忆分组 |
+| --- | --- |
+| 绑定一个目录 A | 自动使用 A 的分组 |
+| 没有绑定工作目录 | 使用 `default` 分组 |
+| 绑定 A、B 等多个目录 | 每个目录拥有自己的分组，主目录负责执行和未明确归属的写入 |
+
+目录名用于显示，内部目录身份用于区分同名目录。存量项目 ID 在迁移时保留对应关系，已保存的条目不重写。不同绑定目录分别归组，不因它们属于同一个 Git 仓库就自动合并。
+
+运行范围来自会话真实绑定目录。Codex 日志的 `session_meta.runtime_workspace_roots` 可以提供此信息；权限目录、临时输出目录和单次命令的 `workdir` 不会被当成业务工作目录。缺少多目录元数据时，仅使用已确认的主目录；明确没有绑定目录时使用 `default`。
+
+默认读取当前会话绑定目录的项目记忆和用户级记忆。只有一个目录时，声明可以省略 `workspaces`；多目录会话中，明确属于其他目录的项目条目使用其真实绑定路径：
+
+```text
+<!-- jth-memory {"items":[{"text":"B 的接口使用固定分页协议。","scope":"project","basis":"tool_observation","quote":"此前真实工具输出中的连续原文","workspaces":["/workspace/B"]}]} -->
+```
+
+`workspaces` 只适用于项目条目，必须是本会话真实绑定目录的非空子集。省略时归入主目录。共同结论选择多个目录，后台保存一条共同事实，而不是复制到各目录。来源会话、消息、引文、版本和日志位置保留。
+
+存储继续使用 `jt_memo.entries` 的 `scope/project_ids` 逻辑隔离，不创建按目录命名的物理 SQL 表。共同事实关联 A、B 时，当前检索规则要求查询范围同时包含 A、B。明确跨项目查询仍可使用多个 `--project`；`--user` 只表示用户级条目，不表示整个记忆库。
+
+## 列举和清理存量
+
+先查看清单，再执行同一迁移：
+
+```sh
+jth migrate --dry-run
+jth migrate
+jth doctor
+jth memo doctor
+```
+
+迁移根据本机旧安装记录及相应 Git worktree 查找接入，也可显式指定工作目录。报告列出旧入口、Skill、范围文件和可确认的 JTH 专属配置；缺失目录和无法确认所有权的内容会保留诊断。
+
+迁移将旧范围和配置引用导入本机映射，然后精确移除项目中的 JTH Hook、复制的 JTH Skill 和接入文件。团队 Hook、其他 Skill、无关 TOML 键、业务改动、数据库和待处理队列保留。历史 Flow 数据和运行资料不因迁移被清空。修改前的接入备份留在用户数据目录。
+
+已跟踪的项目文件清理后会出现 Git 差异；团队 Hook 文件仍可正常提交。JTH 不自动推送这些修改。检查迁移报告及各仓库 `git diff` 后，按各项目的提交规则处理。
+
+迁移完成后重新打开或恢复 Codex 会话，以加载用户级入口。`doctor` 的安装和信任检查不代表已经产生新记忆；实际写入仍以 Stop 来源、声明回执和索引回执为准。
+
+## 日常检查
+
+```sh
+jth flow status
+jth memo codex status
+jth memo status --summary
+jth memo recall '关键词'
+jth memo search '关键词' --project A --project B --mode keyword
+```
+
+关键词检索不调用 Embedding。新的记忆正文索引仍调用现有配置中的 Embedding 服务；用户级接入分离的是仓库同步配置，没有把既有 Provider 改为离线服务。
+
+卸载用户级入口使用 `jth uninstall`。凭据、数据库、历史任务和队列继续保留；显式 legacy 恢复仍使用原命令。

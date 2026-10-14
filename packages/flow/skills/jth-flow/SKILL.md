@@ -1,6 +1,6 @@
 ---
 name: jth-flow
-description: 在安装了 JTH 的项目中，按入口指令为 planned 任务启动或复用 Codex 原生 Goal，用 update_plan 记录进度；普通问答直接回答，有界小改 guarded。补充目标边界、项目验收与按需 Memo 约定。
+description: 在用户级 JTH 入口启用时，按入口指令为 planned 任务启动或复用 Codex 原生 Goal，用 update_plan 记录进度；普通问答直接回答，有界小改 guarded。工作目录自动分组，补充目标边界、项目验收与按需 Memo 约定。
 ---
 
 # JTH Flow
@@ -20,16 +20,17 @@ description: 在安装了 JTH 的项目中，按入口指令为 planned 任务�
 - 上下文压缩或新会话恢复时，读取原生会话、Goal 和计划，接续当前未完成步骤；`jth flow status` 只提供安装配置，不保存任务进度。
 - 反馈只调整计划、约束或当前步骤；只有用户明确更换目标时才改变目标。同步调整受影响的验收条件，保留仍然适用的条件。
 
-Flow 状态命令如下；项目接入与更新使用 `jth init`，卸载与诊断使用 `jth uninstall`、`jth doctor`：
+Flow 由用户级 Hook 与 Skill 提供。`jth init` 只需在本机运行一次，不向业务仓库写入 Hook、Skill 或范围文件；会话绑定目录自动分组，无绑定目录使用 `default`。多目录会话以主目录执行，读取真实绑定目录的记忆，明确归属的结论分别保存。旧接入使用 `jth migrate --dry-run` 核对清单，再用 `jth migrate` 迁移。卸载与诊断使用 `jth uninstall`、`jth doctor`。
+
+Flow 状态命令如下：
 
 ```sh
-jth flow install --project <项目ID>
 jth flow status
 jth flow context
-jth flow uninstall
+jth flow config
 ```
 
-安装后，`UserPromptSubmit` 只注入短入口提示，促使主 Agent 按本技能执行；它不替代语义验收、不读取旧任务或聊天全文。`jth flow status` 的 `entry_hook.last_emission` 证明最近一次 Hook 输出，不证明模型已执行验收。
+安装后，用户级 `UserPromptSubmit` 只注入短入口提示，促使主 Agent 按本技能执行；它不替代语义验收、不读取旧任务或聊天全文。`jth flow status` 的 `entry_hook.last_emission` 证明最近一次 Hook 输出，不证明模型已执行验收。Hook、工作目录映射和运行回执保存于用户目录，不随业务仓库提交。
 
 旧数据库任务仅通过 `jth flow legacy ...` 使用。默认不创建或同步第二份 PostgreSQL 任务；除已安装的入口提示外，不注册重复生命周期 Hook。没有用户安装要求时，不主动安装、迁移或开启 Hook。
 

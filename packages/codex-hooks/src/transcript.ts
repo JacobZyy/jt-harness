@@ -87,6 +87,8 @@ function itemMessage(item: Record<string, unknown>, child: boolean): { role: Mes
     case 'SubAgentActivity':
     case 'ImageView':
     case 'ContextCompaction': return undefined
+    case 'CollabAgentToolCall':
+    case 'HookPrompt': return undefined
     default: throw new Error(`尚未适配 Codex completed item 类型：${String(item.type)}`)
   }
 }

@@ -1,31 +1,32 @@
 import { execFile } from 'node:child_process'
 import { access, chmod, cp, lstat, mkdir, readFile, realpath, rename, rm, symlink } from 'node:fs/promises'
-import { basename, dirname, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { parseArgs, promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { openDatabase, prepareDatabase, schemaVersion, safeError, type Config } from '@jacob-z/jt-harness/memo'
-import { locatorSchema } from '@jacob-z/jt-harness/flow'
-import { captureSettingsSchema, configureFlowHooks, configureHooks, configureMonitorHooks, hookCommand, memoHookCommand, installationPath, readJson, writeJson, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
+import { hookCommand, memoHookCommand, configureUserHooks, userInstallationPath, flowEntryReceiptPath, monitorDirectory, readJson, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
+import { userConfigPaths } from '@jacob-z/jt-harness/memo/config'
 import { installFlow } from './flow.ts'
-import { configureProjectCodex, inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
-import { phoenixStatus } from './phoenix.ts'
-import { completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration, promptConfigValue, promptConfirmation, removeWorkspaceBinding } from './configuration.ts'
+import { inspectNativeHooks, withCodex, type NativeHook, type NativeHookList } from './codex-client.ts'
+import { automaticWorkspaceScope, completeConfiguration, configurationScope, ensureUserConfig, loadWorkspaceConfig, missingConfiguration, saveUserConfigBinding } from './configuration.ts'
 import { connectDatabase } from './postgres.ts'
+import { migrateUserInstallation } from './migration.ts'
+import { phoenixStatus } from './phoenix.ts'
 
 const execute = promisify(execFile)
-const help = `jth init [--project <id>] [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
-jth install --project <id> [--workspace <path>] [--env-file <path>] [--trust] [--codex-memory off|inherit]
+const help = `jth init [--env-file <path>] [--trust]
+jth install [--env-file <path>] [--trust]
 jth install --cli [--from <已解压发行目录>] [--prefix <目录>] [--env-file <path>]
 jth doctor [--workspace <path>] [--env-file <path>]
+jth migrate [--dry-run] [--workspace <path> ...] [--env-file <path>]
 jth uninstall [--workspace <path>] [--env-file <path>]
-init 是交互初始化问卷：项目名默认当前文件夹，已有项目复用原范围与 Codex 偏好；全局配置完整时跳过，缺项才询问并保存。
-问卷确认后自动准备记忆表、接入项目并检查，终端输出完成摘要；无需再执行 memo init 或 doctor。
-首次 init 默认关闭本项目 Codex 原生记忆并开启 update_plan；再次 init 保留现有偏好，inherit 跟随上层记忆设置。
-install 接入项目，未传 --codex-memory 时保留原生记忆配置；--cli 安装或更新 CLI 本体。工具更新后重新运行 init，同步项目接入并迁移记忆表。
-用户配置默认保存于 ~/.jt-harness/.env，项目只保存范围、偏好、Hooks 和 Skill 文件；本机配置引用只在本机保存。API Key 隐藏输入。--env-file 显式覆盖。
-非交互 init 使用配置和默认项目名，输出 JSON；--trust 只信任 JTH Hooks，项目配置层需已受信任。
-doctor 只读检查，不调用模型；uninstall 移除项目 JTH 配置，保留数据库、队列与用户凭据。
+init 一次配置用户级 JTH：补齐连接配置、准备记忆表、安装用户 Hook 和 Skill；以后目录无需 init。
+新会话按真实绑定目录自动分组，无绑定使用 default；继承用户原生 Codex 偏好，不修改项目 TOML。
+migrate 默认发现旧安装及其 Git worktrees，迁移本机目录映射并移除旧项目 JTH 接入；--workspace 可重复。
+--dry-run 只列举变更；实际迁移保存本机备份、原 IDs/env/enabled_at，保留业务改动、队列及历史。
+doctor 只读检查用户 Hook 来源，不调用模型。uninstall 默认卸载用户 Hook/Skill；指定 --workspace 仅清理该目录的旧接入。
+用户配置默认 ~/.jt-harness/.env，Skill 为 ~/.agents/skills，Hook 为 CODEX_HOME/hooks.json。--env-file 显式覆盖；API Key 隐藏输入。
 `
 
 const ownDistributionName = (name: string) => name === 'jt-harness' || name === '@jacob-z/jt-harness'
@@ -38,7 +39,8 @@ export function isManagedHook(hook: NativeHook, workspace: string, settings: Cap
   const commands: Record<string, string> = { 'jth flow entry': hookCommand('flow', 'prompt'),
     'jth memo declaration': memoHookCommand(settings, 'declare'), 'jth memo cues': memoHookCommand(settings, 'cue'),
     'jth monitor': hookCommand('monitor', 'capture') }
-  return hook.source === 'project' && hook.sourcePath === resolve(workspace, '.codex/hooks.json')
+  return (hook.source === 'project' && hook.sourcePath === resolve(workspace, '.codex/hooks.json')
+    || hook.source === 'user' && hook.sourcePath === resolve(settings.codex_home, 'hooks.json'))
     && Boolean(events[hook.statusMessage ?? '']?.includes(hook.eventName) && hook.command === commands[hook.statusMessage ?? ''])
 }
 
@@ -48,7 +50,7 @@ export async function installCli(source: string, prefix: string, envFile?: strin
   const manifest = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'))
   const build = manifest.jthDistribution?.build
   if (!ownDistributionName(manifest.name) || !/^[a-z0-9-]{8,80}$/.test(build ?? '')) throw new Error('需要独立发行目录；先运行 pnpm bundle 并解压发行包')
-  await execute(process.execPath, ['--', resolve(packageRoot, 'bin/jth.ts'), '--help'], { timeout: 15000 })
+  await execute(process.execPath, [...(process.versions.bun ? ['--no-env-file'] : []), '--', resolve(packageRoot, 'bin/jth.ts'), '--help'], { timeout: 15000 })
   const home = resolve(prefix, 'share/jth'), target = resolve(home, 'releases', build), binary = resolve(prefix, 'bin/jth')
   const existing = await lstat(binary).catch(error => { if (error.code === 'ENOENT') return null; throw error })
   if (existing) {
@@ -73,7 +75,7 @@ export async function installCli(source: string, prefix: string, envFile?: strin
       if (Object.keys(manifest.dependencies ?? {}).length && !await access(resolve(staging, 'node_modules')).then(() => true, () => false)) {
         await execute('bun', ['install', '--production', '--ignore-scripts', '--no-save'], { cwd: staging, timeout: 120000 })
       }
-      await execute(process.execPath, ['--', resolve(staging, 'bin/jth.ts'), '--help'], { timeout: 15000 })
+      await execute(process.execPath, [...(process.versions.bun ? ['--no-env-file'] : []), '--', resolve(staging, 'bin/jth.ts'), '--help'], { timeout: 15000 })
       await rename(staging, target)
     } finally { await rm(staging, { recursive: true, force: true }) }
   }
@@ -85,30 +87,36 @@ export async function installCli(source: string, prefix: string, envFile?: strin
   return { status: 'installed', version: manifest.version, build, root: target, binary, envFile: userConfig.envFile }
 }
 
-async function inspectProject(root: string, workspace: string, config: Config) {
+async function inspectUser(root: string, cwd: string, config: Config, codexHome: string) {
+  const context = await automaticWorkspaceScope({ cwd, session_id: process.env.CODEX_THREAD_ID }, codexHome)
+  const workspace = context.primary ?? context.cwd
   const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-  const checks: { name: string, status: string, detail?: unknown }[] = []
-  checks.push({ name: 'cli', status: 'ok', detail: { version: manifest.version, bun: process.versions.bun, standalone: Boolean(manifest.jthDistribution) } })
-  checks.push({ name: 'configuration', status: missingConfiguration(config).length ? 'error' : 'ok', detail: { ...await configurationScope(config), missing: missingConfiguration(config), embeddingConfigured: Boolean(config.embedding.space && config.embedding.apiKey) } })
+  const checks: { name: string, status: string, detail?: unknown }[] = [
+    { name: 'cli', status: 'ok', detail: { version: manifest.version, bun: process.versions.bun, standalone: Boolean(manifest.jthDistribution) } },
+    { name: 'configuration', status: missingConfiguration(config).length ? 'error' : 'ok', detail: { ...await configurationScope(config), missing: missingConfiguration(config) } },
+  ]
   try {
     const pool = openDatabase(config, true)
-    try {
-      const result = await pool.query("SELECT kind,status,count(*)::int AS count FROM jt_memo.jobs GROUP BY kind,status")
-      checks.push({ name: 'database', status: 'ok', detail: result.rows })
-    } finally { await pool.end() }
+    try { checks.push({ name: 'database', status: 'ok', detail: (await pool.query('SELECT kind,status,count(*)::int AS count FROM jt_memo.jobs GROUP BY kind,status')).rows }) }
+    finally { await pool.end() }
   } catch (error) { checks.push({ name: 'database', status: 'error', detail: safeError(error, config) }) }
   try {
-    const native = await inspectNativeHooks(workspace), own = native.hooks.filter(h => h.statusMessage?.startsWith('jth '))
-    const skillAvailable = (await Promise.all(['jth-flow', 'jth-memo'].map(name => access(resolve(workspace, '.agents/skills', name, 'SKILL.md')).then(() => true, () => false)))).every(Boolean)
-    checks.push({ name: 'hooks', status: skillAvailable && own.length && own.every(h => h.enabled && h.trustStatus === 'trusted') ? 'ok' : 'warning',
-      detail: { skill_available: skillAvailable, hooks: own.map(({ statusMessage, eventName, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
+    const native = await inspectNativeHooks(workspace)
+    const settings: CaptureSettings = { workspace, codex_home: codexHome, env_file: config.envFile, enabled_at: new Date().toISOString(), scope: context.scope, workspaces: context.workspaces }
+    const own = native.hooks.filter(hook => isManagedHook(hook, workspace, settings, true) && hook.source === 'user')
+    const skillAvailable = (await Promise.all(['jth-flow', 'jth-memo'].map(name => access(resolve(homedir(), '.agents/skills', name, 'SKILL.md')).then(() => true, () => false)))).every(Boolean)
+    checks.push({ name: 'hooks', status: skillAvailable && own.filter(hook => hook.statusMessage !== 'jth monitor').length === 4 && own.every(hook => hook.enabled && hook.trustStatus === 'trusted') ? 'ok' : 'warning',
+      detail: { skill_available: skillAvailable, source: 'user', hooks_path: resolve(codexHome, 'hooks.json'),
+        hooks: own.map(({ statusMessage, eventName, source, sourcePath, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, source, sourcePath, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })
   } catch (error) { checks.push({ name: 'hooks', status: 'warning', detail: safeError(error, config) }) }
-  checks.push({ name: 'flow_entry', status: (await readJson(resolve(workspace, '.jth/flow-entry.json'))) ? 'ok' : 'warning', detail: await readJson(resolve(workspace, '.jth/flow-entry.json')) ?? '尚无触发记录；已安装不等于已执行' })
-  const monitor = await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined
+  const receipt = await readJson(flowEntryReceiptPath(workspace, config))
+  checks.push({ name: 'flow_entry', status: receipt ? 'ok' : 'warning', detail: receipt ?? '尚无触发记录；已安装不等于已执行' })
+  const monitor = await readJson(resolve(userConfigPaths().directory, 'monitor.json')) as { enabled?: boolean } | undefined
   const phoenix = await phoenixStatus(config)
   checks.push({ name: 'monitor', status: !monitor?.enabled ? 'disabled' : phoenix.reachable ? 'ok' : 'warning', detail: {
-    ...phoenix, enabled: Boolean(monitor?.enabled), lastExport: await readJson(resolve(workspace, '.jth/monitor/last-export.json')) ?? null } })
-  return { workspace, checks }
+    ...phoenix, enabled: Boolean(monitor?.enabled), source: 'user',
+    lastExport: await readJson(resolve(monitorDirectory(workspace, config), 'last-export.json')) ?? null } })
+  return { mode: 'user', cwd: context.cwd, workspace, user_installation: await readJson(userInstallationPath(config, codexHome)) ?? null, checks }
 }
 
 export async function deliveryMain(root: string, args: string[]) {
@@ -116,152 +124,64 @@ export async function deliveryMain(root: string, args: string[]) {
   let interactive = false
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-      workspace: { type: 'string' }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
-      from: { type: 'string' }, prefix: { type: 'string' }, cli: { type: 'boolean' }, trust: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
-      'codex-memory': { type: 'string' },
+      workspace: { type: 'string', multiple: true }, 'env-file': { type: 'string' }, project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
+      'codex-home': { type: 'string' }, from: { type: 'string' }, prefix: { type: 'string' }, cli: { type: 'boolean' }, trust: { type: 'boolean' },
+      'dry-run': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     } })
     const [command] = positionals
     if (values.help) { process.stdout.write(help); return }
-    interactive = command === 'init' && Boolean(process.stdin.isTTY && process.stderr.isTTY)
+    if (command === 'upgrade') throw new Error('upgrade 已移除；更新工具后运行 jth init')
     if (positionals.length !== 1) throw new Error('参数数量不符；运行 jth install --help')
     const allowed: Record<string, string[]> = {
-      init: ['workspace', 'env-file', 'project', 'business', 'trust', 'codex-memory'],
-      install: ['workspace', 'env-file', 'project', 'business', 'from', 'prefix', 'cli', 'trust', 'codex-memory'],
-      doctor: ['workspace', 'env-file'], uninstall: ['workspace', 'env-file'],
+      init: ['env-file', 'workspace', 'project', 'business', 'trust', 'codex-home'],
+      install: ['env-file', 'workspace', 'project', 'business', 'trust', 'codex-home', 'from', 'prefix', 'cli'],
+      doctor: ['workspace', 'env-file', 'codex-home'], uninstall: ['workspace', 'env-file', 'codex-home'], migrate: ['workspace', 'env-file', 'codex-home', 'dry-run'],
     }
-    if (command === 'upgrade') throw new Error('upgrade 已移除；更新工具后在项目运行 jth init')
     if (!allowed[command] || Object.keys(values).some(key => !allowed[command].includes(key))) throw new Error(`${command} 参数不支持；运行 jth install --help`)
-    const memoryPolicy = values['codex-memory']
-    if (memoryPolicy !== undefined && memoryPolicy !== 'off' && memoryPolicy !== 'inherit') throw new Error('--codex-memory 仅支持 off 或 inherit')
-    if (values.cli && (values.project || values.business || values.trust || memoryPolicy)) throw new Error('--cli 安装工具本体；项目接入请另用 jth init 或 jth install')
-    if (values.cli && command !== 'install') throw new Error('--cli 仅用于 install')
-    if ((values.from || values.prefix) && !values.cli) throw new Error('--from/--prefix 仅用于 install --cli')
-    const workspace = await realpath(resolve(values.workspace ?? process.cwd()))
+    if (command !== 'migrate' && (values.workspace?.length ?? 0) > 1) throw new Error('--workspace 仅 migrate 支持重复目录')
+    if ((values.from || values.prefix) && !values.cli || values.cli && (values.project || values.business || values.trust)) throw new Error('--cli 安装工具本体；--from/--prefix 仅用于 install --cli')
+    const workspace = await realpath(resolve(values.workspace?.[0] ?? process.cwd()))
+    const codexHome = resolve(values['codex-home'] ?? process.env.CODEX_HOME ?? resolve(homedir(), '.codex'))
     const output = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n')
-    const home = homedir()
-    const shortPath = (path: string) => path.startsWith(home) ? `~${path.slice(home.length)}` : path
-    if (command === 'install' && values.cli) {
-      const installed = await installCli(resolve(values.from ?? root), resolve(values.prefix ?? resolve(homedir(), '.local')), values['env-file'])
-      output(installed); return
+    if (command === 'install' && values.cli) { output(await installCli(resolve(values.from ?? root), resolve(values.prefix ?? resolve(homedir(), '.local')), values['env-file'])); return }
+    config = await loadWorkspaceConfig(root, values['env-file'])
+    if (command === 'doctor') { const report = await inspectUser(root, workspace, config, codexHome); output(report); process.exitCode = report.checks.some(check => check.status === 'error') ? 1 : 0; return }
+    if (command === 'migrate') {
+      const migrated = await migrateUserInstallation(root, config, codexHome, { workspaces: values.workspace, dryRun: values['dry-run'] })
+      if (!values['dry-run'] && (values['env-file'] || process.env.JTH_ENV_FILE)) await saveUserConfigBinding(config.envFile)
+      output(migrated); return
     }
-    const savedLocator = await readJson(resolve(workspace, '.jth/flow.json'))
-    const locator = savedLocator ? locatorSchema.parse(savedLocator) : undefined
-    const projectMemoryPolicy = memoryPolicy ?? (command === 'init' && !locator ? 'off' : undefined)
-    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
-    if (command === 'doctor') {
-      const report = await inspectProject(root, workspace, config)
-      output(report); process.exitCode = report.checks.some(check => check.status === 'error') ? 1 : 0; return
-    }
-    const priorInstallation = await readJson(installationPath(config, workspace)) as { settings?: unknown, disabled?: boolean } | undefined
-    const previousScope = priorInstallation?.settings ? captureSettingsSchema.parse(priorInstallation.settings).scope : undefined
     if (command === 'uninstall') {
-      for (const name of ['.jth', '.codex', '.agents', '.agents/skills']) {
-        const path = resolve(workspace, name)
-        const info = await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })
-        if (info?.isSymbolicLink()) throw new Error(`${name} 是符号链接；未修改仓库配置`)
-      }
-      const existingSkills = await Promise.all(['jth-flow', 'jth-memo'].map(async name => {
-        const info = await lstat(resolve(workspace, '.agents/skills', name)).catch(error => { if (error.code === 'ENOENT') return null; throw error })
-        return Boolean(info)
-      }))
-      await configureMonitorHooks(root, workspace, false)
-      const flow = await configureFlowHooks(root, workspace, false)
-      const memo = await configureHooks(root, config, workspace, undefined, resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-      if (locator || existingSkills.some(Boolean) || priorInstallation?.settings) await configureProjectCodex(workspace, 'inherit', false, true)
-      const hooksPath = resolve(workspace, '.codex/hooks.json')
-      const hooksText = await readFile(hooksPath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
-      if (hooksText) {
-        const document = JSON.parse(hooksText)
-        if (Object.keys(document).length === 1 && document.hooks && Object.keys(document.hooks).length === 0) {
-          if (await readFile(hooksPath, 'utf8') !== hooksText) throw new Error('Hook 配置被其他进程更新；请重试，原配置未覆盖')
-          await rm(hooksPath)
-        }
-      }
-      for (const name of ['flow.json', 'workflow.json', 'monitor.json', 'flow-entry.json']) await rm(resolve(workspace, '.jth', name), { force: true })
-      await removeWorkspaceBinding(workspace)
-      output({ flow, memo, previous_scope: previousScope, configuration: await configurationScope(config), project_configuration_removed: true, database_preserved: true, queues_preserved: true }); return
+      const result = values.workspace?.length ? await migrateUserInstallation(root, config, codexHome, { workspaces: values.workspace, cleanupOnly: true })
+        : await configureUserHooks(root, config, codexHome, false)
+      output({ ...result, uninstall_scope: values.workspace?.length ? 'workspace-legacy' : 'user', database_preserved: true, queues_preserved: true, history_preserved: true }); return
     }
-    if (!['init', 'install'].includes(command)) throw new Error('未知交付命令')
-    const status = locator?.version === 2 && locator.workspace === workspace
-      ? JSON.parse((await execute(process.execPath, ['--', resolve(root, 'bin/jth.ts'), 'flow', 'status', '--workspace', workspace])).stdout) : null
-    const projects: string[] = values.project ?? (locator?.version === 3 ? locator.scope.project_ids : undefined) ?? status?.memo_scope?.project_ids ?? previousScope?.project_ids ?? []
-    const businesses: string[] = values.business ?? (locator?.version === 3 ? locator.scope.business_ids : undefined) ?? status?.memo_scope?.business_ids ?? previousScope?.business_ids ?? []
-    if (interactive) process.stderr.write(`JTH 初始化\n准备：可连接的 PostgreSQL（已安装 pgvector）及 Embedding 服务配置。\n已有全局配置会复用，回车采用默认值，Ctrl+C 取消。\n\n项目配置\n目录：${workspace}\n`)
-    if (command === 'init' && !projects.length) {
-      projects.push(interactive ? await promptConfigValue('项目名称', { value: basename(workspace) }) : basename(workspace))
-    } else if (interactive) process.stderr.write(`项目：${projects.join('、')}（复用已给定范围）\n`)
-    if (!projects.length && !businesses.length) throw new Error('首次安装需要 --project <id> 或 --business <id>')
-    if (command === 'init') captureSettingsSchema.shape.scope.parse({ project_ids: projects, business_ids: businesses })
-    let trust = Boolean(values.trust), trustProject = false
-    if (interactive && !values.trust) {
-      trust = await promptConfirmation('信任当前 Codex 项目并启用 JTH 自动流程与记忆？')
-      trustProject = trust
-    }
-    let userConfig: Awaited<ReturnType<typeof ensureUserConfig>> | undefined
-    if (!values['env-file'] && !process.env.JTH_ENV_FILE) {
-      if (!locator || (await configurationScope(config)).scope === 'user') userConfig = await ensureUserConfig(root)
-      else {
-        const legacyEnv = await realpath(resolve(root, '.env')).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
-        if (legacyEnv === config.envFile) userConfig = await ensureUserConfig(root, legacyEnv)
-      }
-    }
-    config = await loadWorkspaceConfig(root, values['env-file'], workspace)
+    interactive = command === 'init' && Boolean(process.stdin.isTTY && process.stderr.isTTY)
+    if (interactive) process.stderr.write('JTH 用户级初始化\n已有连接配置会复用，仅补齐缺项。目录范围自动确定；原生 Codex 偏好继承用户配置。\n')
+    const userConfig = !values['env-file'] && !process.env.JTH_ENV_FILE ? await ensureUserConfig(root) : undefined
+    config = await loadWorkspaceConfig(root, values['env-file'])
     if (command === 'init') {
-      if (interactive) {
-        const configuration = await configurationScope(config)
-        process.stderr.write(`\n${configuration.scope === 'user' ? '全局共享配置' : '项目指定配置'}：${config.envFile}\n${missingConfiguration(config).length ? '仅补齐缺项；首次配置可回车保留默认值。' : '配置完整，直接复用，不重复询问凭据。'}\n`)
-      }
       config = await completeConfiguration(root, config, { reviewDefaults: userConfig?.created && !userConfig.imported, interactive })
-      for (;;) {
-        try {
-          if (interactive) process.stderr.write('\n正在连接数据库并准备记忆表…\n')
-          const pool = await connectDatabase(config)
-          try { await prepareDatabase(pool, true) } finally { await pool.end() }
-          break
-        } catch (error) {
-          if (!interactive || process.env.JTH_DATABASE_URL) throw error
-          process.stderr.write(`数据库尚未就绪：${safeError(error, config)}\n`)
-          if (!await promptConfirmation('重新输入数据库连接并重试？')) throw error
-          config = await completeConfiguration(root, config, { editDatabase: true })
-        }
-      }
+      const pool = await connectDatabase(config)
+      try { await prepareDatabase(pool, true) } finally { await pool.end() }
     }
-    const installed = await installFlow(root, workspace, config, { project_ids: projects, business_ids: businesses })
-    const codexPreferences = projectMemoryPolicy
-      ? await configureProjectCodex(workspace, projectMemoryPolicy, command === 'init' && !locator) : {}
-    const monitoring = Boolean((await readJson(resolve(workspace, '.jth/monitor.json')) as { enabled?: boolean } | undefined)?.enabled)
-    if (monitoring) await configureMonitorHooks(root, workspace, true)
-    if (trust) {
-      const memoSettings = installed.memo.settings
-      if (!memoSettings) throw new Error('Memo Hook 安装范围缺失；未信任 Hook')
+    const installed = await installFlow(root, workspace, config, { project_ids: values.project ?? [], business_ids: values.business ?? [] }, codexHome)
+    if (values['env-file'] || process.env.JTH_ENV_FILE) await saveUserConfigBinding(config.envFile)
+    if (values.trust) {
+      const context = await automaticWorkspaceScope({ cwd: workspace }, codexHome)
+      const settings: CaptureSettings = { workspace, codex_home: codexHome, env_file: config.envFile, enabled_at: installed.enabled_at,
+        workspaces: context.workspaces, scope: context.scope }
       await withCodex(async call => {
-        if (trustProject) await call('config/batchWrite', { edits: [{ keyPath: `projects.${JSON.stringify(workspace)}.trust_level`, value: 'trusted', mergeStrategy: 'replace' }], reloadUserConfig: true })
         const result = await call('hooks/list', { cwds: [workspace] }) as NativeHookList
-        const hooks = result.data[0].hooks.filter(h => isManagedHook(h, workspace, memoSettings, monitoring))
-        if (!hooks.length) throw new Error('Codex 未发现项目 Hook；先信任项目配置层')
-        await call('config/batchWrite', { edits: hooks.map(h => ({ keyPath: `hooks.state.${JSON.stringify(h.key)}.trusted_hash`, value: h.currentHash, mergeStrategy: 'replace' })), reloadUserConfig: true })
+        const hooks = result.data[0].hooks.filter(hook => isManagedHook(hook, workspace, settings, true) && hook.source === 'user')
+        if (!hooks.length) throw new Error('Codex 未发现用户级 JTH Hook；检查 CODEX_HOME/hooks.json')
+        await call('config/batchWrite', { edits: hooks.map(hook => ({ keyPath: `hooks.state.${JSON.stringify(hook.key)}.trusted_hash`, value: hook.currentHash, mergeStrategy: 'replace' })), reloadUserConfig: true })
       })
     }
-    const verification = command === 'init' ? await inspectProject(root, workspace, config) : undefined
-    const result = { ...installed, ...codexPreferences, configuration: await configurationScope(config),
-      ...(command === 'init' ? { database: { status: 'ready', schema_version: schemaVersion } } : {}),
-      ...(verification ? { verification } : {}) }
-    if (verification) {
-      process.exitCode = verification.checks.some(check => check.status === 'error') ? 1 : 0
-      if (interactive) {
-        const labels: Record<string, string> = { configuration: '连接配置', database: '记忆库', hooks: '自动入口' }
-        const attention = verification.checks.filter(check => check.name in labels && check.status !== 'ok')
-        process.stdout.write([attention.length ? '项目已接入，仍有待处理项' : '初始化完成',
-          `项目：${projects.join('、')}`, `配置：${shortPath(config.envFile)}（${result.configuration.scope === 'user' ? '全局共享' : '显式指定'}）`,
-          `记忆表：已初始化（v${schemaVersion}）`,
-          ...attention.map(check => `${labels[check.name]}：${typeof check.detail === 'string' ? check.detail : '检查未通过，可用 jth doctor 查看详情'}`),
-          ...(attention.length ? ['未信任或禁用的 Hook 可在 Codex /hooks 中处理。'] : []),
-          '下一步：重新打开 Codex 任务，直接描述要做的工作。',
-          '首次运行回执会在任务输入和回复后产生。',
-        ].join('\n') + '\n'); return
-      }
-    }
-    output(result)
+    const verification = command === 'init' ? await inspectUser(root, workspace, config, codexHome) : undefined
+    output({ ...installed, configuration: await configurationScope(config), native_preferences: 'inherit',
+      ...(command === 'init' ? { database: { status: 'ready', schema_version: schemaVersion }, verification } : {}) })
+    if (verification) process.exitCode = verification.checks.some(check => check.status === 'error') ? 1 : 0
   } catch (error) {
     process.stderr.write(interactive ? `初始化未完成：${safeError(error, config)}\n修正后重新运行 jth init。\n` : JSON.stringify({ error: safeError(error, config) }) + '\n')
     process.exitCode = 1

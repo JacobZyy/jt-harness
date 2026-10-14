@@ -74,8 +74,10 @@ test('explicit legacy CLI retains historical task execution while memory is offl
   const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
   await prepareFlowDatabase(pool)
   const store = new FlowStore(workspace, pool)
+  const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(JTH_|EMBEDDING_|CODEX_)/.test(name))),
+    HOME: resolve(workspace, 'user-home'), JTH_CONFIG_DIR: resolve(workspace, 'user-config'), CODEX_HOME: resolve(workspace, 'codex-home') }
   const command = async (...args: string[]) => {
-    const result = await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'flow', 'legacy', ...args, '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace })
+    const result = await execute(process.execPath, [...(process.versions.bun ? ['--no-env-file'] : []), resolve(root, 'bin/jth.ts'), 'flow', 'legacy', ...args, '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace, env: environment })
     return JSON.parse(result.stdout)
   }
   try {
@@ -85,7 +87,7 @@ test('explicit legacy CLI retains historical task execution while memory is offl
     await writeFile(resolve(workspace, '.jth/flow-events/pending.json'), pendingEvent)
     const created = await command('start', '验证真实 CLI 闭环', '--phase', 'execution', '--accept', '验收命令通过', '--check', `${process.execPath} -e "console.log('checked')"`)
     assert.equal(created.phase, 'execution')
-    const recall = await execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'flow', 'legacy', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt]).catch(error => error)
+    const recall = await execute(process.execPath, [...(process.versions.bun ? ['--no-env-file'] : []), resolve(root, 'bin/jth.ts'), 'flow', 'legacy', 'recall', '--workspace', workspace, '--task', created.id, '--request', (await store.task(created.id)).memory!.requestedAt], { env: environment }).catch(error => error)
     assert.equal(JSON.parse(recall.stdout).status, 'failed')
     assert.equal((await command('status')).id, created.id)
     assert.equal(await readFile(resolve(workspace, '.jth/flow-events/pending.json'), 'utf8'), pendingEvent, 'Reading legacy status must not replay pending lifecycle events')
@@ -100,5 +102,11 @@ test('explicit legacy CLI retains historical task execution while memory is offl
     assert.equal((await command('finish', '--summary', 'CLI 流程已完成')).phase, 'completed')
     await command('uninstall')
     assert.equal((await command('status')).phase, 'completed')
+    await execute(process.execPath, [...(process.versions.bun ? ['--no-env-file'] : []), resolve(root, 'bin/jth.ts'), 'migrate', '--env-file', envFile, '--workspace', workspace], { cwd: workspace, env: environment })
+    await assert.rejects(readFile(resolve(workspace, '.jth/flow.json')), { code: 'ENOENT' })
+    assert.equal((await command('status')).id, created.id, 'Explicit legacy history remains available after project locator cleanup')
+    const context = await execute(process.execPath, [...(process.versions.bun ? ['--no-env-file'] : []), resolve(root, 'bin/jth.ts'), 'flow', 'legacy', 'context', '--workspace', workspace, '--session', 'cli-test'], { cwd: workspace, env: environment })
+    assert(context.stdout.includes(created.id))
+    assert(context.stdout.includes('历史任务已完成'))
   } finally { await store.close(); await rm(workspace, { recursive: true, force: true }) }
 })

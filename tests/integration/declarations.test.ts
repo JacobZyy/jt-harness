@@ -5,8 +5,9 @@ import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Pool } from 'pg'
 import { loadConfig, prepareDatabase, MemoStorage, runIndexWorker, retryJob, enqueue, executionProfile, storageDoctor, recordDeclaration } from '@jt-harness/memo'
-import type { Evidence, RecordDraft } from '@jt-harness/memo/contracts'
+import type { Evidence, MemoryDeclaration, RecordDraft } from '@jt-harness/memo/contracts'
 import { captureDeclaration, rememberEntryRead } from '@jt-harness/codex-hooks'
+import type { CaptureSettings } from '@jt-harness/codex-hooks'
 import { receiveRecords } from '../../packages/cli/src/ingest.ts'
 import { ensureUserConfig } from '../../packages/cli/src/configuration.ts'
 import { createServer } from 'node:http'
@@ -17,7 +18,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 test('installed declaration CLI persists a cross-turn approval with both sources, defaults to index-only and stays idempotent', { skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 20000 }, async () => {
   const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-declaration-cli-')))
-  const home = resolve(directory, 'codex'), source = resolve(home, 'sessions/cli.jsonl'), envFile = resolve(directory, '.env')
+  const home = resolve(directory, 'codex'), source = resolve(home, 'sessions/rollout-declaration-cli-session.jsonl'), envFile = resolve(directory, '.env')
   const root = fileURLToPath(new URL('../../', import.meta.url)), execute = promisify(execFile)
   let calls = 0
   const server = createServer(async (request, response) => {
@@ -34,10 +35,14 @@ test('installed declaration CLI persists a cross-turn approval with both sources
   await mkdir(resolve(home, 'sessions'), { recursive: true })
   await writeFile(envFile, `JTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nJTH_DATA_DIR=${directory}/data\nEMBEDDING_API_KEY=test\nEMBEDDING_BASE_URL=http://127.0.0.1:${address.port}/v1\nEMBEDDING_MODEL=declaration-cli\nEMBEDDING_DIMENSIONS=2\nJTH_DSH_BIN=/must-not-run-dsh\n`)
   const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
-  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile], { cwd: directory })
+  const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(JTH_|EMBEDDING_|CODEX_)/.test(name))),
+    HOME: directory, CODEX_HOME: home, CODEX_THREAD_ID: 'declaration-cli-session', JTH_CONFIG_DIR: resolve(directory, 'user-config'),
+    JTH_DATABASE_URL: process.env.JTH_TEST_DATABASE_URL, JTH_DATA_DIR: resolve(directory, 'data'), JTH_PG_DATA_DIR: '', JTH_PG_BIN_DIR: '',
+    EMBEDDING_API_KEY: 'test', EMBEDDING_BASE_URL: `http://127.0.0.1:${address.port}/v1`, EMBEDDING_MODEL: 'declaration-cli', EMBEDDING_DIMENSIONS: '2', JTH_DSH_BIN: '/must-not-run-dsh' }
+  const cli = (...args: string[]) => execute(process.execPath, [resolve(root, 'bin/jth.ts'), 'memo', ...args, '--env-file', envFile], { cwd: directory, env: environment })
   let hookCommand = ''
   const hook = (text: string) => new Promise<void>((done, reject) => {
-    const child = execFile('/bin/sh', ['-c', hookCommand], { cwd: directory, env: { ...process.env, PATH: `${resolve(directory, 'bin')}:${process.env.PATH}` } }, (error, stdout, stderr) => {
+    const child = execFile('/bin/sh', ['-c', hookCommand], { cwd: directory, env: { ...environment, PATH: `${resolve(directory, 'bin')}:${process.env.PATH}` } }, (error, stdout, stderr) => {
       if (error) { reject(error); return }
       try { assert.equal(stdout, ''); assert.equal(stderr, ''); done() } catch (failure) { reject(failure) }
     })
@@ -48,13 +53,15 @@ test('installed declaration CLI persists a cross-turn approval with both sources
     await symlink(resolve(root, 'bin/jth.ts'), resolve(directory, 'bin/jth'))
     await prepareDatabase(pool, true)
     const installed = JSON.parse((await cli('codex', 'install', '--workspace', directory, '--codex-home', home, '--project', 'declaration-cli')).stdout)
-    assert.deepEqual(installed.events, ['Stop', 'SessionStart', 'UserPromptSubmit'])
-    const hooks = JSON.parse(await readFile(resolve(directory, '.codex/hooks.json'), 'utf8')).hooks
+    assert.equal(installed.mode, 'user-declaration')
+    assert.equal(installed.hooks_path, resolve(home, 'hooks.json'))
+    const hooks = JSON.parse(await readFile(resolve(home, 'hooks.json'), 'utf8')).hooks
+    assert.deepEqual(new Set(Object.keys(hooks)), new Set(['Stop', 'SessionStart', 'UserPromptSubmit']))
     hookCommand = hooks.Stop.flatMap((group: { hooks: { command: string, statusMessage: string }[] }) => group.hooks)
       .find((handler: { statusMessage: string }) => handler.statusMessage === 'jth memo declaration').command
     const row = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: new Date().toISOString(), payload }) + '\n'
     const text = '<!-- jth-memory {"items":[{"text":"项目已决定使用 pnpm，待实施。","scope":"project","basis":"user_confirmed","quote":"建议项目使用 pnpm。","confirmation_quote":"可以，你做吧。"}]} -->'
-    await writeFile(source, row('session_meta', { id: 'declaration-cli-session' })
+    await writeFile(source, row('session_meta', { id: 'declaration-cli-session', cwd: directory, runtime_workspace_roots: [directory] })
       + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'proposal', type: 'AgentMessage', content: [{ type: 'text', text: '建议项目使用 pnpm。' }] } })
       + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'u', type: 'UserMessage', content: [{ type: 'text', text: '可以，你做吧。' }] } })
       + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'a', type: 'AgentMessage', content: [{ type: 'text', text }] } }))
@@ -63,11 +70,15 @@ test('installed declaration CLI persists a cross-turn approval with both sources
     await hook(text)
     let entryId = ''
     for (let attempt = 0; attempt < 100; attempt++) {
-      const rows = (await pool.query("SELECT e.id,e.state FROM jt_memo.entry_states e WHERE e.project_ids=ARRAY['declaration-cli'] AND e.state='active'")).rows
+      const rows = (await pool.query("SELECT e.id,e.state FROM jt_memo.entry_states e WHERE e.project_ids @> ARRAY['declaration-cli'] AND e.state='active'")).rows
       if (rows.length) { entryId = rows[0].id; break }
       await delay(50)
     }
-    assert(entryId, 'The detached worker must publish the declared fact')
+    if (!entryId) {
+      const worker = await readFile(resolve(directory, 'data/worker.log'), 'utf8').catch(error => { if (error.code === 'ENOENT') return 'worker log absent'; throw error })
+      const status = JSON.parse((await cli('codex', 'status')).stdout)
+      assert.fail(`The detached worker must publish the declared fact: ${JSON.stringify({ worker, status })}`)
+    }
     assert.equal(calls, 1)
     const entry = await new MemoStorage(pool).getEntry(entryId)
     assert.equal(entry.basis, 'user_confirmed')
@@ -79,8 +90,9 @@ test('installed declaration CLI persists a cross-turn approval with both sources
     const status = JSON.parse((await cli('codex', 'status')).stdout)
     assert.equal(status.mode, 'declaration')
     await assert.rejects(cli('send', source), /--legacy/)
-    await cli('codex', 'uninstall', '--workspace', directory)
-    assert.deepEqual(JSON.parse(await readFile(resolve(directory, '.codex/hooks.json'), 'utf8')).hooks, {})
+    await cli('codex', 'uninstall')
+    const remaining = JSON.parse(await readFile(resolve(home, 'hooks.json'), 'utf8')).hooks
+    assert(!JSON.stringify(remaining).includes('jth memo declaration'))
   } finally { await pool.end(); await new Promise<void>(done => server.close(() => done())); await rm(directory, { recursive: true, force: true }) }
 })
 
@@ -191,5 +203,93 @@ test('declarations preserve source, deduplicate across turns, apply explicit rev
     const other = await recordDeclaration(pool, { ...receipt.draft, evidence_id: changedScope.id }, changedScope, config)
     assert.equal(other.new_facts, 1, 'Equal text in another scope is independent')
     await work()
+  } finally { api.mock.restore(); await pool.end(); await rm(directory, { recursive: true, force: true }) }
+})
+
+test('workspace declarations keep independent facts, shared facts, primary defaults and legacy scopes distinct', { skip: !process.env.JTH_TEST_DATABASE_URL }, async t => {
+  const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL, max: 4 })
+  const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-workspace-declaration-')))
+  const home = resolve(directory, 'codex'), envFile = resolve(directory, '.env'), sourceFile = resolve(home, 'sessions/parent.jsonl')
+  const a = resolve(directory, 'a'), b = resolve(directory, 'b')
+  await Promise.all([mkdir(resolve(home, 'sessions'), { recursive: true }), mkdir(a), mkdir(b)])
+  await writeFile(envFile, `JTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nJTH_DATA_DIR=${directory}/data\nEMBEDDING_API_KEY=test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=workspace-declaration-test\nEMBEDDING_DIMENSIONS=2\nJTH_DSH_BIN=/must-not-run-dsh\n`)
+  const config = await loadConfig(process.cwd(), envFile, {})
+  const storage = new MemoStorage(pool)
+  const settings: CaptureSettings = {
+    workspace: a, codex_home: home, env_file: envFile, enabled_at: '2026-01-01T00:00:00Z',
+    scope: { project_ids: ['workspace-a', 'workspace-b'], business_ids: [] },
+    workspaces: [
+      { path: a, project_ids: ['workspace-a'], business_ids: [] },
+      { path: b, project_ids: ['workspace-b'], business_ids: [] },
+    ],
+  }
+  const row = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: new Date().toISOString(), payload }) + '\n'
+  await writeFile(sourceFile, row('session_meta', { id: 'workspace-declaration-session' }))
+  const api = t.mock.method(globalThis, 'fetch', async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body))
+    return Response.json({ model: 'workspace-declaration-test', data: body.input.map((_text: string, index: number) => ({ index, embedding: [1, 0] })) })
+  })
+  let turn = 0
+  const declare = async (items: MemoryDeclaration['items'], captureSettings = settings) => {
+    turn++
+    const output = `完成。\n<!-- jth-memory ${JSON.stringify({ items })} -->`
+    await appendFile(sourceFile, items.map((item, index) => row('event_msg', {
+      type: 'item_completed', thread_id: 'workspace-declaration-session', item: {
+        id: `source-${turn}-${index}`, type: ['assistant_proposal', 'agent_inference'].includes(item.basis) ? 'AgentMessage' : 'UserMessage',
+        content: [{ type: 'text', text: item.quote }],
+      },
+    })).join('') + row('event_msg', { type: 'item_completed', thread_id: 'workspace-declaration-session', item: { id: `answer-${turn}`, type: 'AgentMessage', content: [{ type: 'text', text: output }] } }))
+    await captureDeclaration({ hook_event_name: 'Stop', session_id: 'workspace-declaration-session', cwd: captureSettings.workspace, transcript_path: sourceFile, last_assistant_message: output }, captureSettings, config)
+    const received = await receiveRecords(pool, config)
+    assert.deepEqual(received.declaration_errors, [])
+    assert.deepEqual(received.errors, [])
+    return received.accepted as { entry_ids: string[], new_facts: number }[]
+  }
+  const fact = (text: string, workspaces?: string[]): MemoryDeclaration['items'][number] => ({ text, quote: text, scope: 'project', basis: 'user_statement', ...(workspaces ? { workspaces } : {}) })
+  const work = () => runIndexWorker(pool, async () => config)
+  try {
+    await prepareDatabase(pool, true)
+    const receipts = await declare([fact('目录 A 使用 pnpm。', [a]), fact('目录 B 使用 npm。', [b]), fact('两个目录共同使用接口 v2。', [a, b])])
+    assert.equal(receipts.length, 3)
+    assert.equal(receipts.reduce((count, receipt) => count + receipt.new_facts, 0), 3)
+    assert.equal((await work()).completed, 3)
+    const entries = await Promise.all(receipts.flatMap(receipt => receipt.entry_ids).map(id => storage.getEntry(id)))
+    const entryA = entries.find(entry => entry.content === '目录 A 使用 pnpm。')!
+    const entryB = entries.find(entry => entry.content === '目录 B 使用 npm。')!
+    const shared = entries.find(entry => entry.content === '两个目录共同使用接口 v2。')!
+    assert.deepEqual(entryA.project_ids, ['workspace-a'])
+    assert.deepEqual(entryB.project_ids, ['workspace-b'])
+    assert.deepEqual(shared.project_ids, ['workspace-a', 'workspace-b'])
+    assert.deepEqual(shared.messages.map(message => message.text), ['两个目录共同使用接口 v2。'])
+    assert.equal((await pool.query('SELECT count(*)::int AS count FROM jt_memo.entries WHERE content=$1', [shared.content])).rows[0].count, 1)
+    const retrieve = (project_ids: string[]) => storage.retrieve({ scope: { kind: 'project', project_ids }, query: '目录', mode: 'keyword' })
+    assert.deepEqual((await retrieve(['workspace-a'])).entries.map(entry => entry.id), [entryA.id])
+    assert.deepEqual((await retrieve(['workspace-b'])).entries.map(entry => entry.id), [entryB.id])
+    assert.deepEqual(new Set((await retrieve(['workspace-a', 'workspace-b'])).entries.map(entry => entry.id)), new Set(entries.map(entry => entry.id)))
+
+    const [primary] = await declare([fact('省略目录归入主目录。')])
+    assert.deepEqual((await storage.getEntry(primary.entry_ids[0])).project_ids, ['workspace-a'])
+    const defaultSettings: CaptureSettings = { ...settings, workspace: directory, scope: { project_ids: ['default'], business_ids: [] }, workspaces: [{ path: directory, project_ids: ['default'], business_ids: [] }] }
+    const [fallback] = await declare([fact('无绑定目录归入默认组。')], defaultSettings)
+    const fallbackEntry = await storage.getEntry(fallback.entry_ids[0])
+    assert.equal(fallbackEntry.scope, 'project')
+    assert.deepEqual(fallbackEntry.project_ids, ['default'])
+    const [legacy] = await declare([fact('旧声明继续沿用旧项目范围。')], { ...settings, workspaces: undefined, scope: { project_ids: ['legacy-project'], business_ids: [] } })
+    assert.deepEqual((await storage.getEntry(legacy.entry_ids[0])).project_ids, ['legacy-project'])
+    assert.equal((await work()).completed, 3)
+
+    await rememberEntryRead(config, 'workspace-declaration-session', shared.id, shared.version!, 'evidence')
+    const [derived] = await declare([{ ...fact('建议两个目录共同升级接口。', [a, b]), basis: 'assistant_proposal', derived_from: [shared.id] }])
+    assert.equal((await work()).completed, 1)
+    const derivedEntry = await storage.getEntry(derived.entry_ids[0])
+    assert.deepEqual(derivedEntry.project_ids, ['workspace-a', 'workspace-b'])
+    assert.deepEqual(derivedEntry.derivation?.sources.map(source => source.read_version), [shared.version])
+    await rememberEntryRead(config, 'workspace-declaration-session', shared.id, shared.version!, 'full')
+    const [correction] = await declare([{ ...fact('明确更正：两个目录共同使用接口 v3。', [a, b]), change: { kind: 'correction', target: shared.id } }])
+    assert.equal((await work()).completed, 1)
+    assert.equal((await storage.getEntry(shared.id)).state, 'superseded')
+    assert.deepEqual((await storage.getEntry(correction.entry_ids[0])).project_ids, ['workspace-a', 'workspace-b'])
+    assert.equal((await storage.getEntry(derived.entry_ids[0])).derivation?.stale, true)
+    assert.equal((await storageDoctor(pool)).ok, true)
   } finally { api.mock.restore(); await pool.end(); await rm(directory, { recursive: true, force: true }) }
 })

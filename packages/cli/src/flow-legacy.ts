@@ -7,7 +7,7 @@ import { FlowStore, findFlowWorkspace, renderFlowContext, taskView, verifyTask, 
 import { configureFlowHooks, configureHooks, flowHook, stageFlowEvent, drainFlowEvents, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { openDatabase } from '@jacob-z/jt-harness/memo'
 import { loadConfig, safeError } from '@jacob-z/jt-harness/memo/config'
-import { loadWorkspaceConfig, saveWorkspaceBinding } from './configuration.ts'
+import { findLegacyWorkspace, loadLegacyWorkspaceConfig, saveWorkspaceBinding, workspaceBindings } from './configuration.ts'
 import { recallTask, scheduleRecall } from './flow-memory.ts'
 import { connectDatabase } from './postgres.ts'
 import { startBackground } from './background.ts'
@@ -59,7 +59,7 @@ export async function flowLegacyMain(root: string, args: string[]) {
     const invalid = Object.keys(values).filter(key => !['workspace', 'session', 'task', 'help', ...allowed[command]].includes(key))
     if (invalid.length) throw new Error(command + ' 不支持：' + invalid.join(', '))
     if (positionals.length !== (['start', 'revise', 'resume', 'focus'].includes(command) ? 2 : 1)) throw new Error('命令参数数量不符；使用 jth flow --help')
-    const workspace = command === 'install' ? await realpath(resolve(values.workspace ?? process.cwd())) : findFlowWorkspace(values.workspace ?? process.cwd())
+    const workspace = command === 'install' ? await realpath(resolve(values.workspace ?? process.cwd())) : await findLegacyWorkspace(values.workspace ?? process.cwd())
     const sessionId = values.session ?? process.env.CODEX_THREAD_ID
     const output = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n')
     if (command === 'migrate') {
@@ -75,7 +75,7 @@ export async function flowLegacyMain(root: string, args: string[]) {
     }
     if (command === 'install') {
       if (existsSync(legacyFlowPath(workspace)) && !existsSync(flowPath(workspace))) throw new Error('检测到旧 SQLite；先运行 jth flow migrate，保留原任务')
-      const config = await loadWorkspaceConfig(root, values['env-file'], workspace)
+      const config = await loadLegacyWorkspaceConfig(root, workspace, values['env-file'])
       const pool = await connectDatabase(config)
       store = new FlowStore(workspace, pool)
       await prepareFlowDatabase(pool)
@@ -98,9 +98,10 @@ export async function flowLegacyMain(root: string, args: string[]) {
       if (!staged) { output({}); return }
       let hook
       try {
-        const location = locatorSchema.parse(await readJson(flowPath(workspace)))
-        if (location.version === 2 && location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
-        const config = await loadWorkspaceConfig(root, undefined, workspace)
+        const saved = await readJson(flowPath(workspace))
+        const location = saved === undefined ? undefined : locatorSchema.parse(saved)
+        if (location?.version === 2 && location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
+        const config = await loadLegacyWorkspaceConfig(root, workspace)
         store = new FlowStore(workspace, openDatabase(config, true))
         hook = await flowHook(staged.event, store)
         await unlink(staged.file)
@@ -119,10 +120,12 @@ export async function flowLegacyMain(root: string, args: string[]) {
       return
     }
     if (command === 'uninstall') { output(await configureFlowHooks(root, workspace, false)); return }
-    if (!existsSync(flowPath(workspace))) throw new Error('旧流程尚未迁移；运行 jth flow migrate')
-    const location = locatorSchema.parse(await readJson(flowPath(workspace)))
-    if (location.version === 2 && location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
-    const config = await loadWorkspaceConfig(root, undefined, workspace)
+    const saved = await readJson(flowPath(workspace))
+    const binding = (await workspaceBindings()).find(binding => binding.path === workspace)
+    if (saved === undefined && !binding?.legacy.length) throw new Error('旧流程尚未迁移；运行 jth flow legacy migrate')
+    const location = saved === undefined ? undefined : locatorSchema.parse(saved)
+    if (location?.version === 2 && location.workspace !== workspace) throw new Error('流程连接配置的工作区不一致')
+    const config = await loadLegacyWorkspaceConfig(root, workspace)
     store = new FlowStore(workspace, await connectDatabase(config))
     await store.settings()
     if (command === 'sync') {

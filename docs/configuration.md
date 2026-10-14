@@ -1,63 +1,72 @@
-# 用户配置与仓库接入
+# 用户配置与自动目录分组
 
-共享连接和凭据默认保存在 `~/.jt-harness/.env`。该文件是独立普通文件，不链接到源码仓库。配置目录权限为 `0700`，凭据文件为 `0600`；CLI 输出只显示来源路径、范围及缺失字段，不打印 API Key 或数据库密码。
+JTH 在本机安装一次用户级 Hook 和 Skill，不需要逐仓库初始化。凭据默认保存在独立普通文件 `~/.jt-harness/.env`；配置目录权限为 `0700`，凭据文件为 `0600`。CLI 只显示配置来源和缺失字段，不打印 API Key 或数据库密码。
 
-| 范围 | 内容与位置 |
+| 内容 | 本机位置 |
 | --- | --- |
-| 用户级 | `~/.jt-harness/.env`：数据库连接、Embedding 服务地址、模型、维度、API Key，以及可选的运行数据路径和 legacy 模型设置；`~/.jt-harness/projects/` 保存本机项目的配置绑定 |
-| 仓库级 | `.jth/flow.json` 只保存项目和业务 ID；`.codex/hooks.json` 保存无设备路径的 Hook；`.agents/skills/jth-flow` 和 `jth-memo` 是复制的文件；`.codex/config.toml` 和 `AGENTS.md` 保存宿主接入及项目约定 |
-| 程序 | npm 等包管理器管理自己的全局安装；`install --cli` 使用 `~/.local/bin/jth` 和 `~/.local/share/jth/releases/`。程序目录不存放权威凭据 |
-| 运行数据 | 继续使用当前 `JTH_DATA_DIR`、PostgreSQL 和队列位置；未指定数据目录时沿用 `~/.jth`，升级不迁移或清空数据 |
+| 数据库、Embedding、可选 legacy 模型配置 | `~/.jt-harness/.env` |
+| 显式选择的共享配置路径 | `~/.jt-harness/configuration.json` |
+| 目录身份、显示名及旧范围读取别名 | `~/.jt-harness/projects/` |
+| Codex 用户 Hook | `$CODEX_HOME/hooks.json`，默认 `~/.codex/hooks.json` |
+| Flow 与 Memo Skill | `~/.agents/skills/jth-flow`、`~/.agents/skills/jth-memo` |
+| 用户 Workflow Policy | `~/.jt-harness/workflow.json` |
+| 目录 Workflow Policy | `~/.jt-harness/workflow/<目录哈希>.json` |
+| 运行数据、原数据库与队列 | 沿用 `JTH_DATA_DIR`；缺省 `~/.jth` |
 
-同一仓库的使用者共享项目和业务 ID；每台设备读取自己的 CLI 配置、PostgreSQL 和 Memo 数据。`.jth/flow.json`、Hook、Skill 文件可提交到 Git；`.jth` 的运行回执、备份、队列及 `.jth/monitor.json` 留在本机。用户配置和本机安装记录可含本机绝对路径，但不写入仓库分发文件。
+工具安装目录不保存权威凭据。npm 等包管理器管理自己的全局安装；`install --cli` 使用 `~/.local/bin/jth` 和 `~/.local/share/jth/releases/`。升级不移动或清空数据库、待投递声明、索引和 legacy 队列。
 
-## Workflow Policy 配置
+## 初始化与更新
 
-流程模式与 Memo 凭据分开读取：用户默认在 `~/.jt-harness/workflow.json`，仓库覆盖在 `.jth/workflow.json`。缺省为 adaptive；用 `jth flow config --scope user|project --mode adaptive|strict|inherit` 设置。`flow status/context` 显示最终模式与来源；数据库或凭据不可用不影响策略命令。详见 [Workflow Policy](workflow-policy.md)。
-
-## 初始化
-
-先准备可连接的 PostgreSQL（已安装 pgvector）和 Embedding 服务的地址、模型、向量维度及 API Key。工具本体安装后，在项目目录只需运行：
-
-```sh
-jth init
-```
-
-问卷分两层：
-
-- **项目级**：首次默认使用当前文件夹名作为项目标识，回车接受，也可以修改；已有安装始终复用原范围。随后确认是否信任当前 Codex 项目并启用 JTH 自动流程与记忆，默认是。
-- **全局级**：默认使用 `~/.jt-harness/.env`。完整配置直接复用，不重复询问；首次配置或缺项时，交互填写服务地址、模型、向量维度、数据库连接和 API Key。凭据隐藏输入，文件权限为 `0600`；显式 `--env-file` 的项目绑定只在本机保存。
-
-问答完成后，`init` 自动连接数据库、初始化或升级 Memo 表、安装项目指引和 Hooks、按回答处理信任，再执行接入检查并输出人类可读摘要。不需要另跑 `memo init` 或 `doctor`。再次运行 `init` 只补齐配置缺项，并保留已有 Codex 记忆和计划工具偏好；显式传入 `--codex-memory` 时才修改记忆偏好。数据库连接失败时，可在同一问卷中重新输入连接并重试；数据库软件、目标数据库与 pgvector 仍需提前准备。
-
-Ctrl+C 取消当前问答，尚未完成的输入不保存；此前已经完成保存的共享配置保留。初始化完成后重新打开 Codex 任务，新输入和回复才会产生运行回执。第二个项目仍只运行 `jth init`，复用同一全局配置。
-
-AI 或脚本运行时保留非交互 JSON 输出，项目名同样可以省略；配置缺项时直接退出，不写入项目安装文件。需要明确覆盖默认值时仍可传参数：
+准备可连接的 PostgreSQL（已安装 pgvector）以及 Embedding 地址、模型、维度和 API Key。安装 CLI 后运行一次：
 
 ```sh
-jth init --project my-project --env-file /absolute/path/to/private.env --trust
+jth init --trust
+jth doctor
 ```
 
-非交互的 `--trust` 仅信任 JTH Hooks，Codex 项目配置层需要已受信任；交互问卷中的确认则明确包含当前项目的信任。`--env-file` 保留显式指定的独立配置，不覆盖全局文件。`init` 不发送 Embedding 或生成模型测试请求；`doctor` 仍可作为后续只读诊断命令。`install --cli` 只安装或更新程序，随后在项目运行 `init` 同步接入。
+交互初始化只补齐用户配置缺项，不询问项目 ID，不在当前仓库写 Hook、Skill 或 `.jth/flow.json`。随后连接数据库，执行保留数据的表迁移，安装用户级入口并检查接入。`init` 不调用 Embedding 或生成模型。数据库软件、目标数据库与 pgvector 需提前准备。
+
+已有完整配置直接复用。Ctrl+C 取消尚未完成的问答；已经保存的共享配置保留。非交互调用保留 JSON 输出；配置缺项时退出，不安装入口。独立配置可明确选择：
+
+```sh
+jth init --env-file /absolute/path/to/private.env --trust
+```
+
+明确选择的配置路径保存在本机用户指针中，后续用户 Hook 使用同一配置。`--trust` 仅信任本次 JTH Hook 定义。用户原生记忆、Goal、计划和模型偏好继续由 Codex 配置管理；初始化不写项目覆盖或强制修改全局偏好。更新 CLI 后重新执行一次 `init --trust`，再重新加载已有 Codex 会话；新增仓库无需再次执行。
+
+## 目录与读取范围
+
+目录组依据当前会话实际绑定的工作目录；权限允许访问的额外目录不会自动成为记忆组。没有绑定目录时使用 `default`。多个目录各自保留分组，主目录负责 CLI 执行和未指定归属的默认写入。目录显示名取文件夹名，内部身份依据规范绝对路径，避免同名目录碰撞。
+
+默认搜索读取全部当前绑定目录和用户范围。声明可通过 `items[].workspaces` 选择一个或多个已绑定目录；共同事实保存一次并关联多个目录。旧主仓库保留已登记的项目 ID；复制的工作目录使用独立新写入组，旧 ID 只作读取别名。详细例子见[用户级迁移](user-local-jth.md)。
 
 ## 覆盖与来源
 
-Memo、数据库、监控和项目接入命令的配置文件选择顺序为 `--env-file`、`JTH_ENV_FILE`、本机 `~/.jt-harness/projects/` 绑定、用户默认配置。旧版同设备的 `.jth/flow.json` 或 `.jth/memo.json` 配置引用仍可读取；从其他设备复制的旧绝对工作区路径不会被采用。选择文件后，进程环境变量覆盖文件值；不会自动合并当前仓库任意 `.env`。`flow status/context` 的项目范围来自仓库共享文件。
+配置文件选择顺序为 `--env-file`、`JTH_ENV_FILE`、用户 `configuration.json` 指针、用户默认配置。选择文件后，进程环境变量覆盖文件值；不自动合并当前仓库任意 `.env`。`configuration` 输出显示实际 `envFile`、默认 `userFile` 和来源范围。
 
-项目初始化时显式选择的 `--env-file` 继续作为该项目的覆盖配置，再次 `init` 不将它擅自改为用户默认。`init`、`flow status` 和 `doctor` 的 `configuration` 会显示 `scope`、实际 `envFile` 和默认 `userFile`；`scope=user` 表示用户默认，`scope=override` 表示显式覆盖。
+`JTH_CONFIG_DIR` 可改变用户配置目录；运行 CLI 和 Hook 时应保持该变量一致。目录分组和 Workflow Policy 不新增数据库或模型配置格式。
 
-需要隔离或便携安装时可设置 `JTH_CONFIG_DIR` 改变用户配置目录；运行 CLI 和 Hook 的环境应保持这个变量一致。通常无需设置。数据库、Embedding 和模型选择不额外引入第二套配置格式。
+流程模式与 Memo 凭据分开读取，缺省 adaptive：
+
+```sh
+jth flow config --scope user --mode adaptive
+jth flow config --scope project --mode strict
+jth flow config --scope project --mode inherit
+```
+
+`project` 覆盖存于本机用户配置目录，命令不写仓库。`flow status/context` 显示最终模式与来源；数据库或凭据不可用不影响策略命令。详见 [Workflow Policy](workflow-policy.md)。
 
 ## 从旧安装迁移
 
-旧版 `share/jth/.env` 可能链接到源码仓库。安装新 CLI 或重新初始化使用该旧默认配置的仓库时，程序将其内容复制到用户配置目录，并把相对数据路径转换为原位置的绝对路径。原文件保留，已有用户配置不会被覆盖。
+```sh
+jth migrate --dry-run
+jth migrate
+```
 
-`config-migrations.json` 只记录已确认等价的旧配置路径。旧 Hook、待投递声明、暂存记录、索引和显式 legacy 队列仍可解析旧路径，即使旧配置文件随后移走。不会改写历史来源、项目范围、任务执行快照，也不会因此重跑 legacy 队列。
+迁移枚举旧安装记录及对应 Git 工作目录；`--workspace <路径>` 可重复传入以补充未登记目录。迁移先保存本机备份、目录映射和旧范围读取别名，再清理可确认属于 JTH 的仓库入口。团队 Hook、其他 Skill、业务配置、历史任务、队列和运行证据保留。已消失的路径仅报告跳过，不重建目录。Git 配置差异留在工作区供审阅。
 
-迁移后的旧路径作为用户配置的别名，不再作为独立配置编辑；后续修改用户目录中的 `.env`。需要独立覆盖配置时，使用新的文件路径并显式传入 `--env-file`。
+旧版链接到源码的共享 `.env` 会复制到用户配置目录，相对数据路径转换为原位置的绝对路径；原文件保留，已有用户配置不覆盖。`config-migrations.json` 只记录已确认等价的旧配置路径，待投递声明和 legacy 队列仍可解析旧路径，不改历史快照或重跑任务。配置不同则不建立等价映射；核对后明确选择共享配置。
 
-CLI 入口是原生 `bin/jth.ts`，由 Bun 直接运行，npm 发布包保留 TypeScript 源码，不编译成 `.mjs`。手动通过 Bun 调用时使用 `bun -- bin/jth.ts ...`；`--` 保证 `--env-file` 由 JTH 解析。后台启动入口也使用这个分隔符。Hook 只调用 PATH 中的 `jth -- ...`，不携带安装目录、工作区、配置文件或 Codex 主目录的绝对路径。运行时从当前目录向上定位项目，用共享项目 ID 和本机配置工作；`~` 不写进单引号 Hook 命令，因为 shell 不会展开。安装后可用 `command -v jth` 检查。新设备先安装 CLI 并配置自己的 `~/.jt-harness/.env`；克隆项目后可直接使用已受信任的 Hook，也可运行 `jth init` 检查本机连接。
+Hook 只调用 PATH 中的 `jth -- ...`，不携带工作区、配置或安装目录的绝对路径。CLI 入口为 Bun TypeScript `bin/jth.ts`；手动调用使用 `bun --no-env-file -- bin/jth.ts ...`，让 JTH 解析自身参数。可用 `command -v jth` 确认实际入口。
 
-若现有用户配置与旧配置不同，不建立等价映射，也不覆盖其中任何一份；已有项目在本机保留自己的配置引用。明确核对后再选择需要的配置。
-
-安装新版本后，在每个已接入项目运行 `jth init`。它补齐缺项、保留本机配置并迁移本机数据库；同一设备上已更新的项目可复用该数据库。随后用 `jth doctor` 检查 Hook 信任，再重新加载 Codex 任务。定义变化时也可在 `/hooks` 重新审阅。`jth uninstall` 移除仓库内 JTH 接入配置，不删数据库、用户凭据或待处理队列。诊断与实际触发的区别见[接入和更新](local-delivery-monitoring.md#项目接入和更新)。
+`jth uninstall` 移除用户级入口，保留数据库、凭据、目录映射和队列；带 `--workspace` 时清理指定旧仓库接入。诊断与实际触发的区别见[接入和更新](local-delivery-monitoring.md#用户级接入和更新)。

@@ -41,17 +41,17 @@ JTH 的流程控制只补充项目约定和 Memo 接入。目标续跑、任务�
 ## 安装与调用
 
 ```sh
-jth flow install --project jt-harness
+jth init --trust
 jth flow status
 jth flow context
-jth flow uninstall
+jth uninstall
 ```
 
-`install` 管理项目 Skill、`UserPromptSubmit` 短入口提示和 Memo Stop 声明入口，移除旧 `jth flow context` Hook。项目 `.jth/flow.json` 仅定位 workspace 和 `.env`；Memo 的安装记录提供 `memo_scope`，不复制到第二张配置表。卸载 Flow 移除 Skill 与入口 Hook，保留 Memo、第三方 Hook 和历史数据。
+`init` 安装用户级 Flow/Memo Skill、`UserPromptSubmit` 短入口提示和 Memo Stop 声明入口。目录范围从当前会话真实工作目录解析，不需要仓库 `.jth/flow.json`。旧项目入口用 `jth migrate` 统一清理；第三方 Hook 和历史数据保留。`flow install/uninstall` 兼容入口管理同一用户级 Flow/Memo 接入，不写项目文件。
 
-入口执行 `jth flow prompt --workspace <项目目录>`，接收 Codex 的 Hook JSON，只输出短 Skill 入口及 planned 使用原生 Goal 的明确指令。它不读取用户正文、聊天记录、旧目标或记忆，不连接数据库或模型；任务分类和工具调用由主 Agent 执行。Hook 定义设置 512 的 `additionalContextLimit`，异常输出诊断并放行，防止入口故障阻塞会话。
+入口执行 `jth -- flow prompt`，接收 Codex 的 Hook JSON，只输出短 Skill 入口及 planned 使用原生 Goal 的明确指令。它不读取用户正文、聊天记录、旧目标或记忆，不连接数据库或模型；任务分类和工具调用由主 Agent 执行。Hook 定义设置 512 的 `additionalContextLimit`，异常输出诊断并放行，防止入口故障阻塞会话。
 
-`.jth/flow-entry.json` 仅保留最近一次输出的时间、会话/回合 ID、工作目录和字符数。`flow status/context` 的 `entry_hook` 展示安装与最近输出记录；这不是任务状态表，也不能单独证明模型遵守流程。Codex 必须同时信任项目层和当前 Hook 定义；仅写入 hooks.json 不代表已激活。已有会话重新加载后，同会话恢复的下一次用户输入会再次收到短提示。
+用户数据目录 `codex/flow-entry/<目录哈希>.json` 仅保留最近一次输出的时间、会话/回合 ID、工作目录和字符数。`flow status/context` 的 `entry_hook` 展示安装与最近输出记录；这不是任务状态表，也不能单独证明模型遵守流程。Codex 必须信任当前用户 Hook 定义；仅写入 hooks.json 不代表已激活。已有会话重新加载后，同会话恢复的下一次用户输入会再次收到短提示。
 
 `status/context` 只读本地配置，不连接 PostgreSQL，不读取旧任务、旧阶段和缓存记忆，也不声称读取了原生 Goal/计划的实时状态。原生状态在 Codex 中查看。安装、状态和退役 Hook 入口在数据库离线时也可运行。
 
@@ -61,7 +61,7 @@ Memo 通过 Stop 保存主会话声明及采用反馈，后台处理存储与新
 
 原生 Goal 和计划工具由当前宿主提供，不由 `jth` 模拟。主 Agent 根据入口指令、实际授权和 `get_goal` 结果启动或复用 Goal，并独立调用 `update_plan`；只在全部验收后调用 `update_goal` 完成。未暴露工具时明确说明，并继续可执行工作，不用 Markdown 清单或旧 Flow Task 冒充原生 UI。两组工具互不替代，`flow status` 的安装信息也不证明 Goal 已启动。
 
-Codex CLI 0.152.0 起计划工具默认关闭。首次 `jth init` 会在项目 `.codex/config.toml` 设置 `tools.update_plan.enabled = true`；再次 `init` 和 `install` 保留已有选择，`uninstall` 移除该项目覆盖项。新配置由重新加载的受信任项目会话读取，是否实际提供工具仍以宿主工具清单为准。
+计划工具是否提供以当前宿主工具清单为准。用户级 `jth init` 不写项目 `tools.update_plan` 覆盖，也不修改用户的原生工具偏好。`jth migrate` 只移除可确认由旧 JTH 安装器写入的项目覆盖，恢复继承 Codex 用户配置。
 
 `turn/plan/updated` 是宿主发出的计划通知，不是可以写入的公共计划接口。本版不伪造这些通知、不修改 Codex 私有数据库，也不为适配原生功能添加一个新服务。
 

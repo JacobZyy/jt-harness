@@ -1,19 +1,25 @@
-import { chmod, link, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { chmod, link, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, resolve } from 'node:path'
+import { execFile } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { isDeepStrictEqual, parseEnv } from 'node:util'
+import { isDeepStrictEqual, parseEnv, promisify } from 'node:util'
 import { createInterface } from 'node:readline'
 import { Writable } from 'node:stream'
-import { stdin, stderr } from 'node:process'
 import { z } from 'zod'
-import { flowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
-import { hash, memoLocatorPath, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { flowPath, legacyFlowPath, locatorSchema } from '@jacob-z/jt-harness/flow'
+import { hash, memoLocatorPath, readJson, writeJson, codexDirectory, captureSettingsSchema, sessionWorkspaceContext, type CaptureSettings } from '@jacob-z/jt-harness/codex-hooks'
 import { loadConfig, readConfigAliases, userConfigPaths, type Config } from '@jacob-z/jt-harness/memo/config'
 
 const readEnv = (path: string) => readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
 const deviceBindingSchema = z.strictObject({ version: z.literal(1), envFile: z.string().refine(isAbsolute) })
+const workspaceBindingSchema = z.strictObject({ version: z.literal(2), path: z.string(), identity: z.string(), display_name: z.string(),
+  project_ids: z.array(z.string()), read_project_ids: z.array(z.string()), business_ids: z.array(z.string()),
+  legacy: z.array(z.strictObject({ workspace: z.string(), env_file: z.string(), enabled_at: z.string().optional(), installation_path: z.string(),
+    project_ids: z.array(z.string()), business_ids: z.array(z.string()) })).default([]),
+})
+export type WorkspaceBinding = z.infer<typeof workspaceBindingSchema>
 const deviceBindingPath = (workspace: string, environment: NodeJS.ProcessEnv = process.env) =>
   resolve(userConfigPaths(environment).directory, 'projects', `${hash(realpathSync(workspace))}.json`)
 
@@ -36,15 +42,124 @@ export function findInstalledWorkspace(start: string) {
   return path
 }
 
-export async function loadWorkspaceConfig(root: string, envFile?: string, workspace = process.cwd(), environment: NodeJS.ProcessEnv = process.env) {
+export async function loadWorkspaceConfig(root: string, envFile?: string, _workspace = process.cwd(), environment: NodeJS.ProcessEnv = process.env) {
   if (envFile !== undefined || environment.JTH_ENV_FILE !== undefined) return loadConfig(root, envFile, environment)
-  const installed = findInstalledWorkspace(workspace)
-  const binding = await readJson(deviceBindingPath(installed, environment))
-  if (binding) return loadConfig(root, deviceBindingSchema.parse(binding).envFile, environment)
-  const locator = await readJson(flowPath(installed)) ?? await readJson(memoLocatorPath(installed))
-  if (!locator) return loadConfig(root, undefined, environment)
-  const saved = locatorSchema.parse(locator)
-  return loadConfig(root, saved.version === 2 && saved.workspace === installed ? saved.envFile : undefined, environment)
+  const selected = await readJson(resolve(userConfigPaths(environment).directory, 'configuration.json'))
+  return loadConfig(root, selected ? deviceBindingSchema.parse(selected).envFile : undefined, environment)
+}
+
+export async function saveUserConfigBinding(envFile: string, environment: NodeJS.ProcessEnv = process.env) {
+  await writeJson(resolve(userConfigPaths(environment).directory, 'configuration.json'), deviceBindingSchema.parse({ version: 1, envFile }))
+}
+
+export async function findLegacyWorkspace(start: string, environment: NodeJS.ProcessEnv = process.env) {
+  const bindings = await workspaceBindings(environment)
+  let path = await realpath(start)
+  const original = path
+  for (;;) {
+    if (existsSync(flowPath(path)) || existsSync(legacyFlowPath(path)) || bindings.some(binding => binding.path === path && binding.legacy.length)) return path
+    const parent = dirname(path)
+    if (parent === path) return original
+    path = parent
+  }
+}
+
+/** Explicit legacy commands retain their original connection; native commands use the user selection. */
+export async function loadLegacyWorkspaceConfig(root: string, workspace: string, envFile?: string, environment: NodeJS.ProcessEnv = process.env) {
+  if (envFile !== undefined || environment.JTH_ENV_FILE !== undefined) return loadConfig(root, envFile, environment)
+  const selected = await readJson(deviceBindingPath(workspace, environment))
+  if ((selected as { version?: number } | undefined)?.version === 1) return loadConfig(root, deviceBindingSchema.parse(selected).envFile, environment)
+  if ((selected as { version?: number } | undefined)?.version === 2) {
+    const binding = workspaceBindingSchema.parse(selected)
+    const legacy = binding.legacy.find(entry => entry.workspace === workspace) ?? binding.legacy[0]
+    if (legacy) return loadConfig(root, legacy.env_file, environment)
+  }
+  const locator = await readJson(flowPath(workspace))
+  if (locator !== undefined) {
+    const saved = locatorSchema.parse(locator)
+    if (saved.version === 2 && saved.workspace === workspace) return loadConfig(root, saved.envFile, environment)
+  }
+  return loadWorkspaceConfig(root, undefined, workspace, environment)
+}
+
+export async function workspaceIdentity(workspace: string) {
+  return `path:${await realpath(workspace)}`
+}
+
+export async function workspaceBindings(environment: NodeJS.ProcessEnv = process.env) {
+  const directory = resolve(userConfigPaths(environment).directory, 'projects')
+  const names = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+  const entries = await Promise.all(names.filter(name => name.endsWith('.json')).map(async name => {
+    const entry = await readJson(resolve(directory, name))
+    if ((entry as { version?: number } | undefined)?.version === 1) { deviceBindingSchema.parse(entry); return undefined }
+    return workspaceBindingSchema.parse(entry)
+  }))
+  return entries.filter((entry): entry is WorkspaceBinding => entry !== undefined)
+}
+
+export async function workspaceBinding(workspace: string, environment: NodeJS.ProcessEnv = process.env, options: {
+  projectIds?: string[], readProjectIds?: string[], businessIds?: string[], legacy?: WorkspaceBinding['legacy'], dryRun?: boolean, independent?: boolean,
+} = {}) {
+  const path = await realpath(workspace), identity = await workspaceIdentity(path)
+  const related = (await workspaceBindings(environment)).filter(binding => binding.identity === identity)
+  const projectId = `${basename(path)}-${hash(identity).slice(0, 12)}`
+  const legacy = [...related.flatMap(binding => binding.legacy), ...(options.legacy ?? [])]
+    .filter((entry, index, entries) => entries.findIndex(other => other.installation_path === entry.installation_path) === index)
+  const projectIds = options.independent ? [projectId] : options.projectIds?.length ? options.projectIds : related[0]?.project_ids ?? [projectId]
+  const binding = workspaceBindingSchema.parse({ version: 2, path, identity, display_name: basename(path), project_ids: projectIds,
+    read_project_ids: [...new Set([...projectIds, ...related.flatMap(binding => binding.read_project_ids), ...(options.readProjectIds ?? []), ...legacy.flatMap(entry => entry.project_ids)])],
+    business_ids: [...new Set([...related.flatMap(binding => binding.business_ids), ...(options.businessIds ?? []), ...legacy.flatMap(entry => entry.business_ids)])], legacy })
+  if (!options.dryRun) await writeJson(deviceBindingPath(path, environment), binding)
+  return binding
+}
+
+export async function legacyInstallations(config: { dataDir: string }) {
+  const directory = resolve(codexDirectory(config), 'installations')
+  const names = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+  return (await Promise.all(names.filter(name => name.endsWith('.json') && !name.startsWith('user-')).map(async name => {
+    const path = resolve(directory, name), entry = await readJson(path) as { settings?: unknown, disabled?: boolean } | undefined
+    if (!entry?.settings) return undefined
+    const settings = captureSettingsSchema.parse(entry.settings)
+    return { path, settings, disabled: Boolean(entry.disabled) }
+  }))).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
+}
+
+export async function importLegacyBindings(config: { dataDir: string }, environment: NodeJS.ProcessEnv = process.env, dryRun = false) {
+  const imported = []
+  for (const installation of await legacyInstallations(config)) {
+    const settings = installation.settings
+    const available = await realpath(settings.workspace).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+    if (!available) { imported.push({ workspace: settings.workspace, available: false, installation: installation.path }); continue }
+    const existing = (await workspaceBindings(environment)).find(binding => binding.path === available)
+    const independent = !existing && await secondaryGitWorktree(available)
+    const binding = await workspaceBinding(available, environment, { dryRun, independent, projectIds: existing ? undefined : settings.scope.project_ids, businessIds: settings.scope.business_ids,
+      legacy: [{ workspace: settings.workspace, env_file: settings.env_file, enabled_at: settings.enabled_at, installation_path: installation.path,
+        project_ids: settings.scope.project_ids, business_ids: settings.scope.business_ids }] })
+    imported.push({ workspace: available, available: true, installation: installation.path, binding })
+  }
+  return imported
+}
+
+async function secondaryGitWorktree(workspace: string) {
+  try {
+    const result = await promisify(execFile)('git', ['worktree', 'list', '--porcelain', '-z'], { cwd: workspace })
+    const primary = result.stdout.split('\0').find(field => field.startsWith('worktree '))
+    return primary !== undefined && await realpath(primary.slice(9)) !== workspace
+  } catch (error) {
+    if ((error as { stderr?: string }).stderr?.includes('not a git repository')) return false
+    throw error
+  }
+}
+
+export async function automaticWorkspaceScope(input: unknown, codexHome: string, environment: NodeJS.ProcessEnv = process.env) {
+  const context = await sessionWorkspaceContext(input, codexHome)
+  const ordered = context.primary ? [context.primary, ...context.roots.filter(path => path !== context.primary)] : context.roots
+  const bindings = await Promise.all(ordered.map(path => workspaceBinding(path, environment, { dryRun: true })))
+  const workspaces: NonNullable<CaptureSettings['workspaces']> = ordered.length
+    ? bindings.map(binding => ({ path: binding.path, project_ids: binding.project_ids, business_ids: binding.business_ids }))
+    : [{ path: context.cwd, project_ids: ['default'], business_ids: [] }]
+  return { ...context, workspaces, scope: { project_ids: bindings.length ? [...new Set(bindings.flatMap(binding => binding.read_project_ids))] : ['default'],
+    business_ids: [...new Set(workspaces.flatMap(workspace => workspace.business_ids))] } }
 }
 
 export async function configurationScope(config: Config, environment: NodeJS.ProcessEnv = process.env) {
@@ -124,7 +239,7 @@ export async function ensureUserConfig(root: string, source?: string, environmen
 }
 
 export function promptConfigValue(label: string, options: { value?: string, secret?: boolean, input?: NodeJS.ReadableStream, output?: NodeJS.WritableStream } = {}) {
-  const input = options.input ?? stdin, destination = options.output ?? stderr
+  const input = options.input ?? process.stdin, destination = options.output ?? process.stderr
   let muted = false, answered = false
   const output = new Writable({ write(chunk, _encoding, done) { if (!muted) destination.write(chunk); done() } })
   const reader = createInterface({ input, output, terminal: true })
@@ -151,7 +266,7 @@ export async function promptConfirmation(label: string) {
     const answer = (await promptConfigValue(`${label}（Y/n）`, { value: 'y' })).toLowerCase()
     if (['y', 'yes', '是'].includes(answer)) return true
     if (['n', 'no', '否'].includes(answer)) return false
-    stderr.write('请输入 y 或 n。\n')
+    process.stderr.write('请输入 y 或 n。\n')
   }
 }
 
@@ -160,7 +275,7 @@ export async function completeConfiguration(root: string, config: Config, option
 } = {}) {
   const missing = missingConfiguration(config)
   if (!missing.length && !options.editDatabase) return config
-  if (!(options.interactive ?? (stdin.isTTY && stderr.isTTY))) {
+  if (!(options.interactive ?? (process.stdin.isTTY && process.stderr.isTTY))) {
     throw new Error(`配置不完整：缺少 ${missing.join('、')}。请在交互终端运行 jth init，或填写 ${config.envFile}；非交互模式也可使用 --env-file 或环境变量`)
   }
   const environment = options.environment ?? process.env, ask = options.ask ?? promptConfigValue
@@ -194,7 +309,7 @@ export async function completeConfiguration(root: string, config: Config, option
             : ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash
         } catch { valid = false }
       }
-      if (!valid) { stderr.write(`${field.name} 无效，请重新输入。\n`); continue }
+      if (!valid) { process.stderr.write(`${field.name} 无效，请重新输入。\n`); continue }
       updates[field.name] = value
       break
     }

@@ -1,8 +1,9 @@
-import { cp, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import type { CaptureSettings } from './capture.ts'
-import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, readJson, writeJson } from './capture.ts'
+import { captureSettingsSchema, codexDirectory, hash, hookEvents, installationPath, userInstallationPath, readJson, writeJson } from './capture.ts'
 import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { cueMarker } from './cues.ts'
 
@@ -57,6 +58,58 @@ type HookHandler = { statusMessage?: string, command?: string, [key: string]: un
 type HookGroup = { hooks?: HookHandler[], [key: string]: unknown }
 type HookConfig = { hooks?: Record<string, HookGroup[]>, [key: string]: unknown }
 
+const ownedCommands: Record<string, readonly string[][]> = {
+  'jth memo capture': [['memo', 'codex', 'capture']],
+  'jth memo declaration': [['memo', 'codex', 'declare']],
+  'jth memo cues': [['memo', 'codex', 'cue']],
+  'jth flow context': [['flow', 'legacy', 'hook'], ['flow', 'hook']],
+  'jth flow entry': [['flow', 'prompt']],
+  'jth monitor': [['monitor', 'capture']],
+}
+const ownedEvents: Record<string, readonly string[]> = {
+  'jth memo capture': hookEvents,
+  'jth memo declaration': ['Stop'],
+  'jth memo cues': ['SessionStart', 'UserPromptSubmit'],
+  'jth flow context': [...hookEvents, 'UserPromptSubmit'],
+  'jth flow entry': ['UserPromptSubmit'],
+  'jth monitor': ['UserPromptSubmit', 'Stop', 'Interrupt'],
+}
+
+/** Ownership requires the JTH command and its marker; status text alone belongs to nobody. */
+export function ownsHook(handler: HookHandler, marker = handler.statusMessage, event?: string) {
+  if (!marker || handler.statusMessage !== marker || !handler.command || !ownedCommands[marker]) return false
+  if (event && !ownedEvents[marker].includes(event)) return false
+  return ownedCommands[marker].some(args => handler.command === hookCommand(...args)
+    || handler.command === `jth ${args.join(' ')}`
+    || new RegExp(`^(?:'[^']*/jth'|[^\\s]+/jth) (?:'--'|--) ${args.map(arg => `(?:'${arg}'|${arg})`).join(' ')}$`).test(handler.command!)
+    || ownsLegacyHookCommand(handler.command!, args))
+}
+
+function ownsLegacyHookCommand(command: string, args: readonly string[]) {
+  const quoted = command.match(/'(?:[^']|'\\'')*'/g)
+  if (!quoted || quoted.join(' ') !== command) return false
+  const words = quoted.map(word => word.slice(1, -1).replaceAll("'\\''", "'"))
+  if (!isAbsolute(words[0]) || basename(words[0]) !== 'node' || words[1] !== '--'
+    || !isAbsolute(words[2]) || !words[2].endsWith('/node_modules/@jacob-z/jt-harness/bin/jth.mjs')
+    || args.some((arg, index) => words[index + 3] !== arg)) return false
+  const options = words.slice(args.length + 3)
+  if (options.length % 2) return false
+  const values = new Map<string, string[]>()
+  for (let index = 0; index < options.length; index += 2) {
+    const flag = options[index], value = options[index + 1]
+    const allowed = args[0] === 'memo' ? ['--env-file', '--workspace', '--codex-home', '--since', '--project', '--business'] : ['--workspace', '--env-file']
+    if (!allowed.includes(flag) || !value.trim()) return false
+    if (['--env-file', '--workspace', '--codex-home'].includes(flag) && !isAbsolute(value)) return false
+    if (flag === '--since' && !Number.isFinite(Date.parse(value))) return false
+    const prior = values.get(flag) ?? []
+    if (prior.length && !['--project', '--business'].includes(flag)) return false
+    values.set(flag, prior.concat(value))
+  }
+  return args[0] === 'memo'
+    ? ['--env-file', '--workspace', '--codex-home', '--since', '--project'].every(flag => values.has(flag))
+    : values.has('--workspace')
+}
+
 export function mergeHooks(existing: HookConfig, command?: string, options: { marker?: string, events?: readonly string[], additionalContextLimit?: number } = {}) {
   if (!existing || typeof existing !== 'object' || Array.isArray(existing)
     || (existing.hooks !== undefined && (!existing.hooks || typeof existing.hooks !== 'object' || Array.isArray(existing.hooks)))) {
@@ -68,7 +121,7 @@ export function mergeHooks(existing: HookConfig, command?: string, options: { ma
     if (!Array.isArray(groups)) throw new Error(`已有 ${event} Hook 配置无效；没有覆盖原配置`)
     const preserved = groups.flatMap(group => {
       if (!Array.isArray(group.hooks)) throw new Error(`已有 ${event} Hook handler 无效；没有覆盖原配置`)
-      const handlers = group.hooks.filter(handler => handler.statusMessage !== (options.marker ?? marker))
+      const handlers = group.hooks.filter(handler => !ownsHook(handler, options.marker ?? marker, event))
       return handlers.length ? [{ ...group, hooks: handlers }] : []
     })
     if (command) preserved.push({ hooks: [{ type: 'command', command, timeout: 3, statusMessage: options.marker ?? marker,
@@ -78,6 +131,121 @@ export function mergeHooks(existing: HookConfig, command?: string, options: { ma
     else delete hooks[event]
   }
   return { ...existing, hooks }
+}
+
+export async function configureUserHooks(root: string, config: { dataDir: string, envFile: string }, codexHome: string, enabled = true, userHome = homedir()) {
+  const hooksPath = resolve(codexHome, 'hooks.json'), manifestPath = userInstallationPath(config, codexHome)
+  const prior = await readJson(manifestPath) as { disabled?: boolean, settings?: { enabled_at?: string } } | undefined
+  const enabled_at = !prior?.disabled && prior?.settings?.enabled_at ? prior.settings.enabled_at : new Date().toISOString()
+  const skills = await Promise.all((['flow', 'memo'] as const).map(kind => configureUserSkill(root, userHome, kind, enabled)))
+  const backups = resolve(codexDirectory(config), 'backups')
+  await updateHookConfig(hooksPath, backups, document => {
+    let next = document
+    for (const ownedMarker of Object.keys(ownedCommands).filter(ownedMarker => !enabled || ownedMarker !== 'jth monitor')) next = mergeHooks(next, undefined, { marker: ownedMarker, events: [...hookEvents, 'UserPromptSubmit'] })
+    if (!enabled) return next
+    next = mergeHooks(next, hookCommand('memo', 'codex', 'declare'), { marker: declarationHookMarker, events: ['Stop'] })
+    next = mergeHooks(next, hookCommand('memo', 'codex', 'cue'), { marker: cueMarker, events: ['SessionStart', 'UserPromptSubmit'], additionalContextLimit: 2400 })
+    return mergeHooks(next, hookCommand('flow', 'prompt'), { marker: 'jth flow entry', events: ['UserPromptSubmit'], additionalContextLimit: 512 })
+  })
+  const settings = { enabled_at, codex_home: codexHome, env_file: config.envFile }
+  await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: !enabled, mode: 'user-declaration' })
+  return { status: enabled ? 'installed' : 'uninstalled', mode: 'user-declaration', hooks_path: hooksPath, skills, enabled_at, settings }
+}
+
+async function configureUserSkill(root: string, userHome: string, kind: 'flow' | 'memo', enabled: boolean) {
+  const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`), target = resolve(userHome, '.agents/skills', name)
+  const prior = await lstat(target).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
+  if (!enabled) {
+    if (prior && await ownedSkill(target, kind)) await rm(target, { recursive: true, force: true })
+    return target
+  }
+  if (prior && !await ownedSkill(target, kind)) throw new Error(`已有 ${name} Skill 不属于 JTH；没有覆盖`)
+  await readFile(resolve(source, 'SKILL.md'), 'utf8')
+  await mkdir(dirname(target), { recursive: true })
+  const temporary = `${target}.${randomUUID()}.tmp`
+  try {
+    await cp(source, temporary, { recursive: true, dereference: true })
+    if (prior) await rm(target, { recursive: true, force: true })
+    await rename(temporary, target)
+  } finally { await rm(temporary, { recursive: true, force: true }) }
+  return target
+}
+
+async function ownedSkill(path: string, kind: 'flow' | 'memo') {
+  const info = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
+  if (info?.isSymbolicLink()) {
+    const target = resolve(dirname(path), await readlink(path))
+    if (target.endsWith(`/node_modules/@jacob-z/jt-harness/packages/${kind}/skills/jth-${kind}`)) return true
+  }
+  const content = await readFile(resolve(path, 'SKILL.md'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+  return new RegExp(`^name: jth-${kind}\\s*$`, 'm').test(content) && content.includes(`jth ${kind}`)
+}
+
+/** Remove only installed project entrances; archived queues, tasks and runtime evidence stay intact. */
+export async function cleanupProjectInstallation(workspace: string, options: { dataDir: string, dryRun?: boolean, registered?: boolean }) {
+  const backups = resolve(codexDirectory(options), 'backups', `project-${hash(workspace)}-${Date.now()}-${randomUUID()}`)
+  const removed: string[] = [], handlers: string[] = []
+  const hooksPath = resolve(workspace, '.codex/hooks.json')
+  const hookText = await readFile(hooksPath, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+  if (hookText) {
+    const document: HookConfig = JSON.parse(hookText)
+    for (const [event, groups] of Object.entries(document.hooks ?? {})) for (const group of groups) for (const handler of group.hooks ?? []) if (ownsHook(handler, handler.statusMessage, event)) handlers.push(handler.command!)
+    const remaining = Object.keys(ownedCommands).reduce((next, ownedMarker) => mergeHooks(next, undefined, { marker: ownedMarker, events: Object.keys(next.hooks ?? {}) }), document)
+    const removeFile = handlers.length > 0 && !Object.keys(remaining.hooks ?? {}).length && Object.keys(remaining).every(key => key === 'hooks')
+    if (removeFile) removed.push(hooksPath)
+    if (handlers.length && !options.dryRun) {
+      await writeJson(resolve(backups, `${hash(hooksPath)}.json`), { path: hooksPath, content: hookText })
+      await updateHookConfig(hooksPath, backups, document => Object.keys(ownedCommands).reduce((next, ownedMarker) => mergeHooks(next, undefined, { marker: ownedMarker, events: Object.keys(next.hooks ?? {}) }), document))
+      if (removeFile) {
+        const current = await readJson(hooksPath)
+        if (JSON.stringify(current) !== JSON.stringify(remaining)) throw new Error('Hook 配置被其他进程更新；保留内容，请重试')
+        await rm(hooksPath)
+      }
+    }
+  }
+  for (const directory of ['.agents/skills', '.codex/skills', '.claude/skills']) for (const kind of ['flow', 'memo'] as const) {
+    const path = resolve(workspace, directory, `jth-${kind}`)
+    if (!await ownedSkill(path, kind)) continue
+    removed.push(path)
+    if (!options.dryRun) { await mkdir(backups, { recursive: true }); await cp(path, resolve(backups, `${hash(path)}-jth-${kind}`), { recursive: true, dereference: false, verbatimSymlinks: true }); await rm(path, { recursive: true, force: true }) }
+  }
+  for (const name of ['memo.json', 'flow.json', 'workflow.json', 'monitor.json']) {
+    const path = resolve(workspace, '.jth', name)
+    const content = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+    if (!content) continue
+    const document = JSON.parse(content)
+    const locator = document.version === 2 && Object.keys(document).every(key => ['version', 'workspace', 'envFile'].includes(key)) && typeof document.workspace === 'string' && typeof document.envFile === 'string'
+      || document.version === 3 && Object.keys(document).every(key => ['version', 'scope'].includes(key)) && document.scope && Object.keys(document.scope).every(key => ['project_ids', 'business_ids'].includes(key)) && Array.isArray(document.scope.project_ids) && Array.isArray(document.scope.business_ids)
+    const owned = name === 'memo.json' ? locator
+      : name === 'flow.json' ? locator || document.version === 1 && document.workspace === workspace && typeof document.installedAt === 'string'
+      : name === 'workflow.json' ? Object.keys(document).every(key => key === 'mode') && (document.mode === undefined || ['adaptive', 'strict'].includes(document.mode))
+      : Object.keys(document).every(key => ['enabled', 'url'].includes(key)) && typeof document.enabled === 'boolean'
+    if (!owned || (!options.registered && !locator && name !== 'flow.json')) continue
+    removed.push(path)
+    if (!options.dryRun) { await writeJson(resolve(backups, `${hash(path)}.json`), { path, content }); await rm(path) }
+  }
+  const agentsPath = resolve(workspace, 'AGENTS.md'), agents = await readFile(agentsPath, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+  if (agents.includes('<!-- JTH_MEMORY_START -->') !== agents.includes('<!-- JTH_MEMORY_END -->')) throw new Error('已有 JTH 记忆说明区间不完整；未覆盖 AGENTS.md')
+  if (agents.includes('<!-- JTH_MEMORY_START -->')) {
+    removed.push(`${agentsPath}#JTH_MEMORY`)
+    if (!options.dryRun) await removeDeclarationInstructions(workspace, backups)
+  }
+  if (options.registered) {
+    const path = resolve(workspace, '.gitignore'), original = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+    const entrances = new Set(['/.jth/*', '!/.jth/flow.json', '!/.jth/workflow.json', '/.agents/skills/jth-flow', '/.agents/skills/jth-memo', '/.codex/hooks.json'])
+    const preserved = original.split(/(?<=\n)/u).filter(line => !entrances.has(line.replace(/\r?\n$/u, ''))).join('')
+    const next = preserved.split(/\r?\n/u).includes('/.jth/') ? preserved : `${preserved}${preserved && !preserved.endsWith('\n') ? '\n' : ''}/.jth/\n`
+    if (original !== next) {
+      removed.push(`${path}#JTH`)
+      if (!options.dryRun) {
+        await writeJson(resolve(backups, `${hash(path)}.json`), { path, content: original })
+        const current = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error })
+        if (current !== original) throw new Error('.gitignore 被其他进程更新；保留内容，请重试')
+        await writeFile(path, next)
+      }
+    }
+  }
+  return { workspace, dry_run: Boolean(options.dryRun), removed, handlers, backup_directory: !options.dryRun && (removed.length || handlers.length) ? backups : null }
 }
 
 export async function updateHookConfig(hooksPath: string, backupDirectory: string, transform: (document: HookConfig) => HookConfig) {

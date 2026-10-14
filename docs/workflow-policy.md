@@ -28,11 +28,11 @@ jth flow policy request.json --plan-tool available --goal-tools available
 配置只使用非敏感的 `{ "mode": "adaptive" }` 或 `{ "mode": "strict" }`：
 
 - 用户默认：`~/.jt-harness/workflow.json`，跟随 `JTH_CONFIG_DIR`。
-- 仓库覆盖：`.jth/workflow.json`。
+- 目录覆盖：`~/.jt-harness/workflow/<目录哈希>.json`，仅保存在本机；`--scope project` 使用当前目录。
 - `inherit` 清除该层的 mode；缺省值为 adaptive。
 - 优先级：`policy --mode`、进程 `JTH_WORKFLOW_POLICY_MODE`、仓库、用户、内置默认。
 
-`flow status/context` 和安装结果显示 `workflow_policy.mode/source/file`。初始化、升级复用这些配置，不为默认值创建多余文件。不实现旧配置迁移，Memo 凭据和队列保持原有职责。策略和配置命令不要求数据库、Embedding 或 API Key 可用。
+`flow status/context` 和安装结果显示 `workflow_policy.mode/source/file`。初始化、升级复用这些配置，不为默认值创建多余文件。`jth migrate` 将旧 `.jth/workflow.json` 的目录策略迁到本机；Memo 凭据和队列保持原有职责。策略和配置命令不要求数据库、Embedding 或 API Key 可用。
 
 请求示例、完整草稿字段及进度准备见 [随安装分发的操作说明](../packages/flow/skills/jth-flow/references/workflow-policy.md)。普通问答不必调用 CLI；实质工作进入、范围变化或恢复需要判断时调用一次即可，不在每次工具调用后评估。
 

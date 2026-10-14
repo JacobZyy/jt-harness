@@ -7,6 +7,7 @@
 | 内容 | 入口 |
 | --- | --- |
 | 模块、命令、存储能力与边界 | [项目 README](../README.md) |
+| 用户级接入、自动目录分组、多目录归属与存量清理 | [用户级 JTH 与存量迁移](user-local-jth.md) |
 | 从项目初始化到日常任务、记忆与排障 | [JTH 使用指南](articles/jth-guide.md) |
 | 安装、版本更新、Hook 信任与 Phoenix | [本地交付与观测](local-delivery-monitoring.md) |
 | 用户配置、项目覆盖、旧配置迁移 | [配置说明](configuration.md) |

@@ -12,6 +12,4 @@ artifacts/jth/
 artifacts/
 .DS_Store
 /.build/
-/.jth/*
-!/.jth/flow.json
-!/.jth/workflow.json
+/.jth/

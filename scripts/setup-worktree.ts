@@ -3,7 +3,7 @@ import { access, lstat, realpath, symlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** Share local configuration and external source dependencies without replacing local overrides. */
+/** Share external source dependencies without replacing local overrides. */
 export async function ensureSharedLink(source: string, target: string) {
   const actualSource = await realpath(source)
   const existing = await lstat(target).catch((error: NodeJS.ErrnoException) => {
@@ -22,36 +22,21 @@ export async function ensureSharedLink(source: string, target: string) {
 }
 
 export async function readPrimaryInstallation(primary: string) {
-  const primaryCli = resolve(primary, 'bin/jth.ts')
-  // Reuse the primary installation's scope and config instead of copying workspace-bound runtime files.
-  const status = JSON.parse(execFileSync('bun', ['--', primaryCli, 'flow', 'status', '--workspace', primary], {
+  const status = JSON.parse(execFileSync('bun', ['--no-env-file', '--', resolve(primary, 'bin/jth.ts'), 'flow', 'status', '--workspace', primary], {
     cwd: primary, encoding: 'utf8',
-  })) as { memo_scope: { project_ids: string[], business_ids: string[] } | null, configuration?: { envFile: string } }
-  if (!status.memo_scope) throw new Error('主工作区尚未配置 Memo 范围')
-  if (!status.configuration?.envFile) throw new Error('主工作区尚未配置本机连接文件')
-  const envFile = await realpath(status.configuration.envFile)
-  return { envFile, projectIds: status.memo_scope.project_ids, businessIds: status.memo_scope.business_ids }
+  })) as { memo_scope: { project_ids: string[], business_ids: string[] }, configuration: { envFile: string } }
+  return { envFile: await realpath(status.configuration.envFile), projectIds: status.memo_scope.project_ids, businessIds: status.memo_scope.business_ids }
 }
 
 export async function setupWorktree() {
   const workspace = await realpath(execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim())
   const worktrees = execFileSync('git', ['worktree', 'list', '--porcelain', '-z'], { cwd: workspace, encoding: 'utf8' })
   const primary = await realpath(worktrees.split('\0').find(field => field.startsWith('worktree '))!.slice('worktree '.length))
-  const { envFile, projectIds, businessIds } = await readPrimaryInstallation(primary)
   const dsh = resolve(dirname(primary), 'deepseek-harness')
   await access(resolve(dsh, 'package.json'))
-  if (workspace !== primary) {
-    await ensureSharedLink(envFile, resolve(workspace, '.env'))
-    // package.json already uses link:../deepseek-harness; keep that layout in a Codex worktree container.
-    await ensureSharedLink(dsh, resolve(dirname(workspace), 'deepseek-harness'))
-  }
+  if (workspace !== primary) await ensureSharedLink(dsh, resolve(dirname(workspace), 'deepseek-harness'))
   execFileSync('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'], { cwd: workspace, stdio: 'inherit' })
-  execFileSync('bun', ['--', resolve(workspace, 'bin/jth.ts'), 'flow', 'install',
-    '--workspace', workspace, '--env-file', envFile,
-    ...projectIds.flatMap(id => ['--project', id]),
-    ...businessIds.flatMap(id => ['--business', id]),
-  ], { cwd: workspace, stdio: 'inherit' })
-  return { status: 'configured', workspace, primary, envFile }
+  return { status: 'configured', workspace, primary, jth: '用户级接入由已安装 Hook 自动生效；worktree 无需 init 或项目文件' }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

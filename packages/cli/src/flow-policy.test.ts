@@ -118,7 +118,8 @@ test('policy CLI stays offline, config overrides are explicit, and no task datab
     const override = await execute(process.execPath, ['--', resolve(root, 'bin/jth.ts'), 'flow', 'config', '--workspace', workspace],
       { env: { ...environment, JTH_WORKFLOW_POLICY_MODE: 'adaptive' } })
     assert.equal(JSON.parse(override.stdout).effective.source, 'environment')
-    assert.deepEqual(await readdir(resolve(workspace, '.jth')), ['workflow.json'])
+    assert.deepEqual(await readdir(workspace), [], 'Project policy stays in the local user mapping')
+    assert.equal((await readdir(resolve(user, 'workflow'))).length, 1)
     assert.equal((JSON.parse(await readFile(input, 'utf8'))).plan.tasks[0].id, 'T1')
     await writeFile(resolve(user, 'workflow.json'), '{"mode":"strcit"}')
     await assert.rejects(cli('config'), /Workflow Policy 配置无效/)

@@ -4,13 +4,13 @@
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
-项目接入只需运行 `jth init`：问卷默认用当前文件夹名，复用完整的全局配置，缺项才询问。确认后自动准备记忆表、安装项目指引和 Hooks、处理信任并检查接入。首次接入默认开启原生 `update_plan`、关闭本项目 Codex 原生记忆读写；再次运行保留现有偏好。高级参数 `--codex-memory inherit` 可改为跟随上层记忆设置。
+本机只需运行一次 `jth init`：复用完整的用户配置，缺项才询问，准备记忆表并安装用户级 Hook 和 Skill。之后会话按真实绑定工作目录自动分组，无绑定目录使用 `default`；业务仓库无需逐个初始化。Codex 原生记忆、计划工具和团队配置继续由宿主管理。
 
-开始前准备 Bun 1.3.14 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后，进入项目目录运行 `jth init`，按问卷填写并重新打开 Codex 任务即可。后续项目仍运行同一命令，不重复配置全局凭据。
+开始前准备 Bun 1.3.14 或以上、Codex、可连接的 PostgreSQL（已安装 pgvector），以及 Embedding 服务的地址、模型、维度和 API Key。安装工具后运行 `jth init`，按问卷补齐本机配置并重新打开 Codex 任务即可。Hook 位于用户 Codex 目录，Skill 位于用户 Skill 目录；JTH 不向业务仓库写入接入文件。
 
-更新工具本体后，在每个已接入项目重新运行 `jth init`：复用已有配置、迁移记忆表并刷新 Hook 和 Skill。`jth uninstall` 清理仓库内的 JTH 接入配置，保留数据库、待处理队列和用户凭据。其他交付命令为 `jth install / doctor`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [本地交付](docs/local-delivery-monitoring.md)。
+更新工具本体后运行一次 `jth init`，刷新用户级入口。旧项目接入用 `jth migrate --dry-run` 列举，再用 `jth migrate` 清理；迁移保留原范围对应的历史记忆、团队 Hook、队列和无关改动。`jth uninstall` 卸载用户级 JTH 入口，保留数据库、队列和凭据。其他交付命令为 `jth install / doctor`，观测命令为 `jth monitor start / stop / status / open / flush`。可通过 `pnpm bundle` 构建独立发行包。Phoenix 直接在本机运行，复用 PostgreSQL 的独立 schema，不使用 Docker。详见 [用户级接入与迁移](docs/user-local-jth.md)和[本地交付](docs/local-delivery-monitoring.md)。
 
-共享配置与凭据默认存放于 `~/.jt-harness/.env`；仓库只保存自己的接入、范围与开关，默认不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级与仓库级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
+共享配置与凭据默认存放于 `~/.jt-harness/.env`；工作目录映射、范围兼容和开关也保存在用户目录，不依赖源码仓库的 `.env`。`init` 在终端补齐缺项并隐藏凭据输入，完整配置跨仓库复用。详见[用户级配置](docs/configuration.md)。Flow 进入/恢复和实际 Memo 检索/读取后，主 Agent 按事实输出简短回执。
 
 当前操作说明与历史设计的入口见[文档导航](docs/README.md)。历史报告中的“当前”“默认”和未完成项只描述报告当时的版本，不作为今天的安装或执行指令。
 
@@ -20,24 +20,23 @@
 
 生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.ts` 保持稳定。
 
-默认使用主会话声明：安装项目 `jth-memo` Skill，`UserPromptSubmit` 注入短入口，Agent 按需读取规则并在有值得保留的结论时输出最多三条短声明。Stop Hook 保存事件，后台 `memo work` 绑定原始证据、精确去重并生成向量。没有声明就不调用 Embedding；Hook 不等待后台处理。
+默认使用主会话声明：安装用户级 `jth-memo` Skill，`UserPromptSubmit` 注入短入口，Agent 按需读取规则并在有值得保留的结论时输出最多三条短声明。多目录条目可选择真实绑定目录；后台按归属拆批，共同结论只保存一条并关联多个分组。Stop Hook 保存事件，后台 `memo work` 绑定原始证据、精确去重并生成向量。没有声明就不调用 Embedding；Hook 不等待后台处理。
 
 用户以“可以，你做吧”等短回复采纳前文方案时，主会话保留已确认决策，并在收口时用 `user_confirmed` 声明；`quote` 与 `confirmation_quote` 分别绑定助手方案和后续用户确认。后台校验来源角色及顺序，语义关联仍由主会话核对。未确认方案可作为候选保存，批准实施不代表已经完成。详见 [声明契约](docs/memory-declarations.md)。
 
-数据库使用 schema v8，在 v7 声明回执和来源关联之上增加采用记录，保留所有历史数据。`memo work` 与 `memo work --index` 处理声明和索引队列；只有显式 `memo work --legacy` 才处理旧 DSH 队列。失败任务仍需显式 retry，不自动重跑旧失败记录。
+数据库使用 schema v9，保留声明回执、采用记录和派生候选来源版本。工作目录使用同一数据库中的逻辑分组，不按目录创建物理表。`memo work` 与 `memo work --index` 处理声明和索引队列；只有显式 `memo work --legacy` 才处理旧 DSH 队列。失败任务仍需显式 retry，不自动重跑旧失败记录。
 
 会话内 `prepare / evidence / record` 保留为手动工具，默认声明流程不需要调用。`record` 只启动 index worker。协议、流程图与实测见 [主会话记忆声明](docs/memory-declarations.md)。
 
 ## Codex 原生流程
 
-在需要使用的项目运行一次，项目 ID 与已有 Memo 范围保持一致：
+用户级接入完成后，在任意工作目录查看当前范围：
 
 ```sh
-jth flow install --project jt-harness
 jth flow status
 ```
 
-安装保留 Memo Stop 声明入口，复制项目 `jth-flow` 和 `jth-memo` Skill，增加 `UserPromptSubmit` 短入口，并移除旧 Flow 的七阶段注入 Hook。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 读取项目范围、本机配置和最近一次入口输出，不返回旧目标、阶段或缓存记忆。入口记录位于 `.jth/flow-entry.json`，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
+用户级入口保留 Memo Stop 声明、`jth-flow` 和 `jth-memo` Skill，以及 `UserPromptSubmit` 短入口。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 读取自动目录范围、本机配置和最近一次入口输出，不返回旧目标、阶段或缓存记忆。入口回执位于用户数据目录，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
 
 Workflow Policy 默认 adaptive：普通问答直接回答，有界小改直接执行并做聚焦验证；多阶段或明确要求规划时走 planned，受信任入口明确要求主 Agent 启动或复用一个 Codex 原生 Goal，并用 `update_plan` 记录进度。用户明确停用 Goal 时不创建。`jth flow policy` 分别准备 Goal 和计划参数，不调用原生工具或保存任务；`plan.goal` 只是文本，更新计划不会自动启动 Goal。用户确认、补充及恢复沿用同一目标。工具未暴露时说明具体缺失，不伪造原生状态。配置与调用约定见 [Workflow Policy](docs/workflow-policy.md)。
 
@@ -53,11 +52,11 @@ jth flow legacy status --task <旧任务ID> --history
 jth flow legacy migrate
 ```
 
-旧版本已经加载的 `flow hook`、`flow sync` 和后台 `flow recall --request` 入口会安静跳过，不重放历史事件或启动旧任务召回。`jth flow uninstall` 移除 Flow Skill，Memo 和历史数据保留。详细说明见 [原生流程与验证](docs/flow-control.md)；旧运行器见 [历史 Flow](docs/flow-legacy.md)。
+旧版本已经加载的 `flow hook`、`flow sync` 和后台 `flow recall --request` 入口会安静跳过，不重放历史事件或启动旧任务召回。全局卸载使用 `jth uninstall`，Memo 数据和历史任务保留。详细说明见 [原生流程与验证](docs/flow-control.md)；旧运行器见 [历史 Flow](docs/flow-legacy.md)。
 
 ## 当前本机使用
 
-工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，项目可显式选择覆盖配置。安装、版本更新与项目同步见[本地交付](docs/local-delivery-monitoring.md)。
+工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，可显式选择本机覆盖配置。安装、版本更新与用户入口同步见[本地交付](docs/local-delivery-monitoring.md)。
 
 ```sh
 jth --help
@@ -154,24 +153,24 @@ jth db stop
 
 Codex 工作树使用 `.codex/environments/environment.toml` 中的 `jt-harness` 本地环境。参考已有项目的 setup 模式，创建工作树时执行 `bun scripts/setup-worktree.ts`；已经存在或手动创建的工作树运行 `pnpm setup:worktree`。
 
-设置脚本从 Git 找到主工作区，复用主安装的项目/业务范围和已选配置（通常为用户目录 `.env`），为当前工作树单独安装依赖，并刷新 Memo/Flow Hook、`.jth/flow.json` 和项目 Skill 文件。Flow 任务按工作区隔离，长期记忆按相同项目范围共享。新 Hook 定义仍遵守 Codex 的信任机制。
+设置脚本从 Git 找到主工作区，为当前工作树单独安装依赖并链接已有外部源码依赖。JTH 用户入口自动生效，不复制项目 Hook、范围或 Skill，不需要逐个工作树初始化。不同绑定目录使用独立记忆组。
 
-工作树 `.env` 链接到主配置，密钥更新立即共享，不提交 Git；相对运行路径以源配置所在目录解析。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成依赖安装与 `jth flow install`，作为可用的配置来源。
+凭据使用本机用户配置，不提交 Git。仓库现有 `link:../deepseek-harness` 依赖通过相邻目录链接复用主工作区的 DSH 源码，工作树自身的 `node_modules` 保持独立。若目标位置已有不同配置或依赖目录，脚本保留原文件并报告冲突，不覆盖。主工作区需要先完成依赖安装。
 
 JTH 命令使用 Bun ≥ 1.3.14 直接运行 TypeScript 源码，不需要构建。源码开发的 pnpm 与检查脚本另需 Node.js ≥ 24.21.0、pnpm 10；开发工具及可选 DSH SDK 仍链接到相邻 `../deepseek-harness` 工作区。普通使用者安装 npm 包或独立发行包即可，默认 Flow/Memo 不依赖该源码目录。发行包不捆绑显式 legacy 路径需要的 DSH SDK。
 
 ```sh
 pnpm install --frozen-lockfile
 bun bin/jth.ts --help
-# 问卷补齐共享配置，自动建表并接入当前项目。
-bun -- bin/jth.ts init
+# 问卷补齐用户配置，自动建表并安装用户入口。
+bun --no-env-file -- bin/jth.ts init
 ```
 
-`init` 自动调用现有建表与迁移逻辑，创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v8，保留原材料、条目、向量与回执。高级手动入口 `memo init` 继续保留。v8 只在 v7 上增加采用记录，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL 或创建数据库实例；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
+`init` 自动调用现有建表与迁移逻辑，创建 `jt_memo` schema 和 `vector` 扩展，或将支持的旧版本事务性升级到 v9，保留原材料、条目、向量与回执。高级手动入口 `memo init` 继续保留。v9 增加派生建议的来源关系，不重写旧正文或哈希。本版使用 PostgreSQL 15+ 的约束能力，本机验证版本为 18.6。命令不安装 PostgreSQL 或创建数据库实例；配置本机托管后会按需启动既有实例，连接用户需要建表、扩展权限，未知版本会被拒绝。
 
 仓库公开托管于 [JacobZyy/jt-harness](https://github.com/JacobZyy/jt-harness)，npm 包为 `@jacob-z/jt-harness`。`.gitignore` 忽略 `.env` 和 `.env.*`，仅允许无凭据的 `.env.example`。用户凭据独立于仓库和发行目录；打包白名单不包含凭据、数据库、运行记录或本地备份。
 
-配置文件按 `--env-file`、`JTH_ENV_FILE`、仓库绑定、用户默认 `~/.jt-harness/.env` 的顺序选择，不自动读取业务项目当前目录中的同名文件。选定后，进程环境变量覆盖文件值。配置内的相对目录、DSH 入口路径以配置文件所在目录为基准。环境变量不会写回文件，文件内容也不会整体导出给 DSH。详见[配置来源与迁移](docs/configuration.md)。
+配置文件按 `--env-file`、`JTH_ENV_FILE`、用户配置指针、用户默认 `~/.jt-harness/.env` 的顺序选择，不自动读取业务项目当前目录中的同名文件。选定后，进程环境变量覆盖文件值。配置内的相对目录、DSH 入口路径以配置文件所在目录为基准。环境变量不会写回文件，文件内容也不会整体导出给 DSH。详见[配置来源与迁移](docs/configuration.md)。
 
 | 配置 | 用途 |
 | --- | --- |
@@ -212,17 +211,17 @@ jth memo work --legacy
 
 ## Codex 自动投递
 
-在需要开启记忆采集的项目中执行安装命令。项目 ID 由调用者明确指定；多个项目共享业务知识时可以额外指定 `--business`。
+用户入口只安装一次。目录 ID 根据当前会话绑定自动解析；新增仓库无需初始化。
 
 ```sh
-jth memo codex install --project jt-harness
+jth init --trust
 jth memo codex status
 jth memo work
-# 关闭当前项目的自动采集，保留已经接收的材料和记忆：
+# 关闭用户自动采集，保留已经接收的材料和记忆：
 jth memo codex uninstall
 ```
 
-`--workspace /absolute/project/path` 可以安装到其他项目。安装管理该项目 `.codex/hooks.json` 中的 Memo 声明和线索 Hook，并复制 `.agents/skills/jth-memo` 文件。升级时移除 `AGENTS.md` 中旧的 `JTH_MEMORY_START/END` 区块，保留其他说明并备份原文到 `~/.jth/codex/backups/`。重复安装不会重复注册；卸载移除受管 Hook 和 Skill。Codex 的 Hook 信任机制保持不变。
+安装管理 `$CODEX_HOME/hooks.json` 中的声明和线索 Hook，并复制用户 `~/.agents/skills/jth-memo` 文件。旧仓库入口用 `jth migrate` 统一备份、清理，保留团队配置及历史数据。重复安装不会重复注册；卸载移除受管用户 Hook 和 Skill。Codex 的 Hook 信任机制保持不变。
 
 Memo 安装 `Stop` 声明入口，以及 `SessionStart` / `UserPromptSubmit` 有限线索入口。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短流程提示，不恢复旧任务生命周期 Hook。
 

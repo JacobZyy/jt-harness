@@ -102,41 +102,67 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
     return [proposal, confirmation]
   })
   const final = { ...last.messages.at(-1)!, location: { path: snapshot.original_path, start: last.start, end: last.end } }
-  const messages = [...new Map([...itemSources.flat(), final].map(message => [message.message_id, message])).values()]
-    .sort((a, b) => a.location!.start - b.location!.start)
   const source = { provider: 'codex' as const, session_id: event.session_id }
   const run = { session_id: event.session_id, provider: 'codex', model: event.model ?? 'unknown' }
-  const id = `evidence-${hash(JSON.stringify({ source, scope: settings.scope, messages, run }))}`
-  const evidence = evidenceSchema.parse({ id, submission: { schema_version: 1, submission_id: id, source, scope: settings.scope, messages }, run })
-  await writeJson(resolve(codexDirectory(config), 'evidence', `${id}.json`), { ...evidence, snapshots: [{ path: snapshot.path, original_path: snapshot.original_path }] })
-  const draft = recordDraftSchema.parse({ evidence_id: id, extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, changes: [] })
-  if (declaration.used?.length) draft.used = await Promise.all(declaration.used.map(async entry_id => ({
+  const primaryScope = settings.workspaces ? workspaceScope([settings.workspaces[0]]) : settings.scope
+  const groups = new Map<string, { scope: CaptureSettings['scope'], itemIndexes: number[], used: boolean }>()
+  for (const [index, item] of declaration.items.entries()) {
+    if (item.workspaces && !settings.workspaces) throw new Error('声明目录缺少本轮可信工作目录快照')
+    if (item.workspaces?.some(path => !settings.workspaces!.some(workspace => workspace.path === path))) throw new Error('声明目录不属于本会话绑定工作目录')
+    const selected = item.workspaces ? settings.workspaces!.filter(workspace => item.workspaces!.includes(workspace.path)) : undefined
+    const scope = selected ? workspaceScope(selected) : primaryScope
+    const key = JSON.stringify(scope), group = groups.get(key) ?? { scope, itemIndexes: [], used: false }
+    group.itemIndexes.push(index)
+    groups.set(key, group)
+  }
+  if (declaration.used?.length) {
+    const key = JSON.stringify(primaryScope), group = groups.get(key) ?? { scope: primaryScope, itemIndexes: [], used: false }
+    group.used = true
+    groups.set(key, group)
+  }
+  const used = declaration.used?.length ? await Promise.all(declaration.used.map(async entry_id => ({
     entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, 'summary'),
-  })))
-  for (const [itemIndex, item] of declaration.items.entries()) {
-    const sourceIds = itemSources[itemIndex].map(message => message.message_id)
-    const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds }
-    if (item.basis === 'assistant_proposal' || item.basis === 'agent_inference') {
-      const proposal_index = draft.extraction.proposals.length
-      draft.extraction.proposals.push({ ...fact, basis: item.basis })
-      if (item.derived_from) {
-        draft.derivations ??= []
-        draft.derivations.push({ proposal_index, sources: await Promise.all(item.derived_from.map(async entry_id => ({
-          entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, 'evidence'),
-        }))) })
+  }))) : undefined
+  const drafts = []
+  for (const group of groups.values()) {
+    const messages = [...new Map([...group.itemIndexes.flatMap(index => itemSources[index]), final].map(message => [message.message_id, message])).values()]
+      .sort((a, b) => a.location!.start - b.location!.start)
+    const id = `evidence-${hash(JSON.stringify({ source, scope: group.scope, messages, run }))}`
+    const evidence = evidenceSchema.parse({ id, submission: { schema_version: 1, submission_id: id, source, scope: group.scope, messages }, run })
+    await writeJson(resolve(codexDirectory(config), 'evidence', `${id}.json`), { ...evidence, snapshots: [{ path: snapshot.path, original_path: snapshot.original_path }] })
+    const draft = recordDraftSchema.parse({ evidence_id: id, extraction: { schema_version: 1, memories: [], proposals: [], revisions: [] }, changes: [] })
+    if (group.used) draft.used = used
+    for (const itemIndex of group.itemIndexes) {
+      const item = declaration.items[itemIndex]
+      const sourceIds = itemSources[itemIndex].map(message => message.message_id)
+      const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds }
+      if (item.basis === 'assistant_proposal' || item.basis === 'agent_inference') {
+        const proposal_index = draft.extraction.proposals.length
+        draft.extraction.proposals.push({ ...fact, basis: item.basis })
+        if (item.derived_from) {
+          draft.derivations ??= []
+          draft.derivations.push({ proposal_index, sources: await Promise.all(item.derived_from.map(async entry_id => ({
+            entry_id, read_version: await readVersion(config, event.session_id, entry_id, capture.received_at, 'evidence'),
+          }))) })
+        }
+      }
+      else {
+        const index = draft.extraction.memories.length
+        draft.extraction.memories.push({ ...fact, basis: item.basis })
+        if (item.change) draft.changes.push({ kind: item.change.kind, previous_entry_id: item.change.target,
+          expected_version: await readVersion(config, event.session_id, item.change.target, capture.received_at), current_memory_index: index,
+          revision_index: null, explanation: `主会话声明 ${item.change.kind}：${item.text}`, source_message_ids: sourceIds,
+          evidence_quote: item.confirmation_quote ?? item.quote, resolved_revision_conflict_ids: [],
+        })
       }
     }
-    else {
-      const index = draft.extraction.memories.length
-      draft.extraction.memories.push({ ...fact, basis: item.basis })
-      if (item.change) draft.changes.push({ kind: item.change.kind, previous_entry_id: item.change.target,
-        expected_version: await readVersion(config, event.session_id, item.change.target, capture.received_at), current_memory_index: index,
-        revision_index: null, explanation: `主会话声明 ${item.change.kind}：${item.text}`, source_message_ids: sourceIds,
-        evidence_quote: item.confirmation_quote ?? item.quote, resolved_revision_conflict_ids: [],
-      })
-    }
+    drafts.push(draft)
   }
-  return stageRecord(config, draft, true)
+  return Promise.all(drafts.map(draft => stageRecord(config, draft, true)))
+}
+
+function workspaceScope(workspaces: NonNullable<CaptureSettings['workspaces']>) {
+  return { project_ids: [...new Set(workspaces.flatMap(workspace => workspace.project_ids))], business_ids: [...new Set(workspaces.flatMap(workspace => workspace.business_ids))] }
 }
 
 /** Invalid declarations remain local diagnostics; this path never asks a model to repair them. */

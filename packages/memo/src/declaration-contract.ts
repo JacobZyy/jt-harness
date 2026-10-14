@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isAbsolute } from 'node:path'
 import { extractionSchema } from './contracts.ts'
 import { recordId } from './record-contract.ts'
 import type { RecordDraft } from './record-contract.ts'
@@ -9,6 +10,7 @@ const fact = extractionSchema.shape.memories.element.shape
 export const declarationSchema = z.strictObject({
   items: z.array(z.strictObject({
     text: z.string().trim().min(1), scope: fact.scope,
+    workspaces: z.array(z.string().refine(isAbsolute, '工作目录必须使用绝对路径')).min(1).optional(),
     basis: z.enum(['user_statement', 'user_confirmed', 'tool_observation', 'assistant_proposal', 'agent_inference']),
     quote: z.string().trim().min(1).max(240),
     confirmation_quote: z.string().trim().min(1).max(240).optional(),
@@ -29,6 +31,12 @@ export const declarationSchema = z.strictObject({
     context.addIssue({ code: 'custom', message: 'confirmation_quote 仅用于 user_confirmed 声明' })
   }
   for (const item of value.items) {
+    if (item.workspaces && item.scope !== 'project') {
+      context.addIssue({ code: 'custom', message: 'workspaces 仅用于 project 声明' })
+    }
+    if (item.workspaces && new Set(item.workspaces).size !== item.workspaces.length) {
+      context.addIssue({ code: 'custom', message: '工作目录不得重复' })
+    }
     if (item.derived_from && !['assistant_proposal', 'agent_inference'].includes(item.basis)) {
       context.addIssue({ code: 'custom', message: 'derived_from 仅用于候选建议或推断；不能替代用户或工具证据' })
     }
