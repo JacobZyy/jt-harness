@@ -108,7 +108,7 @@ test('legacy cleanup ownership requires the exact SessionStart command and marke
   }
 })
 
-test('migration dry run and backup preserve teams, other Skills, AGENTS instructions and all historical runtime queues', async () => {
+test('migration dry run and cleanup preserve teams, other Skills, AGENTS instructions and all historical runtime queues without backups', async () => {
   const f = await fixture()
   try {
     await mkdir(resolve(f.a, '.codex'))
@@ -134,7 +134,7 @@ test('migration dry run and backup preserve teams, other Skills, AGENTS instruct
     await writeFile(resolve(f.a, '.gitignore'), 'node_modules/\n/.jth/*\n!/.jth/flow.json\n!/.jth/workflow.json\nkeep-custom/\n')
     const dry = await cleanupProjectInstallation(f.a, { ...f.config, dryRun: true, registered: true })
     assert.equal(dry.handlers.length, 1)
-    assert.equal(dry.backup_directory, null)
+    await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/backups')), { code: 'ENOENT' })
     assert((await readFile(resolve(f.a, '.jth/flow.json'), 'utf8')).includes('old'))
     const actual = await cleanupProjectInstallation(f.a, { ...f.config, registered: true })
     assert.deepEqual(actual.removed, dry.removed)
@@ -144,9 +144,8 @@ test('migration dry run and backup preserve teams, other Skills, AGENTS instruct
     for (const name of preserved) assert.equal(await readFile(resolve(f.a, '.jth', name), 'utf8'), 'historical')
     assert((await readdir(resolve(f.a, '.agents/skills'))).includes('custom'))
     for (const directory of ['.codex/skills', '.claude/skills']) assert.deepEqual(await readdir(resolve(f.a, directory)), ['custom'])
-    assert(actual.backup_directory && (await readdir(actual.backup_directory)).length >= 5)
-    const backedUpSkills = (await readdir(actual.backup_directory!)).filter(name => name.endsWith('-jth-memo'))
-    assert(await Promise.all(backedUpSkills.map(name => lstat(resolve(actual.backup_directory!, name)))).then(stats => stats.some(info => info.isSymbolicLink())))
+    assert.equal(Object.hasOwn(actual, 'backup_directory'), false)
+    await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/backups')), { code: 'ENOENT' })
   } finally { await f.cleanup() }
 })
 
@@ -158,16 +157,17 @@ test('existing-only cleanup leaves registered clean projects alone and removes o
     assert.deepEqual(await readdir(f.a), [])
     const custom = 'node_modules/\n# /.jth/*\n /.codex/hooks.json\n/.agents/skills/jth-memo-extra\n'
     await writeFile(resolve(f.a, '.gitignore'), custom)
-    assert.equal((await cleanupProjectInstallation(f.a, options)).backup_directory, null)
+    assert.deepEqual((await cleanupProjectInstallation(f.a, options)).removed, [])
     assert.equal(await readFile(resolve(f.a, '.gitignore'), 'utf8'), custom)
     await writeFile(resolve(f.a, '.gitignore'), custom + '/.jth/*\n!/.jth/flow.json\n!/.jth/workflow.json\n/.agents/skills/jth-flow\n/.agents/skills/jth-memo\n/.codex/hooks.json')
     assert.deepEqual((await cleanupProjectInstallation(f.a, options)).removed, [`${f.a}/.gitignore#JTH`])
     assert.equal(await readFile(resolve(f.a, '.gitignore'), 'utf8'), custom + '/.jth/\n')
-    assert.equal((await cleanupProjectInstallation(f.a, options)).backup_directory, null)
+    assert.deepEqual((await cleanupProjectInstallation(f.a, options)).removed, [])
     await mkdir(resolve(f.b, '.jth'))
     await writeFile(resolve(f.b, '.jth/memo.json'), '{"version":3,"scope":{"project_ids":["old"],"business_ids":[]}}')
     await cleanupProjectInstallation(f.b, options)
     assert.equal(await readFile(resolve(f.b, '.gitignore'), 'utf8'), '/.jth/\n')
+    await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/backups')), { code: 'ENOENT' })
   } finally { await f.cleanup() }
 })
 

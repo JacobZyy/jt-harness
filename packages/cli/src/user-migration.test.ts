@@ -112,7 +112,9 @@ test('migration discovers worktrees, preserves historical IDs and removes only o
       ({ workspace: project.workspace, write: project.binding.project_ids, read: project.binding.read_project_ids }))
     assert.deepEqual(identities(migrated), identities(dry), 'Preview and execution must report identical groups')
     assert.equal(migrated.database_preserved, true); assert.equal(migrated.queues_preserved, true)
-    assert((await readFile(resolve(migrated.backup_directory, 'report.json'), 'utf8')).includes('historical-project'))
+    assert.equal(Object.hasOwn(migrated, 'backup_directory'), false)
+    assert(migrated.projects.every((project: object) => !Object.hasOwn(project, 'backup_directory')))
+    await assert.rejects(readdir(resolve(config.dataDir, 'codex/migrations')), { code: 'ENOENT' })
     const remaining = await readJson(hooksFile) as typeof hooks
     assert.deepEqual(remaining.hooks.Stop, [{ hooks: [{ type: 'command', statusMessage: 'jth memo declaration', command: 'third-party' }] }])
     assert.deepEqual(remaining.hooks.PreToolUse, hooks.hooks.PreToolUse)

@@ -56,7 +56,7 @@ jth flow legacy migrate
 
 ## 当前本机使用
 
-工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，可显式选择本机覆盖配置。用户级 `SessionStart` 会检查当前绑定目录，备份并清理旧分支重新带回的 JTH 接入；干净目录跳过，团队配置及历史数据保留。安装、版本更新与用户入口同步见[本地交付](docs/local-delivery-monitoring.md)。
+工具本体可通过 npm 包 `@jacob-z/jt-harness` 或独立发行包安装；命令位置由安装方式决定，用 `command -v jth` 确认。共享配置默认位于 `~/.jt-harness/.env`，可显式选择本机覆盖配置。用户级 `SessionStart` 会检查当前绑定目录，直接清理旧分支重新带回的 JTH 接入，不创建清理备份；干净目录跳过，团队配置及历史数据保留。安装、版本更新与用户入口同步见[本地交付](docs/local-delivery-monitoring.md)。
 
 ```sh
 jth --help
@@ -221,7 +221,7 @@ jth memo work
 jth memo codex uninstall
 ```
 
-安装管理 `$CODEX_HOME/hooks.json` 中的声明和线索 Hook，并复制用户 `~/.agents/skills/jth-memo` 文件。旧仓库入口用 `jth migrate` 统一备份、清理，保留团队配置及历史数据。重复安装不会重复注册；卸载移除受管用户 Hook 和 Skill。Codex 的 Hook 信任机制保持不变。
+安装管理 `$CODEX_HOME/hooks.json` 中的声明和线索 Hook，并复制用户 `~/.agents/skills/jth-memo` 文件。旧仓库入口用 `jth migrate` 直接定向清理，不创建清理备份，保留团队配置及历史数据。重复安装不会重复注册；卸载移除受管用户 Hook 和 Skill。Codex 的 Hook 信任机制保持不变。
 
 Memo 安装 `Stop` 声明入口，以及 `SessionStart` / `UserPromptSubmit` 有限线索入口。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短流程提示，不恢复旧任务生命周期 Hook。
 

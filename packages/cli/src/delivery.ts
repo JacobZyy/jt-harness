@@ -26,8 +26,8 @@ jth uninstall [--workspace <path>] [--env-file <path>]
 init 一次配置用户级 JTH：补齐连接配置、准备记忆表、安装用户 Hook 和 Skill；以后目录无需 init。
 新会话按真实绑定目录自动分组，无绑定使用 default；继承用户原生 Codex 偏好，不修改项目 TOML。
 migrate 默认发现旧安装及其 Git worktrees，迁移本机目录映射并移除旧项目 JTH 接入；--workspace 可重复。
---dry-run 只列举变更；实际迁移保存本机备份、原 IDs/env/enabled_at，保留业务改动、队列及历史。
---session-start 为用户 Hook 入口：仅检查当前绑定目录，干净目录跳过；备份后清理精确旧入口，不连接数据库或模型。
+--dry-run 只列举变更；实际迁移直接清理旧入口，保留原 IDs/env/enabled_at、业务改动、队列及历史，不创建清理备份。
+--session-start 为用户 Hook 入口：仅检查当前绑定目录，干净目录跳过；直接清理精确旧入口，不连接数据库或模型。
 doctor 只读检查用户 Hook 来源，不调用模型。uninstall 默认卸载用户 Hook/Skill；指定 --workspace 仅清理该目录的旧接入。
 用户配置默认 ~/.jt-harness/.env，Skill 为 ~/.agents/skills，Hook 为 CODEX_HOME/hooks.json。--env-file 显式覆盖；API Key 隐藏输入。
 `

@@ -29,8 +29,8 @@ export async function cleanupSessionProjects(root: string, input: unknown, confi
       }
       try {
         if (!changes(await migrateUserInstallation(root, config, codexHome, { ...options, dryRun: true }))) continue
-        const report = await migrateUserInstallation(root, config, codexHome, options)
-        messages.push(`JTH 已清理旧仓库接入：${workspace}；原文备份：${report.backup_directory}。`)
+        await migrateUserInstallation(root, config, codexHome, options)
+        messages.push(`JTH 已清理旧仓库接入：${workspace}。`)
       } finally {
         await unlink(resolve(lock, owner))
         await rmdir(lock).catch(error => { if (!['ENOENT', 'ENOTEMPTY'].includes(error.code)) throw error })

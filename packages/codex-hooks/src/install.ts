@@ -225,7 +225,6 @@ async function assertCleanupSkill(workspace: string, skill: CleanupSkill) {
 /** Remove only installed project entrances; archived queues, tasks and runtime evidence stay intact. */
 export async function cleanupProjectInstallation(workspace: string, options: { dataDir: string, dryRun?: boolean, registered?: boolean, existingOnly?: boolean }) {
   const canonicalWorkspace = await realpath(workspace)
-  const backups = resolve(codexDirectory(options), 'backups', `project-${hash(workspace)}-${Date.now()}-${randomUUID()}`)
   const removed: string[] = [], handlers: string[] = [], skills: CleanupSkill[] = []
   const changes: { file: CleanupFile, next: string | HookConfig | null }[] = []
   const hooks = await cleanupFile(canonicalWorkspace, resolve(workspace, '.codex/hooks.json'))
@@ -281,21 +280,16 @@ export async function cleanupProjectInstallation(workspace: string, options: { d
     for (const skill of skills) await assertCleanupSkill(canonicalWorkspace, skill)
     for (const { file, next } of changes) {
       await assertCleanupFile(canonicalWorkspace, file)
-      await writeJson(resolve(backups, `${hash(file.path)}.json`), { path: file.path, content: file.content })
-      await assertCleanupFile(canonicalWorkspace, file)
       if (next === null) await rm(file.path)
       else if (typeof next === 'string') await writeFile(file.path, next)
       else await writeJson(file.path, next)
     }
     for (const skill of skills) {
       await assertCleanupSkill(canonicalWorkspace, skill)
-      await mkdir(backups, { recursive: true })
-      await cp(skill.path, resolve(backups, `${hash(skill.path)}-jth-${skill.kind}`), { recursive: true, dereference: false, verbatimSymlinks: true })
-      await assertCleanupSkill(canonicalWorkspace, skill)
       await rm(skill.path, { recursive: true, force: true })
     }
   }
-  return { workspace, dry_run: Boolean(options.dryRun), removed, handlers, backup_directory: !options.dryRun && (removed.length || handlers.length) ? backups : null }
+  return { workspace, dry_run: Boolean(options.dryRun), removed, handlers }
 }
 
 export async function updateHookConfig(hooksPath: string, backupDirectory: string, transform: (document: HookConfig) => HookConfig) {

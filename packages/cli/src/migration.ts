@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
@@ -6,13 +6,13 @@ import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import { parse, patch } from '@decimalturn/toml-patch'
 import { locatorSchema, settingsSchema } from '@jacob-z/jt-harness/flow'
-import { cleanupProjectInstallation, configureUserHooks, configureMonitorHooks, hash, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
+import { cleanupProjectInstallation, configureUserHooks, configureMonitorHooks, readJson, writeJson } from '@jacob-z/jt-harness/codex-hooks'
 import { userConfigPaths, type Config } from '@jacob-z/jt-harness/memo/config'
 import { importLegacyBindings, legacyInstallations, loadLegacyWorkspaceConfig, workspaceBinding } from './configuration.ts'
 import { configureWorkflowPolicy, workflowSettingsPaths, workflowSettingsSchema } from './workflow-settings.ts'
 
 /** Remove only the values written by registered JTH project setup, preserving later edits. */
-export async function removeManagedProjectPreferences(workspace: string, backupDirectory: string, dryRun = false) {
+export async function removeManagedProjectPreferences(workspace: string, dryRun = false) {
   const path = resolve(workspace, '.codex/config.toml')
   const metadata = await lstat(path).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
   if (!metadata) return { path, removed: [] as string[] }
@@ -33,7 +33,6 @@ export async function removeManagedProjectPreferences(workspace: string, backupD
   }
   if (!removed.length || dryRun) return { path, removed }
   const next = patch(original, document)
-  await writeJson(resolve(backupDirectory, `${hash(path)}.json`), { path, content: original })
   if (await readFile(path, 'utf8') !== original) throw new Error('Codex 配置被其他进程更新；保留原文件，请重试')
   if (!next.trim()) await rm(path)
   else {
@@ -80,23 +79,6 @@ export async function migrateUserInstallation(root: string, config: Config, code
   const installed = installations.map(installation => installation.settings.workspace)
   const requested = options.workspaces?.length ? options.workspaces : [...installed, ...await installedWorktrees(installed)]
   const workspaces = [...new Set(requested.map(path => resolve(path)))]
-  const backupDirectory = resolve(config.dataDir, 'codex/migrations', `${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}`)
-  if (!dryRun) {
-    await mkdir(backupDirectory, { recursive: true, mode: 0o700 })
-    const projects = resolve(userConfigPaths(environment).directory, 'projects')
-    if (options.cleanupOnly && options.workspaces) {
-      for (const workspace of options.workspaces) {
-        const available = await realpath(workspace).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
-        if (!available) continue
-        const name = `${hash(available)}.json`
-        await cp(resolve(projects, name), resolve(backupDirectory, `binding-${name}`)).catch(error => { if (error.code !== 'ENOENT') throw error })
-      }
-    } else {
-      await cp(projects, resolve(backupDirectory, 'projects'), { recursive: true }).catch(error => { if (error.code !== 'ENOENT') throw error })
-      await cp(resolve(userConfigPaths(environment).directory, 'configuration.json'), resolve(backupDirectory, 'configuration.json')).catch(error => { if (error.code !== 'ENOENT') throw error })
-    }
-    for (const installation of installations) await cp(installation.path, resolve(backupDirectory, `installation-${hash(installation.path)}.json`))
-  }
   const imported = await importLegacyBindings(config, environment, dryRun, options.cleanupOnly ? options.workspaces : undefined)
   const projects = []
   let monitorEnabled = false
@@ -125,9 +107,9 @@ export async function migrateUserInstallation(root: string, config: Config, code
       await configureWorkflowPolicy(available, 'project', oldWorkflow.mode)
     }
     const cleanup = await cleanupProjectInstallation(available, { dataDir: config.dataDir, dryRun, registered, existingOnly: options.existingOnly })
-    const preferences = registered ? await removeManagedProjectPreferences(available, backupDirectory, dryRun) : { removed: [] }
+    const preferences = registered ? await removeManagedProjectPreferences(available, dryRun) : { removed: [] }
     projects.push({ ...cleanup, available: true, registered, binding, legacy_locator: locator ?? null, codex_preferences: preferences,
-      ...(oldWorkflow?.mode ? { workflow_policy: oldWorkflow.mode } : {}), ...(oldMonitor?.enabled ? { monitoring: options.cleanupOnly ? '旧设置已备份；保留用户级监控偏好' : '转为用户级' } : {}) })
+      ...(oldWorkflow?.mode ? { workflow_policy: oldWorkflow.mode } : {}), ...(oldMonitor?.enabled ? { monitoring: options.cleanupOnly ? '保留用户级监控偏好' : '转为用户级' } : {}) })
   }
   const global = options.cleanupOnly ? null : dryRun ? { status: 'planned', hooks_path: resolve(codexHome, 'hooks.json'), skills: resolve(homedir(), '.agents/skills') }
     : await configureUserHooks(root, config, codexHome)
@@ -135,8 +117,6 @@ export async function migrateUserInstallation(root: string, config: Config, code
     await writeJson(resolve(userConfigPaths(environment).directory, 'monitor.json'), { enabled: true })
     await configureMonitorHooks(root, process.cwd(), true, { dataDir: config.dataDir, codexHome })
   }
-  const report = { mode: 'user', dry_run: dryRun, global, imported, projects, backup_directory: dryRun ? null : backupDirectory,
+  return { mode: 'user', dry_run: dryRun, global, imported, projects,
     database_preserved: true, queues_preserved: true, history_preserved: true, native_user_preferences_preserved: true }
-  if (!dryRun) await writeJson(resolve(backupDirectory, 'report.json'), report)
-  return report
 }

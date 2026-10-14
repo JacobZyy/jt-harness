@@ -66,6 +66,7 @@ test('SessionStart cleans restored bound directories, preserves local policy and
     const result = await f.hook()
     assert.equal(result.stderr, '')
     assert.match(result.output.hookSpecificOutput.additionalContext, /已清理旧仓库接入/)
+    assert.doesNotMatch(result.output.hookSpecificOutput.additionalContext, /备份/)
     assert.deepEqual((await readJson(hooksPath) as typeof hooks).hooks, { SessionStart: [team] })
     for (const workspace of [f.a, f.b]) await assert.rejects(readFile(resolve(workspace, '.jth/flow.json')), { code: 'ENOENT' })
     assert.equal(await readFile(resolve(f.other, '.codex/hooks.json'), 'utf8'), otherBefore)
@@ -78,10 +79,10 @@ test('SessionStart cleans restored bound directories, preserves local policy and
     assert.deepEqual(await readJson(resolve(f.b, '.jth/workflow.json')), { mode: 'bogus' })
     assert.equal(await readJson(workflowSettingsPaths(f.b, f.environment).project), undefined)
     assert.equal(await readFile(resolve(f.a, '.codex/config.toml'), 'utf8'), 'model = "keep-model"\n')
-    const backups = await readdir(resolve(codexDirectory(f.config), 'migrations'))
+    await assert.rejects(readdir(resolve(codexDirectory(f.config), 'migrations')), { code: 'ENOENT' })
     const mapBefore = await readFile(resolve(f.user, 'projects', `${hash(f.a)}.json`), 'utf8')
     assert.deepEqual((await f.hook()).output, {})
-    assert.deepEqual(await readdir(resolve(codexDirectory(f.config), 'migrations')), backups)
+    await assert.rejects(readdir(resolve(codexDirectory(f.config), 'migrations')), { code: 'ENOENT' })
     assert.equal(await readFile(resolve(f.user, 'projects', `${hash(f.a)}.json`), 'utf8'), mapBefore)
     // Checking out an old branch restores tracked entrances; the next start must clean them again.
     await f.legacy(f.a, 'old-a')
@@ -111,7 +112,7 @@ test('one unsafe directory does not block another bound directory; unbound and m
   } finally { await f.dispose() }
 })
 
-test('concurrent starts preserve original backups and recover a dead cleanup owner without waiting', { timeout: 30000 }, async () => {
+test('concurrent starts clean without backups and recover a dead cleanup owner without waiting', { timeout: 30000 }, async () => {
   const f = await fixture()
   try {
     await f.bind([f.a]); await f.legacy(f.a, 'old-a')
@@ -126,7 +127,7 @@ test('concurrent starts preserve original backups and recover a dead cleanup own
     assert(results.some(result => result.output.hookSpecificOutput?.additionalContext.includes('已清理旧仓库接入')))
     assert(results.every(result => result.stderr === ''))
     await assert.rejects(readFile(resolve(f.a, '.jth/flow.json')), { code: 'ENOENT' })
-    assert.equal((await readdir(resolve(codexDirectory(f.config), 'migrations'))).length, 1)
+    await assert.rejects(readdir(resolve(codexDirectory(f.config), 'migrations')), { code: 'ENOENT' })
     assert.deepEqual((await f.hook()).output, {})
     await f.legacy(f.a, 'old-a'); await mkdir(lock)
     assert.match((await f.hook()).output.hookSpecificOutput.additionalContext, /已清理旧仓库接入/)
