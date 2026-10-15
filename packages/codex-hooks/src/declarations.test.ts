@@ -36,11 +36,17 @@ test('declaration parser ignores normal replies and fenced examples, and bounds 
   assert.throws(() => parseDeclaration(declaration({ basis: 'user_confirmed', confirmation_quote: '长'.repeat(241) })), /240/)
 })
 
-test('Stop with no declaration is a no-op; source-bound declarations are staged once and malformed ones stay diagnostic', async () => {
+test('every main Stop stays observable; source-bound declarations are staged once and malformed ones stay diagnostic', async () => {
   const f = await fixture()
   try {
-    assert.equal(await f.capture('工作完成，无新事实。'), null)
-    assert.deepEqual(await collectDeclarations(f.config), { received: 0, skipped: 0, errors: [] })
+    await appendFile(f.source, message('u0', 'UserMessage', '完成这次工作。') + message('a0', 'AgentMessage', '工作完成，无新事实。'))
+    assert(await f.capture('工作完成，无新事实。'))
+    assert.deepEqual(await collectDeclarations(f.config), { received: 0, skipped: 1, errors: [] })
+    const observed = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/declaration-events', (await readdir(resolve(f.config.dataDir, 'codex/declaration-events')))[0]), 'utf8'))
+    assert.equal(observed.observation.declaration, 'missing')
+    assert.equal(observed.observation.decision, null)
+    assert.equal(observed.observation.turn_usage.input_tokens, null)
+    assert.equal(observed.observation.write_usage.declaration_tokens, null)
     await appendFile(f.source, message('u1', 'UserMessage', '本项目使用 pnpm，已经确定。') + message('a1', 'AgentMessage', '已完成。\n' + declaration()))
     await f.capture('已完成。\n' + declaration())
     await f.capture('已完成。\n' + declaration())
@@ -61,6 +67,50 @@ test('Stop with no declaration is a no-op; source-bound declarations are staged 
     assert.equal((await collectDeclarations(f.config)).errors.length, 1)
     assert.equal((await collectDeclarations(f.config)).errors.length, 0)
     assert.equal((await readdir(resolve(f.config.dataDir, 'codex/declaration-errors'))).length, 1)
+    const diagnostic = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/declaration-errors', (await readdir(resolve(f.config.dataDir, 'codex/declaration-errors')))[0]), 'utf8'))
+    assert.equal(diagnostic.observation.declaration, 'invalid')
+    assert.equal(diagnostic.observation.stage, 'failed')
+    assert(diagnostic.observation.error)
+  } finally { await f.cleanup() }
+})
+
+test('skip decisions remain operational evidence and turn counters never claim exact declaration cost', async () => {
+  const f = await fixture()
+  const skip = `<!-- jth-memory ${JSON.stringify({ items: [], decision: { action: 'skip', reason: '这轮只有临时操作。' } })} -->`
+  const tokens = (total: object, last?: object) => row('event_msg', { type: 'token_count', info: { total_token_usage: total, last_token_usage: last } })
+  try {
+    const snapshotId = 'a'.repeat(64)
+    await appendFile(f.source, tokens({ input_tokens: 100, cached_input_tokens: 40, output_tokens: 30, reasoning_output_tokens: 10, total_tokens: 130 })
+      + message('user', 'UserMessage', '这轮只查询状态。')
+      + tokens({ input_tokens: 400, cached_input_tokens: 140, output_tokens: 90, reasoning_output_tokens: 20, total_tokens: 490 })
+      + message('final', 'AgentMessage', skip))
+    const capture = await captureDeclaration({ hook_event_name: 'Stop', session_id: 'parent', cwd: f.directory, transcript_path: f.source, last_assistant_message: skip },
+      { ...f.settings, rule_snapshot_id: snapshotId }, f.config)
+    assert.deepEqual(await collectDeclarations(f.config), { received: 0, skipped: 1, errors: [] })
+    const observed = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/declaration-events', `${capture!.id}.json`), 'utf8'))
+    assert.equal(observed.observation.rule_snapshot_id, snapshotId)
+    assert.deepEqual(observed.observation.decision, { action: 'skip', reason: '这轮只有临时操作。' })
+    assert.deepEqual(observed.observation.submission_ids, [])
+    assert.deepEqual(observed.observation.turn_usage, { attribution: 'turn_context', input_tokens: 300, cached_input_tokens: 100, output_tokens: 60, reasoning_output_tokens: 10, total_tokens: 360 })
+    assert.equal(observed.observation.write_usage.background_extraction_model_calls, 0)
+    await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/records')), { code: 'ENOENT' })
+    assert.equal(await captureDeclaration({ hook_event_name: 'Stop', session_id: 'parent', agent_id: 'child', cwd: f.directory }, f.settings, f.config), null)
+  } finally { await f.cleanup() }
+})
+
+test('old declarations preserve a missing decision and incomplete usage stays unknown', async () => {
+  const f = await fixture()
+  try {
+    await appendFile(f.source, message('user', 'UserMessage', '项目使用 pnpm。')
+      + row('event_msg', { type: 'token_count', info: { last_token_usage: { input_tokens: 7 }, total_token_usage: { input_tokens: 7 } } })
+      + message('final', 'AgentMessage', declaration()))
+    const capture = await f.capture(declaration())
+    assert.equal((await collectDeclarations(f.config)).received, 1)
+    const observed = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/declaration-events', `${capture!.id}.json`), 'utf8'))
+    assert.equal(observed.observation.declaration, 'present')
+    assert.equal(observed.observation.decision, null)
+    assert.equal(observed.observation.turn_usage.input_tokens, 7)
+    assert.equal(observed.observation.turn_usage.output_tokens, null)
   } finally { await f.cleanup() }
 })
 

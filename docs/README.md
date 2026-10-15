@@ -1,6 +1,6 @@
 # JTH 文档导航
 
-当前默认架构是独立 TypeScript CLI、Codex 原生流程能力、主会话记忆声明和 PostgreSQL + pgvector。配置、安装和执行行为以源码、CLI 帮助及下列操作说明为准。
+当前默认架构是独立 TypeScript CLI、Codex 原生流程能力、主会话记忆声明、PostgreSQL + pgvector，以及用户发起的独立执行分析。日常采集不自动评分。配置、安装和执行行为以源码、CLI 帮助及下列操作说明为准。
 
 ## 当前操作说明
 
@@ -14,9 +14,10 @@
 | Goal、计划、恢复及项目验收 | [原生 Flow](flow-control.md)、[Workflow Policy](workflow-policy.md) |
 | 声明、读取、更正与过期知识治理 | [主会话记忆声明](memory-declarations.md) |
 | 主动线索、混合检索、证据分层和采用反馈 | [记忆读取](memory-retrieval.md) |
+| 真实 Flow/Memo 记录的按需评分、贡献证据与单次写入用量 | [按需执行分析](analysis.md) |
 | 已实现能力和保留的后续事项 | [Rex 参考的状态对照](rex-memory-reference.md#已落地与保留的后续事项) |
 
-Flow 不保存第二份任务进度；Memo 默认不调用 DSH。历史 Flow 只能通过 `jth flow legacy ...` 使用，历史 DSH 队列只在显式 `--legacy` 路径处理。
+Flow 不保存第二份任务进度；Memo 默认不调用 DSH。Analysis 由用户选择记录，在独立原生聊天中做 judge；CLI 只冻结、校验和计分，不自动评分或另调 judge API，不依赖 Phoenix。历史 Flow 只能通过 `jth flow legacy ...` 使用，历史 DSH 队列只在显式 `--legacy` 路径处理。
 
 ## 历史设计与验证
 

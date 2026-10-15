@@ -34,7 +34,7 @@ test('native user installation and file stdin preserve project files and inject 
     const config = await loadConfig(root, undefined, environment)
     const hooks = await readJson(resolve(codexHome, 'hooks.json')) as { hooks: Record<string, { hooks: { statusMessage: string, command: string }[] }[]> }
     assert.equal(Object.values(hooks.hooks).flatMap(groups => groups.flatMap(group => group.hooks)).length, 5)
-    for (const kind of ['flow', 'memo']) {
+    for (const kind of ['flow', 'memo', 'analysis']) {
       const skill = await readFile(resolve(fixture, '.agents/skills', `jth-${kind}`, 'SKILL.md'), 'utf8')
       assert(skill.includes('references/'))
       if (kind === 'flow') for (const name of ['workflow-policy.md', 'acceptance.md']) assert((await readFile(resolve(fixture, '.agents/skills/jth-flow/references', name), 'utf8')).length > 0)

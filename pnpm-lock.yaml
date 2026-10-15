@@ -36,6 +36,9 @@ importers:
       '@deepseek-ai/dsh-sdk-client':
         specifier: link:../deepseek-harness/packages/sdk/client
         version: link:../deepseek-harness/packages/sdk/client
+      '@jt-harness/analysis':
+        specifier: workspace:*
+        version: link:packages/analysis
       '@jt-harness/codex-hooks':
         specifier: workspace:*
         version: link:packages/codex-hooks
@@ -54,6 +57,12 @@ importers:
       typescript:
         specifier: link:../deepseek-harness/node_modules/typescript
         version: link:../deepseek-harness/node_modules/typescript
+
+  packages/analysis:
+    dependencies:
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   packages/cli:
     dependencies:

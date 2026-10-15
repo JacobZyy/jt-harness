@@ -31,6 +31,8 @@ export { recordMemories, recordDeclaration } from './record.ts'
 export { runIndexWorker, processIndexJob } from './index-worker.ts'
 export { readMemory } from './reading.ts'
 export { memoryUses } from './usage.ts'
+export { readMemoAnalysis } from './analysis-read.ts'
+export type { MemoAnalysisRow } from './analysis-read.ts'
 export {
   memoryContextKind, memoryNotice, createMemoryContext, isMemoryContext, isRecalledMemory,
   withMemoryContext, sanitizeMemoryText, sanitizeMemoryValue, unicodeLength, truncateUnicode,

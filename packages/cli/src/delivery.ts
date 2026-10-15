@@ -29,7 +29,7 @@ migrate 默认发现旧安装及其 Git worktrees，迁移本机目录映射并�
 --dry-run 只列举变更；实际迁移直接清理旧入口，保留原 IDs/env/enabled_at、业务改动、队列及历史，不创建清理备份。
 --session-start 为用户 Hook 入口：仅检查当前绑定目录，干净目录跳过；直接清理精确旧入口，不连接数据库或模型。
 doctor 只读检查用户 Hook 来源，不调用模型。uninstall 默认卸载用户 Hook/Skill；指定 --workspace 仅清理该目录的旧接入。
-用户配置默认 ~/.jt-harness/.env，Skill 为 ~/.agents/skills，Hook 为 CODEX_HOME/hooks.json。--env-file 显式覆盖；API Key 隐藏输入。
+用户配置默认 ~/.jt-harness/.env，Skill 为 ~/.agents/skills；已有 Skill Manager 时 jth-analysis 存入其 canonical 目录并投影。Hook 为 CODEX_HOME/hooks.json。--env-file 显式覆盖；API Key 隐藏输入。
 `
 
 const ownDistributionName = (name: string) => name === 'jt-harness' || name === '@jacob-z/jt-harness'
@@ -109,7 +109,7 @@ async function inspectUser(root: string, cwd: string, config: Config, codexHome:
     const native = await inspectNativeHooks(workspace)
     const settings: CaptureSettings = { workspace, codex_home: codexHome, env_file: config.envFile, enabled_at: new Date().toISOString(), scope: context.scope, workspaces: context.workspaces }
     const own = native.hooks.filter(hook => isManagedHook(hook, workspace, settings, true) && hook.source === 'user')
-    const skillAvailable = (await Promise.all(['jth-flow', 'jth-memo'].map(name => access(resolve(homedir(), '.agents/skills', name, 'SKILL.md')).then(() => true, () => false)))).every(Boolean)
+    const skillAvailable = (await Promise.all(['jth-flow', 'jth-memo', 'jth-analysis'].map(name => access(resolve(homedir(), '.agents/skills', name, 'SKILL.md')).then(() => true, () => false)))).every(Boolean)
     checks.push({ name: 'hooks', status: skillAvailable && own.filter(hook => hook.statusMessage !== 'jth monitor').length === 5 && own.every(hook => hook.enabled && hook.trustStatus === 'trusted') ? 'ok' : 'warning',
       detail: { skill_available: skillAvailable, source: 'user', hooks_path: resolve(codexHome, 'hooks.json'),
         hooks: own.map(({ statusMessage, eventName, source, sourcePath, enabled, trustStatus }) => ({ name: statusMessage, event: eventName, source, sourcePath, enabled, trustStatus })), errors: native.errors, warnings: native.warnings } })

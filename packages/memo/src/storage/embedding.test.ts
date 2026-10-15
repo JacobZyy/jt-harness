@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { embedTexts } from './embedding.ts'
+import type { EmbeddingAttempt } from './embedding.ts'
 import { vectorSchema } from './contract.ts'
 import { safeError } from '../config.ts'
 
@@ -78,5 +79,33 @@ test('Embedding sanitizes credentials at transport boundary without changing cal
     assert(!sent.includes('test-bearer-token'))
     assert(!sent.includes('secret-value'))
     assert(sent.includes('中文😀'))
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('Embedding records actual provider usage for every attempted text, including partial failure and invalid vectors', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  const attempts: EmbeddingAttempt[] = []
+  globalThis.fetch = (async () => {
+    calls++
+    if (calls === 1) return Response.json({ model: 'test', data: [{ index: 0, embedding: [1, 0.1] }], usage: { prompt_tokens: 12, total_tokens: 12 } })
+    return Response.json({ secret: 'not-for-logs' }, { status: 429 })
+  }) as typeof fetch
+  try {
+    await assert.rejects(embedTexts(['one', 'two', 'never attempted'], config, undefined, async attempt => { attempts.push(attempt) }), /HTTP 429/)
+    assert.equal(calls, 2)
+    assert.equal(attempts.length, 2)
+    assert.deepEqual(attempts.map(attempt => [attempt.text_index, attempt.status, attempt.usage]), [
+      [0, 'complete', { prompt_tokens: 12, total_tokens: 12 }],
+      [1, 'failed', { prompt_tokens: null, total_tokens: null }],
+    ])
+    assert(!JSON.stringify(attempts).includes('not-for-logs'))
+    globalThis.fetch = (async () => Response.json({ model: 'test', data: [{ index: 0, embedding: [1] }], usage: { prompt_tokens: 4, total_tokens: 4 } })) as typeof fetch
+    await assert.rejects(embedTexts(['invalid'], config, undefined, async attempt => { attempts.push(attempt) }))
+    assert.equal(attempts.at(-1)!.status, 'failed')
+    assert.equal(attempts.at(-1)!.usage.prompt_tokens, 4)
+    globalThis.fetch = (async () => Response.json({ model: 'test', data: [{ index: 0, embedding: [1, 0.1] }] })) as typeof fetch
+    await embedTexts(['no reported usage'], config, undefined, async attempt => { attempts.push(attempt) })
+    assert.deepEqual(attempts.at(-1)!.usage, { prompt_tokens: null, total_tokens: null })
   } finally { globalThis.fetch = originalFetch }
 })

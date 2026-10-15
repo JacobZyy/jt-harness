@@ -4,6 +4,7 @@ import { evidenceSchema, recordDraftSchema, recordId, declarationId, parseExtrac
 import type { Evidence, RecordDraft, Submission } from '@jacob-z/jt-harness/memo/contracts'
 import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { captureSchema, codexDirectory, hash, inside, readJson, retainTranscript, writeJson } from './capture.ts'
+import { canonicalFilePath } from './source-path.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
 
 export interface CapturePaths { dataDir: string, envFile: string, envAliases?: readonly string[] }
@@ -114,7 +115,7 @@ export async function readEvidence(config: CapturePaths, id: string) {
   if (!Array.isArray(rawSnapshots)) throw new Error('证据缺少运行时来源文件')
   const remaining = new Map(messages.map(message => [message.message_id, message]))
   for (const snapshot of rawSnapshots as { path: string, original_path: string }[]) {
-    if (!inside(await realpath(resolve(codexDirectory(config), 'sources')), await realpath(snapshot.path))) throw new Error('证据引用了采集区以外的文件')
+    if (!inside(await realpath(resolve(codexDirectory(config), 'sources')), await canonicalFilePath(snapshot.path))) throw new Error('证据引用了采集区以外的文件')
     const selected = messages.filter(message => message.location?.path === snapshot.original_path)
     if (!selected.length) continue
     const identity = await transcriptIdentity(snapshot.path, (await stat(snapshot.path)).size)
