@@ -35,7 +35,7 @@ export async function* transcriptLines(path: string, start: number, end: number)
         const length = newline + 1
         const line = pending.subarray(0, newline).toString('utf8')
         const next = offset + length
-        if (line.trim()) yield { start: offset, end: next, value: rowSchema.parse(JSON.parse(line)) }
+        if (line.trim()) yield { start: offset, end: next, sha256: hash(pending.subarray(0, length)), value: rowSchema.parse(JSON.parse(line)) }
         offset = next
         pending = pending.subarray(length)
       }

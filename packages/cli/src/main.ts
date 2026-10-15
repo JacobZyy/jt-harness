@@ -23,6 +23,7 @@ import { rememberEntryRead } from '@jacob-z/jt-harness/codex-hooks'
 import { boundMemoryEntries, readMemory, memoryUses, retrievalInputSchema, sanitizeMemoryValue, truncateUnicode, withMemoryContext } from '@jacob-z/jt-harness/memo'
 
 const help = `jth init  问答式初始化：目录名默认项目、复用全局配置、自动建表与接入检查
+jth analysis prepare|evidence|report|usage  按需分析 Workflow 与 Memo；只读真实记录，不自动评分或设置 Token 上限
 jth install|doctor|uninstall  独立安装、项目接入和运行诊断；运行 jth install --help
 jth monitor <command>  本地 Phoenix 与会话观测
 jth flow <command>  Codex 原生流程指导与 Memo 接入；运行 jth flow --help

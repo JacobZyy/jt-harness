@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import { submissionSchema, timestampSchema } from '@jacob-z/jt-harness/memo/contracts'
 import { sessionTranscriptPath } from './workspace.ts'
+import { canonicalFilePath } from './source-path.ts'
 
 export const hookEvents = ['SessionStart', 'Stop', 'Interrupt', 'SessionEnd', 'SubagentStart', 'SubagentStop'] as const
 const identifier = z.string().trim().min(1).max(200)
@@ -22,6 +23,7 @@ export const hookEventSchema = z.object({
 export const captureSettingsSchema = z.strictObject({
   workspace: absolutePath, codex_home: absolutePath, env_file: absolutePath, enabled_at: timestampSchema,
   scope: submissionSchema.shape.scope.refine(scope => scope.project_ids.length > 0, '自动采集必须明确指定项目 ID'),
+  rule_snapshot_id: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   workspaces: z.array(z.strictObject({ path: absolutePath, project_ids: submissionSchema.shape.scope.shape.project_ids, business_ids: submissionSchema.shape.scope.shape.business_ids })).min(1).optional(),
 })
 export type CaptureSettings = z.infer<typeof captureSettingsSchema>
@@ -32,7 +34,7 @@ export const captureSchema = z.strictObject({
 })
 export type Capture = z.infer<typeof captureSchema>
 
-export const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+export const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex')
 export const codexDirectory = (config: { dataDir: string }) => resolve(config.dataDir, 'codex')
 export const installationPath = (config: { dataDir: string }, workspace: string) => resolve(codexDirectory(config), 'installations', `${hash(resolve(workspace, '.codex/hooks.json'))}.json`)
 export const userInstallationPath = (config: { dataDir: string }, codexHome: string) => resolve(codexDirectory(config), 'installations', `user-${hash(resolve(codexHome, 'hooks.json'))}.json`)
@@ -63,7 +65,7 @@ export async function writeJson(path: string, value: unknown) {
 
 /** Keep the inode alive if Codex removes the transcript when SessionEnd returns. */
 export async function retainTranscript(path: string, settings: CaptureSettings, config: { dataDir: string }) {
-  const source = await realpath(path)
+  const source = await canonicalFilePath(path)
   const home = await realpath(settings.codex_home)
   if (!inside(resolve(home, 'sessions'), source) && !inside(resolve(home, 'archived_sessions'), source)) {
     throw new Error('会话文件必须位于指定 CODEX_HOME 的 sessions 或 archived_sessions 中')

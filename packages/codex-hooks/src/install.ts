@@ -1,7 +1,7 @@
-import { cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { basename, dirname, isAbsolute, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import type { CaptureSettings } from './capture.ts'
 import { captureSettingsSchema, codexDirectory, hash, hookEvents, inside, installationPath, userInstallationPath, readJson, writeJson } from './capture.ts'
@@ -10,6 +10,8 @@ import { cueMarker } from './cues.ts'
 
 const marker = 'jth memo capture'
 const declarationHookMarker = 'jth memo declaration'
+const userSkillKinds = ['flow', 'memo', 'analysis'] as const
+type UserSkillKind = typeof userSkillKinds[number]
 
 export async function configureSkill(root: string, workspace: string, kind: 'flow' | 'memo', enabled = true) {
   const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`)
@@ -141,9 +143,16 @@ export function mergeHooks(existing: HookConfig, command?: string, options: { ma
 
 export async function configureUserHooks(root: string, config: { dataDir: string, envFile: string }, codexHome: string, enabled = true, userHome = homedir()) {
   const hooksPath = resolve(codexHome, 'hooks.json'), manifestPath = userInstallationPath(config, codexHome)
-  const prior = await readJson(manifestPath) as { disabled?: boolean, settings?: { enabled_at?: string } } | undefined
+  const prior = await readJson(manifestPath) as { disabled?: boolean, settings?: { enabled_at?: string, rule_snapshot_id?: string } } | undefined
   const enabled_at = !prior?.disabled && prior?.settings?.enabled_at ? prior.settings.enabled_at : new Date().toISOString()
-  const skills = await Promise.all((['flow', 'memo'] as const).map(kind => configureUserSkill(root, userHome, kind, enabled)))
+  const installations = await Promise.all(userSkillKinds.map(kind => prepareUserSkillInstallation(root, userHome, kind, enabled)))
+  const rule_snapshot_id = enabled ? await saveRuleSnapshot(root, config) : prior?.settings?.rule_snapshot_id
+  // After preflight, an interrupted update must not attribute new files to the old rules.
+  if (enabled && prior?.settings?.rule_snapshot_id) {
+    const { rule_snapshot_id: _previousSnapshot, ...settings } = prior.settings
+    await writeJson(manifestPath, { ...prior, settings })
+  }
+  const skills = await Promise.all(installations.map(installation => applyUserSkillInstallation(installation, enabled)))
   const backups = resolve(codexDirectory(config), 'backups')
   await updateHookConfig(hooksPath, backups, document => {
     let next = document
@@ -154,20 +163,67 @@ export async function configureUserHooks(root: string, config: { dataDir: string
     next = mergeHooks(next, legacyCleanupCommand, { marker: legacyCleanupMarker, events: ['SessionStart'], additionalContextLimit: 512 })
     return mergeHooks(next, hookCommand('flow', 'prompt'), { marker: 'jth flow entry', events: ['UserPromptSubmit'], additionalContextLimit: 512 })
   })
-  const settings = { enabled_at, codex_home: codexHome, env_file: config.envFile }
+  const settings = { enabled_at, codex_home: codexHome, env_file: config.envFile, ...(rule_snapshot_id ? { rule_snapshot_id } : {}) }
   await writeJson(manifestPath, { hooks_path: hooksPath, settings, disabled: !enabled, mode: 'user-declaration' })
   return { status: enabled ? 'installed' : 'uninstalled', mode: 'user-declaration', hooks_path: hooksPath, skills, enabled_at, settings }
 }
 
-async function configureUserSkill(root: string, userHome: string, kind: 'flow' | 'memo', enabled: boolean) {
-  const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`), target = resolve(userHome, '.agents/skills', name)
-  const prior = await lstat(target).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
-  if (!enabled) {
-    if (prior && await ownedSkill(target, kind)) await rm(target, { recursive: true, force: true })
-    return target
+/** A rule snapshot records installation configuration, not whether an agent loaded it. */
+async function saveRuleSnapshot(root: string, config: { dataDir: string }) {
+  const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { version: string }
+  const files = (await Promise.all(userSkillKinds.map(async kind => {
+    const directory = resolve(root, `packages/${kind}/skills/jth-${kind}`)
+    const entries = await readdir(directory, { recursive: true, withFileTypes: true })
+    return Promise.all(entries.filter(entry => entry.isFile()).map(async entry => {
+      const path = resolve(entry.parentPath, entry.name), text = await readFile(path, 'utf8')
+      return { path: relative(root, path), text, sha256: hash(text) }
+    }))
+  }))).flat().sort((left, right) => left.path.localeCompare(right.path))
+  const content = { schemaVersion: 1, packageVersion: manifest.version, files }
+  const id = hash(JSON.stringify(content)), snapshot = { id, ...content }
+  const path = resolve(codexDirectory(config), 'rule-snapshots', `${id}.json`)
+  const existing = await readJson(path)
+  if (existing !== undefined) {
+    if (JSON.stringify(existing) !== JSON.stringify(snapshot)) throw new Error('规则快照 ID 已绑定不同内容；没有覆盖历史快照')
+    return id
   }
-  if (prior && !await ownedSkill(target, kind)) throw new Error(`已有 ${name} Skill 不属于 JTH；没有覆盖`)
-  await readFile(resolve(source, 'SKILL.md'), 'utf8')
+  await writeJson(path, snapshot)
+  return id
+}
+
+interface UserSkillInstallation {
+  kind: UserSkillKind
+  source: string
+  projection: string
+  target: string
+  prior: Stats | null
+  projected: Stats | null
+}
+
+async function prepareUserSkillInstallation(root: string, userHome: string, kind: UserSkillKind, enabled: boolean): Promise<UserSkillInstallation> {
+  const name = `jth-${kind}`, source = resolve(root, `packages/${kind}/skills/${name}`), projection = resolve(userHome, '.agents/skills', name)
+  const managerRoot = resolve(userHome, '.skills-manager/skills')
+  const managerInfo = kind === 'analysis' ? await stat(managerRoot).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error }) : null
+  if (managerInfo && !managerInfo.isDirectory()) throw new Error('Skill Manager 的 skills 路径不是目录；没有覆盖')
+  const target = managerInfo ? resolve(managerRoot, name) : projection
+  const prior = await lstat(target).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
+  const projected = target === projection ? null : await lstat(projection).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
+  if (enabled) {
+    if (prior && !await ownedSkill(target, kind)) throw new Error(`已有 ${name} Skill 不属于 JTH；没有覆盖`)
+    if (projected?.isSymbolicLink() && resolve(dirname(projection), await readlink(projection)) !== target) throw new Error(`已有 ${name} 投影指向其他位置；没有覆盖`)
+    if (projected && !projected.isSymbolicLink() && !await ownedSkill(projection, kind)) throw new Error(`已有 ${name} Skill 不属于 JTH；没有覆盖`)
+    await readFile(resolve(source, 'SKILL.md'), 'utf8')
+  }
+  return { kind, source, projection, target, prior, projected }
+}
+
+async function applyUserSkillInstallation({ kind, source, projection, target, prior, projected }: UserSkillInstallation, enabled: boolean) {
+  if (!enabled) {
+    if (projected?.isSymbolicLink() && resolve(dirname(projection), await readlink(projection)) === target && await ownedSkill(target, kind)) await rm(projection)
+    else if (projected && !projected.isSymbolicLink() && await ownedSkill(projection, kind)) await rm(projection, { recursive: true, force: true })
+    if (prior && await ownedSkill(target, kind)) await rm(target, { recursive: true, force: true })
+    return projection
+  }
   await mkdir(dirname(target), { recursive: true })
   const temporary = `${target}.${randomUUID()}.tmp`
   try {
@@ -175,10 +231,18 @@ async function configureUserSkill(root: string, userHome: string, kind: 'flow' |
     if (prior) await rm(target, { recursive: true, force: true })
     await rename(temporary, target)
   } finally { await rm(temporary, { recursive: true, force: true }) }
-  return target
+  if (target === projection) return projection
+  await mkdir(dirname(projection), { recursive: true })
+  const temporaryProjection = `${projection}.${randomUUID()}.tmp`
+  try {
+    await symlink(target, temporaryProjection)
+    if (projected) await rm(projection, { recursive: true, force: true })
+    await rename(temporaryProjection, projection)
+  } finally { await rm(temporaryProjection, { force: true }) }
+  return projection
 }
 
-async function ownedSkill(path: string, kind: 'flow' | 'memo') {
+async function ownedSkill(path: string, kind: UserSkillKind) {
   const info = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
   if (info?.isSymbolicLink()) {
     const target = resolve(dirname(path), await readlink(path))

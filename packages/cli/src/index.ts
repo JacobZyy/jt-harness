@@ -36,6 +36,10 @@ export async function run(root: string, args = process.argv.slice(2)) {
     const { monitorMain } = await import('./monitor.ts')
     return monitorMain(root, args.slice(1), hookInput)
   }
+  if (args[0] === 'analysis') {
+    const { analysisMain } = await import('./analysis.ts')
+    return analysisMain(root, args.slice(1))
+  }
   if (['init', 'install', 'upgrade', 'doctor', 'uninstall', 'migrate'].includes(args[0])) {
     const { deliveryMain } = await import('./delivery.ts')
     return deliveryMain(root, args, hookInput)

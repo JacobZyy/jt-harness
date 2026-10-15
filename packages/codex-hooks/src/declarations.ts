@@ -10,6 +10,8 @@ import type { Capture, CaptureSettings } from './capture.ts'
 import { readTranscript, transcriptIdentity } from './transcript.ts'
 import { stageRecord } from './evidence.ts'
 import type { CapturePaths } from './evidence.ts'
+import { declarationObservation, declarationTurnUsage } from './declaration-observation.ts'
+import type { DeclarationObservation } from './declaration-observation.ts'
 
 async function jsonFiles(directory: string) {
   try { return (await readdir(directory)).filter(file => file.endsWith('.json')).map(file => resolve(directory, file)) }
@@ -20,10 +22,6 @@ async function jsonFiles(directory: string) {
 export async function captureDeclaration(input: unknown, settings: CaptureSettings, config: CapturePaths) {
   const event = hookEventSchema.parse(input)
   if (event.hook_event_name !== 'Stop' || event.agent_id) return null
-  if (event.last_assistant_message !== undefined && !event.last_assistant_message.includes(declarationMarker)) return null
-  if (event.last_assistant_message !== undefined) {
-    try { if (!parseDeclaration(event.last_assistant_message)) return null } catch { /* Keep malformed declarations for background diagnostics. */ }
-  }
   return captureEvent(event, settings, config, 'declaration-inbox')
 }
 
@@ -63,20 +61,29 @@ function sourceText(message: Submission['messages'][number]) {
   return marker < 0 ? message.text : message.text.slice(0, marker)
 }
 
-async function prepareDeclaration(capture: Capture, config: CapturePaths) {
+async function prepareDeclaration(capture: Capture, config: CapturePaths, observation: DeclarationObservation) {
   const { snapshot, event, settings } = capture
   if (!snapshot) throw new Error('声明缺少已保留的来源文件；等待有效的 Stop 来源')
   const identity = await transcriptIdentity(snapshot.path, snapshot.end)
   if (identity.id !== event.session_id || identity.parent) throw new Error('声明来源不是当前主会话')
   const options = { path: snapshot.path, start: 0, end: snapshot.end, sessionId: event.session_id, child: false, since: settings.enabled_at }
   let last: { start: number, end: number, messages: Submission['messages'], text: string } | undefined
+  let turnStart: number | undefined
   for await (const row of readTranscript(options)) {
+    if (row.messages[0]?.role === 'user') turnStart = row.end
     if (row.messages[0]?.role === 'assistant') last = { ...row, text: row.messages.map(message => message.text).join('') }
   }
+  observation.turn_usage = await declarationTurnUsage(capture, turnStart)
   if (!last) return null
+  observation.final_message = { message_ids: last.messages.map(message => message.message_id), start: last.start, end: last.end }
   if (event.last_assistant_message !== undefined && event.last_assistant_message !== last.text) throw new Error('Stop 回复与已落盘日志尚不一致；保留事件等待恢复')
-  const declaration = parseDeclaration(last.text)
+  const declaration = (() => {
+    try { return parseDeclaration(last.text) }
+    catch (error) { observation.declaration = 'invalid'; throw error }
+  })()
+  observation.declaration = declaration ? 'present' : 'missing'
   if (!declaration) return null
+  observation.decision = declaration.decision ?? null
   const quotes = new Set(declaration.items.flatMap(item => item.confirmation_quote ? [item.quote, item.confirmation_quote] : [item.quote]))
   const matches = new Map<string, Submission['messages']>()
   const recalledIds = new Set<string>()
@@ -158,7 +165,11 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths) {
     }
     drafts.push(draft)
   }
-  return Promise.all(drafts.map(draft => stageRecord(config, draft, true)))
+  if (!drafts.length) return null
+  const staged = await Promise.all(drafts.map(draft => stageRecord(config, draft, true)))
+  observation.stage = 'staged'
+  observation.submission_ids = staged.map(record => record.submission_id)
+  return staged
 }
 
 function workspaceScope(workspaces: NonNullable<CaptureSettings['workspaces']>) {
@@ -172,15 +183,20 @@ export async function collectDeclarations(config: CapturePaths) {
   for (const file of await jsonFiles(resolve(codexDirectory(config), 'declaration-inbox'))) {
     const capture = captureSchema.parse(await readJson(file))
     if (!matchesConfigFile(config, capture.settings.env_file)) continue
+    const observation = declarationObservation(capture)
     try {
-      const staged = await prepareDeclaration(capture, config)
-      await writeJson(resolve(codexDirectory(config), 'declaration-events', `${capture.id}.json`), { capture, result: staged ?? { status: 'skipped' } })
+      const staged = await prepareDeclaration(capture, config, observation)
+      observation.processed_at = new Date().toISOString()
+      await writeJson(resolve(codexDirectory(config), 'declaration-events', `${capture.id}.json`), { capture, result: staged ?? { status: 'skipped' }, observation })
       await unlink(file)
       await unlink(resolve(codexDirectory(config), 'declaration-errors', `${capture.id}.json`)).catch(error => { if (error.code !== 'ENOENT') throw error })
       if (staged) received++; else skipped++
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      await writeJson(resolve(codexDirectory(config), 'declaration-errors', `${capture.id}.json`), { capture, error: message })
+      observation.stage = 'failed'
+      observation.error = message
+      observation.processed_at = new Date().toISOString()
+      await writeJson(resolve(codexDirectory(config), 'declaration-errors', `${capture.id}.json`), { capture, error: message, observation })
       await unlink(file)
       errors.push({ event_id: capture.id, error: message })
     }

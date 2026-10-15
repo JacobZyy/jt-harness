@@ -18,8 +18,11 @@ export const declarationSchema = z.strictObject({
     change: z.strictObject({ kind: z.enum(['correction', 'supplement', 'conflict']), target: z.uuid() }).optional(),
   })).max(3),
   used: z.array(z.uuid()).max(10).optional(),
+  decision: z.strictObject({ action: z.enum(['record', 'skip']), reason: z.string().trim().min(1).max(240) }).optional(),
 }).superRefine((value, context) => {
-  if (!value.items.length && !value.used?.length) context.addIssue({ code: 'custom', message: '声明需要新事实或实际采用的记忆 ID' })
+  if (!value.items.length && !value.used?.length && value.decision?.action !== 'skip') context.addIssue({ code: 'custom', message: '声明需要新事实或实际采用的记忆 ID' })
+  if (value.decision?.action === 'skip' && value.items.length) context.addIssue({ code: 'custom', message: 'skip 决定不能包含新事实；实际采用的记忆可保留 used' })
+  if (value.decision?.action === 'record' && !value.items.length) context.addIssue({ code: 'custom', message: 'record 决定必须包含新事实' })
   if (value.used && new Set(value.used).size !== value.used.length) context.addIssue({ code: 'custom', message: '采用的记忆 ID 不得重复' })
   if (value.items.reduce((count, item) => count + Array.from(item.text).length, 0) > 500) {
     context.addIssue({ code: 'custom', message: '记忆正文合计超过 500 字符；保留原声明，不自动重写' })

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { appendFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { sessionWorkspaceContext } from './workspace.ts'
-import { captureSettingsSchema, readJson, userInstallationPath } from './capture.ts'
+import { captureSettingsSchema, codexDirectory, hash, readJson, userInstallationPath } from './capture.ts'
 import { cleanupProjectInstallation, configureUserHooks, hookCommand, legacyCleanupCommand, legacyCleanupMarker, mergeHooks, ownsHook, quote } from './install.ts'
 import { captureDeclaration, collectDeclarations, rememberEntryRead } from './declarations.ts'
 import { readEvidence } from './evidence.ts'
@@ -81,7 +81,7 @@ test('user installation preserves third-party same-status hooks and copies refer
     assert.equal(document.hooks.Stop.flatMap((group: { hooks: unknown[] }) => group.hooks).length, 3)
     assert((await readFile(resolve(f.userHome, '.agents/skills/jth-memo/references/declarations.md'), 'utf8')).includes('workspaces'))
     assert((await readFile(resolve(f.userHome, '.agents/skills/jth-flow/references/acceptance.md'), 'utf8')).includes('任务验收'))
-    for (const kind of ['memo', 'flow']) {
+    for (const kind of ['memo', 'flow', 'analysis']) {
       const path = resolve(f.userHome, '.agents/skills', `jth-${kind}`, 'SKILL.md')
       const skill = await readFile(path, 'utf8')
       for (const link of skill.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
@@ -94,6 +94,151 @@ test('user installation preserves third-party same-status hooks and copies refer
     await configureUserHooks(root, f.config, f.home, false, f.userHome)
     assert.deepEqual(JSON.parse(await readFile(installed.hooks_path, 'utf8')), teamConfig)
     assert.deepEqual(mergeHooks({ hooks: { Stop: [{ hooks: [unrelated] }] } }, undefined, { marker: unrelated.statusMessage, events: ['Stop'] }), { hooks: { Stop: [{ hooks: [unrelated] }] } })
+  } finally { await f.cleanup() }
+})
+
+test('analysis Skill uses the existing Skill Manager canonical directory and preserves foreign projections', async () => {
+  const f = await fixture()
+  const manager = resolve(f.userHome, '.skills-manager/skills'), canonical = resolve(manager, 'jth-analysis'), projection = resolve(f.userHome, '.agents/skills/jth-analysis')
+  try {
+    await mkdir(manager, { recursive: true })
+    await configureUserHooks(root, f.config, f.home, true, f.userHome)
+    assert((await lstat(projection)).isSymbolicLink())
+    assert((await lstat(canonical)).isDirectory())
+    assert.equal(await realpath(projection), canonical)
+    assert((await readFile(resolve(projection, 'SKILL.md'), 'utf8')).includes('jth analysis'))
+    for (const kind of ['flow', 'memo']) assert((await lstat(resolve(f.userHome, '.agents/skills', `jth-${kind}`))).isDirectory())
+    await configureUserHooks(root, f.config, f.home, true, f.userHome)
+    assert.equal(await realpath(projection), canonical)
+    assert.deepEqual(await readdir(manager), ['jth-analysis'])
+    await configureUserHooks(root, f.config, f.home, false, f.userHome)
+    await assert.rejects(lstat(projection), { code: 'ENOENT' })
+    await assert.rejects(lstat(canonical), { code: 'ENOENT' })
+    assert((await lstat(manager)).isDirectory())
+
+    await configureUserHooks(root, f.config, f.home, true, f.userHome)
+    const foreign = resolve(f.directory, 'foreign-analysis')
+    await mkdir(foreign)
+    await writeFile(resolve(foreign, 'SKILL.md'), '---\nname: foreign-analysis\n---\nKeep this Skill.\n')
+    await rm(projection)
+    await symlink(foreign, projection)
+    await assert.rejects(configureUserHooks(root, f.config, f.home, true, f.userHome), /投影指向其他位置/)
+    await configureUserHooks(root, f.config, f.home, false, f.userHome)
+    assert.equal(await realpath(projection), foreign)
+    assert.equal(await readFile(resolve(foreign, 'SKILL.md'), 'utf8'), '---\nname: foreign-analysis\n---\nKeep this Skill.\n')
+  } finally { await f.cleanup() }
+})
+
+test('analysis installation refuses unrelated canonical content and uninstall preserves it', async () => {
+  const f = await fixture()
+  const canonical = resolve(f.userHome, '.skills-manager/skills/jth-analysis'), projection = resolve(f.userHome, '.agents/skills/jth-analysis')
+  try {
+    await mkdir(canonical, { recursive: true })
+    await mkdir(dirname(projection), { recursive: true })
+    const foreign = '---\nname: independent-analysis\n---\nIndependent Skill content.\n'
+    await writeFile(resolve(canonical, 'SKILL.md'), foreign)
+    await symlink(canonical, projection)
+    await assert.rejects(configureUserHooks(root, f.config, f.home, true, f.userHome), /不属于 JTH/)
+    assert.equal(await readFile(resolve(canonical, 'SKILL.md'), 'utf8'), foreign)
+    await configureUserHooks(root, f.config, f.home, false, f.userHome)
+    assert.equal(await realpath(projection), canonical)
+    assert.equal(await readFile(resolve(canonical, 'SKILL.md'), 'utf8'), foreign)
+  } finally { await f.cleanup() }
+})
+
+test('installation preserves content-addressed rule history and does not claim the rules were loaded', async () => {
+  const f = await fixture()
+  const source = resolve(f.directory, 'source'), snapshots = resolve(codexDirectory(f.config), 'rule-snapshots')
+  try {
+    await mkdir(source)
+    for (const kind of ['flow', 'memo', 'analysis']) await cp(resolve(root, `packages/${kind}/skills/jth-${kind}`), resolve(source, `packages/${kind}/skills/jth-${kind}`), { recursive: true })
+    await writeFile(resolve(source, 'package.json'), JSON.stringify({ version: '1.0.0' }))
+    const first = await configureUserHooks(source, f.config, f.home, true, f.userHome)
+    assert.match(first.settings.rule_snapshot_id!, /^[0-9a-f]{64}$/)
+    const original = await readFile(resolve(snapshots, `${first.settings.rule_snapshot_id}.json`), 'utf8')
+    const snapshot = JSON.parse(original)
+    const { id, ...content } = snapshot
+    assert.equal(hash(JSON.stringify(content)), id)
+    assert.equal(snapshot.packageVersion, '1.0.0')
+    for (const kind of ['flow', 'memo', 'analysis']) assert(snapshot.files.some((file: { path: string }) => file.path === `packages/${kind}/skills/jth-${kind}/SKILL.md`))
+    for (const file of snapshot.files) assert.equal(file.sha256, hash(file.text))
+    assert.equal(snapshot.loaded, undefined)
+    const same = await configureUserHooks(source, f.config, f.home, true, f.userHome)
+    assert.equal(same.settings.rule_snapshot_id, first.settings.rule_snapshot_id)
+    await writeFile(resolve(snapshots, `${first.settings.rule_snapshot_id}.json`), 'null\n')
+    await assert.rejects(configureUserHooks(source, f.config, f.home, true, f.userHome), /没有覆盖历史快照/)
+    assert.equal(await readFile(resolve(snapshots, `${first.settings.rule_snapshot_id}.json`), 'utf8'), 'null\n')
+    await writeFile(resolve(snapshots, `${first.settings.rule_snapshot_id}.json`), original)
+    await writeFile(resolve(source, 'package.json'), JSON.stringify({ version: '1.1.0' }))
+    await appendFile(resolve(source, 'packages/analysis/skills/jth-analysis/SKILL.md'), '\nNew source rule.\n')
+    const updated = await configureUserHooks(source, f.config, f.home, true, f.userHome)
+    assert.notEqual(updated.settings.rule_snapshot_id, first.settings.rule_snapshot_id)
+    assert.equal(await readFile(resolve(snapshots, `${first.settings.rule_snapshot_id}.json`), 'utf8'), original)
+    assert.equal((await readdir(snapshots)).length, 2)
+    await configureUserHooks(source, f.config, f.home, false, f.userHome)
+    assert.equal((await readdir(snapshots)).length, 2)
+  } finally { await f.cleanup() }
+})
+
+test('upgrade preflight leaves installed rules, hooks and manifest unchanged for foreign projections or conflicting snapshots', async () => {
+  const f = await fixture()
+  const source = resolve(f.directory, 'source'), manager = resolve(f.userHome, '.skills-manager/skills'), projection = resolve(f.userHome, '.agents/skills/jth-analysis')
+  const snapshots = resolve(codexDirectory(f.config), 'rule-snapshots'), manifestPath = userInstallationPath(f.config, f.home), hooksPath = resolve(f.home, 'hooks.json')
+  try {
+    await mkdir(source)
+    await mkdir(manager, { recursive: true })
+    for (const kind of ['flow', 'memo', 'analysis']) await cp(resolve(root, `packages/${kind}/skills/jth-${kind}`), resolve(source, `packages/${kind}/skills/jth-${kind}`), { recursive: true })
+    await writeFile(resolve(source, 'package.json'), JSON.stringify({ version: '1.0.0' }))
+    const installed = await configureUserHooks(source, f.config, f.home, true, f.userHome)
+    const paths = ['flow', 'memo', 'analysis'].map(kind => resolve(f.userHome, `.agents/skills/jth-${kind}/SKILL.md`))
+    const before = await Promise.all(paths.map(path => readFile(path, 'utf8')))
+    const hooks = await readFile(hooksPath, 'utf8'), manifest = await readFile(manifestPath, 'utf8')
+    const snapshot = JSON.parse(await readFile(resolve(snapshots, `${installed.settings.rule_snapshot_id}.json`), 'utf8')) as { files: { path: string, text: string, sha256: string }[] }
+    const memoPath = 'packages/memo/skills/jth-memo/SKILL.md'
+    await appendFile(resolve(source, memoPath), '\nChanged Memo source before rejected upgrade.\n')
+    await writeFile(resolve(source, 'package.json'), JSON.stringify({ version: '1.1.0' }))
+    const memoText = await readFile(resolve(source, memoPath), 'utf8')
+    const foreign = resolve(f.directory, 'foreign')
+    await mkdir(foreign)
+    await writeFile(resolve(foreign, 'SKILL.md'), '---\nname: unrelated\n---\nKeep external content.\n')
+    await rm(projection)
+    await symlink(foreign, projection)
+    await assert.rejects(configureUserHooks(source, f.config, f.home, true, f.userHome), /投影指向其他位置/)
+    assert.deepEqual(await Promise.all(paths.slice(0, 2).map(path => readFile(path, 'utf8'))), before.slice(0, 2))
+    assert.equal(await readFile(hooksPath, 'utf8'), hooks)
+    assert.equal(await readFile(manifestPath, 'utf8'), manifest)
+    assert.equal(await realpath(projection), foreign)
+    await rm(projection)
+    await symlink(resolve(manager, 'jth-analysis'), projection)
+    const content = { schemaVersion: 1, packageVersion: '1.1.0', files: snapshot.files.map(file => file.path === memoPath ? { ...file, text: memoText, sha256: hash(memoText) } : file) }
+    const prospectiveId = hash(JSON.stringify(content)), prospectivePath = resolve(snapshots, `${prospectiveId}.json`)
+    await writeFile(prospectivePath, 'null\n')
+    await assert.rejects(configureUserHooks(source, f.config, f.home, true, f.userHome), /没有覆盖历史快照/)
+    assert.deepEqual(await Promise.all(paths.map(path => readFile(path, 'utf8'))), before)
+    assert.equal(await readFile(hooksPath, 'utf8'), hooks)
+    assert.equal(await readFile(manifestPath, 'utf8'), manifest)
+    assert.equal(await readFile(prospectivePath, 'utf8'), 'null\n')
+  } finally { await f.cleanup() }
+})
+
+test('an update failure after preflight invalidates the previous rule snapshot instead of mislabeling new rules', async () => {
+  const f = await fixture()
+  const source = resolve(f.directory, 'source'), manifestPath = userInstallationPath(f.config, f.home)
+  try {
+    await mkdir(source)
+    for (const kind of ['flow', 'memo', 'analysis']) await cp(resolve(root, `packages/${kind}/skills/jth-${kind}`), resolve(source, `packages/${kind}/skills/jth-${kind}`), { recursive: true })
+    await writeFile(resolve(source, 'package.json'), JSON.stringify({ version: '1.0.0' }))
+    const installed = await configureUserHooks(source, f.config, f.home, true, f.userHome)
+    await appendFile(resolve(source, 'packages/memo/skills/jth-memo/SKILL.md'), '\nNew rule in an interrupted installation.\n')
+    await writeFile(resolve(source, 'package.json'), JSON.stringify({ version: '1.1.0' }))
+    await writeFile(resolve(f.home, 'hooks.json'), '{"hooks":false}\n')
+    await assert.rejects(configureUserHooks(source, f.config, f.home, true, f.userHome), /已有 Hook 配置无效/)
+    assert((await readFile(resolve(f.userHome, '.agents/skills/jth-memo/SKILL.md'), 'utf8')).includes('New rule in an interrupted installation.'))
+    const manifest = await readJson(manifestPath) as { settings: { rule_snapshot_id?: string, env_file: string }, disabled: boolean }
+    assert.equal(manifest.settings.rule_snapshot_id, undefined)
+    assert.equal(manifest.settings.env_file, f.config.envFile)
+    assert.equal(manifest.disabled, false)
+    assert(await readJson(resolve(codexDirectory(f.config), 'rule-snapshots', `${installed.settings.rule_snapshot_id}.json`)))
   } finally { await f.cleanup() }
 })
 

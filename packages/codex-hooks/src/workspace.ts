@@ -1,6 +1,7 @@
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod'
+import { canonicalFilePath } from './source-path.ts'
 
 const inputSchema = z.object({ cwd: z.string().refine(isAbsolute), session_id: z.string().min(1).max(200).optional(), transcript_path: z.string().refine(isAbsolute).nullable().optional(), path: z.string().refine(isAbsolute).optional() })
 const inside = (root: string, path: string) => {
@@ -36,7 +37,7 @@ export async function sessionTranscriptPath(input: unknown, codexHome: string): 
   const roots = [resolve(home, 'sessions'), resolve(home, 'archived_sessions')]
   const requested = event.transcript_path ?? event.path
   if (requested) {
-    const path = await realpath(requested)
+    const path = await canonicalFilePath(requested)
     if (!roots.some(root => inside(root, path))) throw new Error('会话文件必须位于指定 CODEX_HOME 的 sessions 或 archived_sessions 中')
     await sessionMetadata(path, event.session_id)
     return path
@@ -45,7 +46,7 @@ export async function sessionTranscriptPath(input: unknown, codexHome: string): 
     const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error })
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.jsonl') || !entry.name.includes(event.session_id)) continue
-      const path = await realpath(resolve(entry.parentPath, entry.name))
+      const path = await canonicalFilePath(resolve(entry.parentPath, entry.name))
       if (!inside(root, path)) throw new Error('会话文件超出指定 CODEX_HOME')
       const meta = await sessionMetadata(path)
       if (meta.id === event.session_id) return path

@@ -1,6 +1,6 @@
 # jt-harness · jth
 
-`jth` 是本地 TypeScript CLI，提供长任务流程控制与长期记忆。`jth flow` 用短 Skill 配合 Codex 原生 Goal、任务列表、会话恢复和项目测试；`jth memo` 接收主会话末尾的短记忆声明，只将新记忆正文发送给 Embedding API，记忆和来源保存在 PostgreSQL + pgvector。
+`jth` 是本地 TypeScript CLI，提供长任务流程控制、长期记忆和按需执行分析。`jth flow` 用短 Skill 配合 Codex 原生 Goal、任务列表、会话恢复和项目测试；`jth memo` 接收主会话末尾的短记忆声明，只将新记忆正文发送给 Embedding API，记忆和来源保存在 PostgreSQL + pgvector；`jth analysis` 冻结用户选定的真实记录，由独立分析聊天评审并保存可直接阅读的报告。
 
 本版本直接在进程内调用业务模块，不提供 HTTP 服务，不依赖 `jt-cli`。默认记忆路径不启动 DSH，不发送聊天记录给第二个提炼或比较模型。
 
@@ -14,13 +14,13 @@
 
 当前操作说明与历史设计的入口见[文档导航](docs/README.md)。历史报告中的“当前”“默认”和未完成项只描述报告当时的版本，不作为今天的安装或执行指令。
 
-记忆读取现支持启动/恢复后的有限关键词线索、`memo recall` 本地召回、`memo search` 混合检索、`memo read --level summary|evidence|full` 分层证据，以及末尾声明 `used` 采用反馈。反馈只记录实际采用，不是质量评分；Phoenix 评分接入后置。操作、预算和升级边界见[记忆读取](docs/memory-retrieval.md)。
+记忆读取现支持启动/恢复后的有限关键词线索、`memo recall` 本地召回、`memo search` 混合检索、`memo read --level summary|evidence|full` 分层证据，以及末尾声明 `used` 采用反馈。反馈是 Agent 的采用声明，不是质量评分。日常只采集；用户要求评分时使用[按需执行分析](docs/analysis.md)，不依赖 Phoenix。读取操作见[记忆读取](docs/memory-retrieval.md)。
 
 ## 模块与运行模式
 
-生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.ts` 保持稳定。
+生产代码分为 `packages/flow`（原生流程 Skill 与历史任务兼容代码）、`packages/memo`（声明契约、存储、队列、历史 DSH Agent）、`packages/analysis`（证据与判断契约、确定性评分、报告和分析 Skill）、`packages/codex-hooks`（Hook 适配与来源绑定）、`packages/cli`（命令和进程编排）。根 `bin/jth.ts` 保持稳定。
 
-默认使用主会话声明：安装用户级 `jth-memo` Skill，`UserPromptSubmit` 注入短入口，Agent 按需读取规则并在有值得保留的结论时输出最多三条短声明。多目录条目可选择真实绑定目录；后台按归属拆批，共同结论只保存一条并关联多个分组。Stop Hook 保存事件，后台 `memo work` 绑定原始证据、精确去重并生成向量。没有声明就不调用 Embedding；Hook 不等待后台处理。
+默认使用主会话声明：安装用户级 `jth-memo` Skill，`UserPromptSubmit` 注入短入口，Agent 收口时记录短 `record/skip` 决定与实际理由；有新事实时附最多三条短声明。多目录条目可选择真实绑定目录；后台按归属拆批，共同结论只保存一条并关联多个分组。Stop Hook 保存真实来源与观察，后台 `memo work` 绑定证据、精确去重并为新事实生成向量。没有新事实不调用 Embedding；没有声明或决定时保留未知，Hook 不等待后台处理或评分。
 
 用户以“可以，你做吧”等短回复采纳前文方案时，主会话保留已确认决策，并在收口时用 `user_confirmed` 声明；`quote` 与 `confirmation_quote` 分别绑定助手方案和后续用户确认。后台校验来源角色及顺序，语义关联仍由主会话核对。未确认方案可作为候选保存，批准实施不代表已经完成。详见 [声明契约](docs/memory-declarations.md)。
 
@@ -36,7 +36,7 @@
 jth flow status
 ```
 
-用户级入口保留 Memo Stop 声明、`jth-flow` 和 `jth-memo` Skill，以及 `UserPromptSubmit` 短入口。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 读取自动目录范围、本机配置和最近一次入口输出，不返回旧目标、阶段或缓存记忆。入口回执位于用户数据目录，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
+用户级入口保留 Memo Stop 声明、`jth-flow`、`jth-memo` 和 `jth-analysis` Skill，以及 `UserPromptSubmit` 短入口。Analysis Skill 只在用户要求分析时使用。不会连接或初始化 `jt_flow`，不会创建第二份任务列表。`status/context` 读取自动目录范围、本机配置和最近一次入口输出，不返回旧目标、阶段或缓存记忆。入口回执位于用户数据目录，不保存用户正文；实际任务完成仍需主 Agent 核对交付和验收证据。
 
 Workflow Policy 默认 adaptive：普通问答直接回答，有界小改直接执行并做聚焦验证；多阶段或明确要求规划时走 planned，受信任入口明确要求主 Agent 启动或复用一个 Codex 原生 Goal，并用 `update_plan` 记录进度。用户明确停用 Goal 时不创建。`jth flow policy` 分别准备 Goal 和计划参数，不调用原生工具或保存任务；`plan.goal` 只是文本，更新计划不会自动启动 Goal。用户确认、补充及恢复沿用同一目标。工具未暴露时说明具体缺失，不伪造原生状态。配置与调用约定见 [Workflow Policy](docs/workflow-policy.md)。
 
@@ -53,6 +53,21 @@ jth flow legacy migrate
 ```
 
 旧版本已经加载的 `flow hook`、`flow sync` 和后台 `flow recall --request` 入口会安静跳过，不重放历史事件或启动旧任务召回。全局卸载使用 `jth uninstall`，Memo 数据和历史任务保留。详细说明见 [原生流程与验证](docs/flow-control.md)；旧运行器见 [历史 Flow](docs/flow-legacy.md)。
+
+## 按需分析真实执行
+
+日常只采集执行证据、Memo 决定与后续结果、单次写入用量，不定时或自动评分。想检查目标是否偏移、交付是否充分、记忆是否漏记或误用时，开启独立 Codex 分析聊天并使用 `$jth-analysis`。Flow 与 Memo 共用 LLM-as-a-judge 方法；原生分析聊天承担 judge，CLI 不另调模型 API，也不重跑业务任务或 A/B 测试。
+
+```sh
+jth analysis prepare --session source-session-id --output /absolute/path/to/analysis-run
+jth analysis evidence /absolute/path/to/analysis-run --id evidence-id
+jth analysis report /absolute/path/to/analysis-run --judgments /absolute/path/to/judgments.json
+jth analysis usage --session source-session-id
+```
+
+将示例 ID 换成真实值。prepare 保存 `bundle.json`、`judgment-template.json` 和 `judgment-schema.json`；分析聊天先提取并核对完整有效要求，再依据当时规则和原文填写 judgments，report 校验并确定性计分，保存 `report.md` 与 `report.json`。报告分别显示要求与已评项覆盖、Flow/Memo 分、阶段与未知项、严重错误和贡献证据；贡献是观察到的帮助或负担，不能当作因果助力百分比。
+
+不设置 Token 上限或按预算截断证据。单次写入用量使用实际观测值，`null` 不等于 0；周边回合用量不冒充声明专属成本。目录/时间选择、使用步骤与计分口径见[按需执行分析](docs/analysis.md)。
 
 ## 当前本机使用
 
@@ -225,9 +240,9 @@ jth memo codex uninstall
 
 Memo 安装 `Stop` 声明入口，以及 `SessionStart` / `UserPromptSubmit` 有限线索入口。重新安装会替换本工具原来的六阶段捕获定义。子 Agent 不直接提交记忆，由主 Agent 核对后声明；原生 Flow 另用 `UserPromptSubmit` 注入短流程提示，不恢复旧任务生命周期 Hook。
 
-Hook 检查本轮最终回复，只保存含声明的本地交接记录并启动独立 worker，超时为 3 秒。Hook 内不连接数据库、不调用模型、不等待 Embedding。来源以硬链接保留，文件边界和原始位置一并记录；声明解析和引文匹配在后台本地执行。只有新记忆正文发送到 Embedding API。
+Hook 保存本轮最终回复的来源与本地交接记录并启动独立 worker，超时为 3 秒。后台记录有无声明、明确决定和实际后续结果；没有声明的原因保持未知。Hook 内不连接数据库、不调用模型、不等待 Embedding 或评分。来源以硬链接保留，文件边界和原始位置一并记录；声明解析和引文匹配在后台本地执行。只有新记忆正文发送到 Embedding API。
 
-Agent 在正常回复末尾按固定格式输出最多三条事实声明，正文合计最多 500 字符，每条附最多 240 字符的原文短引文。来源 ID、时间、存储字段与已读取的旧条目版本由程序补齐。实际采用的已读 ID 可放入 `used`；没有新结论时允许 `items: []` 只提交反馈，反馈本身不生成向量。没有新事实或采用反馈就不输出声明。代码块中的格式示例不会被当成记忆执行。
+Agent 在正常回复末尾按固定格式输出短 `decision`，包含 `record/skip` 及实际理由。record 至少附一条事实；正文合计最多 500 字符，每条附最多 240 字符的原文短引文，最多三条。来源 ID、时间、存储字段与已读取的旧条目版本由程序补齐。实际采用的已读 ID 可放入 `used`；没有新结论时用 skip 和 `items: []`，可保留采用反馈，不生成新向量。旧声明没有 decision 仍兼容，决定和理由保持未知。代码块中的格式示例不会被当成记忆执行。
 
 `~/.jth/codex/` 保存交接记录、来源硬链接、证据、声明回执、读取版本和安装备份。JSON 文件权限为 0600，目录为 0700；硬链接继承原文件权限。解析异常保存在 `declaration-errors/`，通过 `memo codex status` 查看，不阻塞回复，不调用模型修复。数据库尚未接收的有效声明留在 `records/`，恢复数据库后用 `memo work` 继续投递。
 

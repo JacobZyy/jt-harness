@@ -136,7 +136,7 @@ test('declarations preserve source, deduplicate across turns, apply explicit rev
   try {
     await prepareDatabase(pool, true)
     const beforeJobs = (await pool.query('SELECT count(*)::int AS count FROM jt_memo.jobs')).rows[0].count
-    assert.equal(await capture('没有新增结论。'), null)
+    assert(await capture('没有新增结论。'), 'Every primary Stop keeps collection evidence, including replies without declarations')
     assert.equal((await accept()).length, 0)
     assert.equal(calls, 0)
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM jt_memo.jobs')).rows[0].count, beforeJobs)

@@ -48,7 +48,7 @@ export async function codexMain(root: string, args: string[], hookInput?: unknow
     }
     const context = await automaticWorkspaceScope(input, home)
     const workspace = context.primary ?? context.cwd
-    const installed = await readJson(userInstallationPath(config, home)) as { disabled?: boolean, settings?: { enabled_at: string, env_file: string } } | undefined
+    const installed = await readJson(userInstallationPath(config, home)) as { disabled?: boolean, settings?: { enabled_at: string, env_file: string, rule_snapshot_id?: string } } | undefined
     if (command === 'status') {
       process.stdout.write(JSON.stringify({ ...await captureStatus(config), cwd: context.cwd, workspace, workspaces: context.workspaces,
         memo_scope: context.scope, user_installation: installed ?? null }, null, 2) + '\n')
@@ -58,7 +58,7 @@ export async function codexMain(root: string, args: string[], hookInput?: unknow
     if (!explicit && (installed?.disabled || !installed?.settings)) throw new Error('用户级 Memo Hook 未安装或已卸载；运行 jth init')
     if (!explicit && !matchesConfigFile(config, installed!.settings!.env_file)) throw new Error('用户级 Memo Hook 配置不匹配；运行 jth init')
     const settings = captureSettingsSchema.parse({ workspace, codex_home: home, env_file: config.envFile,
-      enabled_at: values.since ?? installed?.settings?.enabled_at, workspaces: explicit && values.project
+      enabled_at: values.since ?? installed?.settings?.enabled_at, rule_snapshot_id: installed?.settings?.rule_snapshot_id, workspaces: explicit && values.project
         ? [{ path: context.cwd, project_ids: values.project, business_ids: values.business ?? [] }] : context.workspaces,
       scope: explicit && values.project ? { project_ids: values.project, business_ids: values.business ?? [] } : context.scope })
     if (command === 'cue') {
