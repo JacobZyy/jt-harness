@@ -128,6 +128,6 @@ jth analysis usage --session source-session-id
 jth analysis usage --workspace /absolute/project-root --since 2026-10-15T00:00:00+08:00 --until 2026-10-16T00:00:00+08:00
 ```
 
-逐次写入保留实际索引尝试及 Embedding 请求的用量、结果和失败状态。供应方没有返回 Token 用量时保留 `null`；重试、失败与复用已有索引分别保留，不能用最后一次成功覆盖之前的尝试。
+逐次写入保留实际索引尝试及 Embedding 请求的用量、结果和失败状态。`job_attempt` 标识队列执行，`embedding_attempts[].request_attempt` 标识该文本在本次执行中的真实 HTTP 请求；自动重试最多 5 次，每次失败及最终结果分别保留。请求日志同时记录脱敏 endpoint、HTTP 状态、服务端 request ID、错误类别与代码、耗时及重试等待，详见[Embedding 失败与诊断](memory-declarations.md#embedding-失败与诊断)。供应方没有返回 Token 用量时保留 `null`；重试、失败与复用已有索引分别保留，不能用最后一次成功覆盖之前的尝试。
 
 周边回合用量描述整轮 Codex 执行，不等于生成某条记忆声明的额外成本。声明专属 Token 无法观测时为 `null`；默认后台没有提炼模型调用，其调用数与输入/输出 Token 可以明确为 0。`null` 与 0 不可互换，缓存输入已包含在输入用量中，不再次相加。本版只记录用量，不按 Token 上限拒绝写入或截断分析证据，也不据此估算账单。

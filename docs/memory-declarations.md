@@ -6,9 +6,9 @@
 
 ```mermaid
 flowchart TD
-    A["主会话完成本轮任务"] --> B{"有新记忆？"}
-    B -- 无 --> C["正常结束"]
-    B -- 有 --> D["末尾输出短声明"]
+    A["主会话完成本轮任务"] --> B{"有值得复用且尚未覆盖的内容？"}
+    B -- 无 --> C["声明 skip 与实际理由"]
+    B -- 有 --> D["声明 record 与内容本体"]
     D --> E["Stop 保存本地交接记录"]
     E --> F["后台绑定来源与去重"]
     F --> G{"精确重复？"}
@@ -16,11 +16,19 @@ flowchart TD
     G -- 否 --> I["保存记忆与索引任务"]
     I --> J["Embedding 新正文"]
     J --> K["事务发布向量与关系"]
-    J -- 失败 --> L["保留任务，索引重试"]
-    L --> J
+    J -- 暂时失败 --> L["最多 5 次退避重试"]
+    L -- 尚有次数 --> J
+    L -- 耗尽 --> M["保留失败任务"]
+    J -- 永久错误 --> M
+    M --> N["修复原因后显式 memo retry"]
+    N --> J
 ```
 
-用户级 Skill 提供声明说明，Hook 注入简短入口，不向业务仓库写入项目说明。每轮最多三条事实声明，记忆正文合计最多 500 个 Unicode 字符，每条原文引文最多 240 字符。来源 ID、时间和版本由程序补齐。项目条目可用 `workspaces` 选择真实绑定目录，省略时归入主目录；共同条目关联多个目录，只保存一次。实际采用的已读记忆可通过顶层 `used` 数组反馈，最多 10 个 ID；仅有反馈时使用 `items: []`，不新增向量任务。两类内容都没有时不输出声明。
+用户级 Skill 提供声明说明，Hook 注入简短入口，不向业务仓库写入项目说明。每轮最多三条事实声明，记忆正文合计最多 500 个 Unicode 字符，每条原文引文最多 240 字符。来源 ID、时间和版本由程序补齐。项目条目可用 `workspaces` 选择真实绑定目录，省略时归入主目录；共同条目关联多个目录，只保存一次。实际采用的已读记忆可通过顶层 `used` 数组反馈，最多 10 个 ID；仅有反馈时使用 `items: []`，不新增向量任务。没有需要新增或更正的内容时，仍声明 `skip` 与实际理由；缺少声明或旧声明没有决定时保持未知。
+
+值得后续复用、且现有有效记忆尚未覆盖的事实或决定，应记录，尤其是明确选型、职责边界和关键更正。代码、README 或聊天记录已有，不构成跳过决定及理由的依据。记忆正文保存可独立复用的内容本体、适用条件和必要理由，少重复实现细节；文档位置仅作为辅助来源。
+
+只有没有复用价值、已知有效记忆准确覆盖且无需修订，或用户明确禁止保存时，才按实际范围跳过。重复性不明时按需读取核对，不强制每轮检索。已启用 JTH Memo 后按声明规则执行，不把 Codex `.codex/memories` 文件更新限制泛化为逐次另获授权。
 
 候选建议或推断可以增加 `derived_from` UUID 数组。它只表示候选摘要的来源提示，不能把旧摘要当作事实，也不能用于 `user_statement`、`user_confirmed` 或 `tool_observation`。后台只接受本会话已经通过 `evidence` 或 `full` 读取的真实来源，自动绑定来源当前版本；不要手写版本哈希，不要用 `summary` 作为派生证据。来源必须与候选属于相同范围、仍已发布且有效，派生来源不能再依赖派生记忆；来源版本变化后候选标记 `stale`，默认不召回，也不能直接确认。
 
@@ -33,7 +41,7 @@ flowchart TD
 最终回复末尾独立一行，使用以下格式；代码块内的示例不会被处理：
 
 ```text
-<!-- jth-memory {"items":[{"text":"项目使用 pnpm 管理依赖。","scope":"project","basis":"user_statement","quote":"项目使用 pnpm"}]} -->
+<!-- jth-memory {"decision":{"action":"record","reason":"项目包管理约定需要后续复用。"},"items":[{"text":"项目使用 pnpm 管理依赖。","scope":"project","basis":"user_statement","quote":"项目使用 pnpm"}]} -->
 ```
 
 `scope` 使用已有的 `project / business / user / current_task / unspecified`。事实依据为 `user_statement / user_confirmed / tool_observation`；未确认建议可用 `assistant_proposal / agent_inference`，进入候选集合。`quote` 是此前真实消息中的短连续原文，不用声明自身作为证据。
@@ -102,10 +110,20 @@ Hook 只保存本地事件与来源指针，后台负责解析、数据库和 Em
 
 - 格式或引文无法解析：原声明和诊断保存在 `~/.jth/codex/declaration-errors/`，`memo codex status` 可见；正常回复继续，不调用模型修补。后续有明确修正时可重新声明。
 - 数据库无法接收：有效声明留在本地待投递文件，`memo work` 继续投递。
-- Embedding 失败：正文和来源已经保存，`memo retry <submission-id>` 只重试索引。
+- Embedding 失败：正文和来源已经保存；暂时故障按下节有限重试，耗尽后 `memo retry <submission-id>` 只重试索引。
 - 旧 DSH 任务：只有 `memo work --legacy`、`memo send ... --legacy` 或 `memo retry ... --legacy` 才会执行。默认后台不消费旧 DSH 队列。
 
 本次没有给实际仓库安装 Hook；实际 `.codex/hooks.json` 继续为 `{"hooks":{}}`。Flow 阶段规划、工作回执和验收通过 CLI 手动运行。
+
+## Embedding 失败与诊断
+
+每条文本首次请求失败后，网络断连、超时、HTTP 429 和 5xx 最多自动重试 5 次，总计最多 6 次请求。默认等待依次为 500、1000、2000、4000、8000 ms；服务端返回 `Retry-After` 时采用更长等待，单次最多等待 30 秒。每次请求仍使用 `EMBEDDING_TIMEOUT_MS`，默认 60 秒。调用方取消会立即停止请求或等待；鉴权、无效请求及返回模型、数量、序号或维度错误直接失败，不反复重试。已成功处理的文本不会因为同批下一条文本失败而在本次自动重试中重发。
+
+自动重试仅属于当前索引尝试，不创建新队列任务。耗尽后任务保留为 `failed`，正文保留但尚未发布；后续 worker 不会自动重新消费该失败任务。修复原因后用 `jth memo retry <submission-id>` 显式恢复。已有失败任务也需要显式重试；安装新版不会自动重放历史请求。
+
+索引尝试日志保存在数据目录的 `codex/write-usage/`，默认 `~/.jth/codex/write-usage/`。每个文件以 `job_attempt` 对应一次队列执行，`embedding_attempts` 逐次保存真实请求，包括 `text_index`、`request_attempt`、脱敏后的模型和 endpoint、开始与结束时间、`duration_ms`、`http_status`、服务端提供的 `request_id`、`error_type`、`error_code`、`error`、下一次的 `retry_delay_ms` 和实际 Token 用量。供应方没有返回的字段保留 `null`；不保存 API Key、输入正文或原始响应正文。日志写入失败不改变索引结果。
+
+先用 `jth memo status <submission-id>` 核对任务，再按日志文件中的 `submission_id` 和服务端 request ID 排查连接、限流或上游异常。字段只描述观测结果：超时或断连本身不能确定发生在网络、代理还是服务端。
 
 ## 验证结果
 

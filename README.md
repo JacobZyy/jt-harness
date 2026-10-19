@@ -248,7 +248,7 @@ Agent 在正常回复末尾按固定格式输出短 `decision`，包含 `record/
 
 重复 Stop 幂等；同范围、同资格、同有效期的精确重复正文复用已有条目和向量，新增来源通过 `declaration_sources` 关联。更正先 `memo read <旧ID>`，主 Agent 在声明中明确目标及关系；程序复用原有版本、冲突和发布事务，不另起比较 Agent。
 
-查看投递和诊断用 `jth memo codex status`，查看索引任务用 `jth memo status`，查看正文、来源与修订用 `jth memo read <id>`。Embedding 失败后执行 `jth memo retry <submission-id>`，只重试索引，不重新提炼。旧 DSH 队列保留，默认 worker 不消费。
+查看投递和诊断用 `jth memo codex status`，查看索引任务用 `jth memo status`，查看正文、来源与修订用 `jth memo read <id>`。Embedding 网络错误、超时、HTTP 429 或 5xx 在首次请求后最多自动重试 5 次；鉴权和协议错误直接失败。耗尽后任务仍保留，可执行 `jth memo retry <submission-id>`，只重试索引，不重新提炼。每次请求的脱敏诊断保存在数据目录的 `codex/write-usage/`，详见[记忆声明与索引诊断](docs/memory-declarations.md#embedding-失败与诊断)。旧 DSH 队列保留，默认 worker 不消费。
 
 当前协议及验收见 [主会话记忆声明](docs/memory-declarations.md)；此前六阶段采集记录见 [历史 Codex Hook 验证报告](docs/codex-hooks-verification.md)。
 

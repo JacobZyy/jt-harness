@@ -26,9 +26,9 @@ test('index retries keep independent write usage records without changing queue 
   }
   globalThis.fetch = (async () => succeed
     ? Response.json({ model: 'test', data: [{ index: 0, embedding: [1, 0.1] }], usage: { prompt_tokens: 5, total_tokens: 5 } })
-    : Response.json({}, { status: 429 })) as typeof fetch
+    : Response.json({}, { status: 401 })) as typeof fetch
   try {
-    await assert.rejects(processIndexJob({} as PoolClient, { ...job, attempts: 1 }, config), /HTTP 429/)
+    await assert.rejects(processIndexJob({} as PoolClient, { ...job, attempts: 1 }, config), /HTTP 401/)
     succeed = true
     assert.equal((await processIndexJob({} as PoolClient, { ...job, attempts: 2 }, config)).status, 'indexed')
     const files = await readdir(resolve(dataDir, 'codex/write-usage'))
@@ -82,4 +82,45 @@ test('a failed configuration load leaves a write attempt record before the uncha
     assert.deepEqual(record.embedding_attempts, [])
     assert(statements.some(statement => statement.includes("SET status='failed',error=$2")))
   } finally { await rm(dataDir, { recursive: true, force: true }) }
+})
+
+test('automatic HTTP retries retain all request diagnostics in one unchanged index job attempt', async () => {
+  const dataDir = await mkdtemp(resolve(tmpdir(), 'jth-index-auto-retry-'))
+  const space = { id: 'test', provider: 'test', model: 'test', dimensions: 2, input_version: 'content-v1' as const }
+  const config = { dataDir, embedding: { baseUrl: 'https://example.invalid/v1', apiKey: 'test-only', timeoutMs: 200, space } } as Config
+  const job = { id: 'declaration-auto-retry', attempts: 1, execution: { dataDir, envFile: resolve(dataDir, '.env'), space }, record_plan: { relations: [], expected_versions: {} } }
+  const originalFetch = globalThis.fetch, originalTimer = globalThis.setTimeout
+  const getSubmission = MemoStorage.prototype.getSubmission, index = MemoStorage.prototype.index
+  const entry = { id: '11111111-1111-4111-8111-111111111111', content: 'private fact', content_sha256: 'a'.repeat(64) }
+  let requests = 0, indexCalls = 0
+  MemoStorage.prototype.getSubmission = async () => ({ entries: [entry], index_receipts: [] }) as unknown as Awaited<ReturnType<typeof getSubmission>>
+  MemoStorage.prototype.index = async () => { indexCalls++; return { id: 'index-auto', space_id: space.id, status: 'indexed' } as Awaited<ReturnType<typeof index>> }
+  globalThis.setTimeout = ((...[handler, _milliseconds, ...args]: Parameters<typeof setTimeout>) => originalTimer(handler, 0, ...args)) as typeof setTimeout
+  globalThis.fetch = (async () => {
+    requests++
+    if (requests === 1) return Response.json({}, { status: 429, headers: { 'x-request-id': 'limited-request' } })
+    return Response.json({ model: 'test', data: [{ index: 0, embedding: [1, .1] }], usage: { prompt_tokens: 4, total_tokens: 4 } }, { headers: { 'x-request-id': 'complete-request' } })
+  }) as typeof fetch
+  try {
+    assert.equal((await processIndexJob({} as PoolClient, job, config)).status, 'indexed')
+    const files = await readdir(resolve(dataDir, 'codex/write-usage'))
+    assert.equal(files.length, 1)
+    const record: IndexWriteUsage = JSON.parse(await readFile(resolve(dataDir, 'codex/write-usage', files[0]), 'utf8'))
+    assert.equal(record.job_attempt, 1)
+    assert.equal(record.status, 'indexed')
+    assert.deepEqual(record.embedding_attempts.map(attempt => [attempt.entry_id, attempt.request_attempt, attempt.status, attempt.http_status, attempt.request_id]), [
+      [entry.id, 1, 'failed', 429, 'limited-request'],
+      [entry.id, 2, 'complete', 200, 'complete-request'],
+    ])
+    assert.equal(record.embedding_attempts[1].usage.prompt_tokens, 4)
+    assert(!JSON.stringify(record).includes(entry.content))
+    assert(!JSON.stringify(record).includes(config.embedding.apiKey!))
+    assert.equal(indexCalls, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    globalThis.setTimeout = originalTimer
+    MemoStorage.prototype.getSubmission = getSubmission
+    MemoStorage.prototype.index = index
+    await rm(dataDir, { recursive: true, force: true })
+  }
 })

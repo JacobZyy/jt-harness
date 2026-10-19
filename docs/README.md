@@ -16,6 +16,7 @@
 | 主动线索、混合检索、证据分层和采用反馈 | [记忆读取](memory-retrieval.md) |
 | 真实 Flow/Memo 记录的按需评分、贡献证据与单次写入用量 | [按需执行分析](analysis.md) |
 | 已实现能力和保留的后续事项 | [Rex 参考的状态对照](rex-memory-reference.md#已落地与保留的后续事项) |
+| Mem0、Letta、LangMem、Graphiti 的写入策略、来源与可借鉴边界 | [记忆写入机制调研（2026-10-19）](research/memory-write-policies.md) |
 
 Flow 不保存第二份任务进度；Memo 默认不调用 DSH。Analysis 由用户选择记录，在独立原生聊天中做 judge；CLI 只冻结、校验和计分，不自动评分或另调 judge API，不依赖 Phoenix。历史 Flow 只能通过 `jth flow legacy ...` 使用，历史 DSH 队列只在显式 `--legacy` 路径处理。
 
