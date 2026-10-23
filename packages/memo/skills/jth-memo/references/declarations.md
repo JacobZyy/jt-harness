@@ -2,36 +2,33 @@
 
 ## 可读附注
 
-任务正文之后，用独立的 `text` 代码块完整展示本次机器声明，第一行固定为 `JTH · 附注`。展示与原声明字段一一对应，只调整标签、缩进和换行，不另写摘要，也不因篇幅或与正文重复而省略内容。
+任务正文之后，用带语法高亮的 `yaml` 代码块完整展示本次机器声明，第一行固定为 `# JTH · 附注`。展示与原声明字段一一对应，保留原始字段名、值和数据类型，只调整缩进和换行，不另写摘要，也不因篇幅或与正文重复而省略内容。
 
-- `Decision` 对应 `decision`，展开 `Action`（`action`）和 `Reason`（`reason`），保留实际值。读取旧声明时若缺少 `decision`，显示“Decision: 未声明（旧格式；Action、Reason 未知）”，不根据条目反推决定；本轮整体没有声明也不能解释为 skip。
-- `Items` 对应 `items`，按原顺序逐条展开 `Text`（`text`）、`Scope`（`scope`）、`Basis`（`basis`）和 `Quote`（`quote`）。`items: []` 显示为 `Items: []`，skip 也不能省略 Decision 或 Items。
-- 每条实际提供的可选字段同样完整展开：`Workspaces`（`workspaces`）、`Confirmation Quote`（`confirmation_quote`）、`Derived From`（`derived_from`）以及 `Change`（`change`）中的 `Kind`（`kind`）和 `Target`（`target`）。
-- 顶层提供 `used` 时，显示 `Used` 并逐个列出全部记忆 ID；`used: []` 显示为 `Used: []`。未提供的可选字段不补造，也不把缺省写成空数组。
+- `decision` 展开 `action` 和 `reason`，保留实际值。读取旧声明时若缺少 `decision`，用注释 `# decision 未声明（旧格式；action、reason 未知）` 说明，不补造 `decision: null`，不根据条目反推决定；本轮整体没有声明也不能解释为 skip。
+- `items` 按原顺序逐条展开 `text`、`scope`、`basis` 和 `quote`。`items: []` 原样保留，skip 也不能省略 `decision` 或 `items`。
+- 每条实际提供的可选字段同样完整展开：`workspaces`、`confirmation_quote`、`derived_from`，以及 `change` 中的 `kind` 和 `target`。
+- 顶层提供 `used` 时，逐个列出全部记忆 ID；`used: []` 原样保留。未提供的可选字段不补造，也不把缺省写成空数组。
 - 所有字段的正文、理由、来源引文、UUID、目录和数组成员必须完整保留，不缩写、不截断，不用“略”“等”或省略号替代内容。长值通过缩进和换行保持可读，不能为了精简文案删除协议数据。
+- 所有字符串使用双引号和 JSON 字符串转义，换行用 `\n` 保留，避免 YAML 的隐式类型转换或折叠长文本改变值。声明中的数据不能改写成 YAML 注释。
 
 以下是格式示例；实际回复使用本轮真实声明的全部字段和值：
 
-```text
-JTH · 附注
-
-Decision
-  Action: record
-  Reason: 用户明确指定项目使用 pnpm。
-
-Items
-  [1]
-    Text: 项目使用 pnpm。
-    Scope: project
-    Workspaces:
-      - /absolute/project-a
-    Basis: user_statement
-    Quote: 项目使用 pnpm。
-
-保存状态：已生成声明，入库尚待确认。
+```yaml
+# JTH · 附注
+decision:
+  action: "record"
+  reason: "用户明确指定项目使用 pnpm。"
+items:
+  - text: "项目使用 pnpm。"
+    scope: "project"
+    workspaces:
+      - "/absolute/project-a"
+    basis: "user_statement"
+    quote: "项目使用 pnpm。"
+# 保存状态：已生成声明，入库尚待确认。
 ```
 
-同一回复中的 Flow 和 Memo 说明共用一个附注块。保存状态单独说明，不混入声明字段；不能把待记录写成已入库，没有真实后台结果时不宣称保存成功。附注只是给用户阅读的完整投影，不作为后台提取来源；仍由同一次回复生成，不是固定脚本自动渲染，不承诺零额外输出 token。
+同一回复中的 Flow 和 Memo 说明共用一个附注块。检索结果、Flow 回执和保存状态写成 YAML 注释，不混入声明字段；不能把待记录写成已入库，没有真实后台结果时不宣称保存成功。除去这些说明性注释，YAML 解析后的对象应与原 JSON 声明一致。附注只是给用户阅读的完整投影，不作为后台提取来源；仍由同一次回复生成，不是固定脚本自动渲染，不承诺零额外输出 token。
 
 ## 机器声明
 
@@ -78,16 +75,14 @@ Items
 - 已知的有效记忆已准确覆盖本轮结论，没有需要补充、更正或保留的冲突。需要确认是否重复时再按需检索，不机械地每轮新增读写。
 - 用户明确禁止保存，按其禁止范围跳过。
 
-仅因代码或文档已有、用户没有再次要求“记住”，不能跳过尚未覆盖的可复用决定及理由。记忆以内容本体为主，文档位置仅辅助定位。skip 保留真实理由和空 Items；存在 Used 时仍完整展示，不编造条目。对应可读附注示例：
+仅因代码或文档已有、用户没有再次要求“记住”，不能跳过尚未覆盖的可复用决定及理由。记忆以内容本体为主，文档位置仅辅助定位。skip 保留真实理由和空 `items`；存在 `used` 时仍完整展示，不编造条目。对应可读附注示例：
 
-```text
-JTH · 附注
-
-Decision
-  Action: skip
-  Reason: 本轮只解释既有规则，没有新增决定或可复用事实。
-
-Items: []
+```yaml
+# JTH · 附注
+decision:
+  action: "skip"
+  reason: "本轮只解释既有规则，没有新增决定或可复用事实。"
+items: []
 ```
 
 对应机器声明：

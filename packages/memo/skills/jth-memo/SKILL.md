@@ -7,7 +7,7 @@ description: 在已启用 JTH Memo 的用户环境中检索历史依据、记录
 
 ## 回复呈现
 
-任务正文保持普通 Markdown。给用户看的记忆检索、采用和声明信息集中在独立的 `text` 代码块，第一行固定为 `JTH · 附注`；按[声明格式](references/declarations.md)完整展开 Decision 的 Action、Reason，每条 Items 的全部实际字段，以及已提供的 Used。只调整排版，不摘要、截断或因与正文重复而删减字段；空数组照实展示，未提供的可选字段不补造。同一回复已有 Flow 附注时合并到同一个代码块，不生成 HTML，也不为排版增加模型调用。机器声明仍放在代码块之外。
+任务正文保持普通 Markdown。给用户看的记忆信息集中在带语法高亮的 `yaml` 代码块，第一行固定为 `# JTH · 附注`；按[声明格式](references/declarations.md)保留原始字段名，完整展开 `decision.action`、`decision.reason`、每条 `items` 的全部实际字段，以及已提供的 `used`。只调整排版，不摘要、截断或因与正文重复而删减字段；空数组照实展示，未提供的可选字段不补造。检索结果、Flow 回执和保存状态作为同一代码块中的 YAML 注释，不混入声明字段。不生成 HTML，也不为排版增加模型调用。机器声明仍是代码块之外的原有 JSON 注释。
 
 ## 读取
 
