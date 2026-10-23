@@ -2,25 +2,43 @@
 
 ## 可读附注
 
-任务正文之后，用独立的 `text` 代码块展示必要的记忆说明，第一行固定为 `JTH · 附注`。按实际发生的事情逐条说明采用了什么、准备记录什么及原因；跳过时只说明真实理由。不要重复整个任务结论，也不要展示内部 ID、来源引文或整段 JSON。长句分行，不要求填满示例中的所有字段：
+任务正文之后，用独立的 `text` 代码块完整展示本次机器声明，第一行固定为 `JTH · 附注`。展示与原声明字段一一对应，只调整标签、缩进和换行，不另写摘要，也不因篇幅或与正文重复而省略内容。
+
+- `Decision` 对应 `decision`，展开 `Action`（`action`）和 `Reason`（`reason`），保留实际值。读取旧声明时若缺少 `decision`，显示“Decision: 未声明（旧格式；Action、Reason 未知）”，不根据条目反推决定；本轮整体没有声明也不能解释为 skip。
+- `Items` 对应 `items`，按原顺序逐条展开 `Text`（`text`）、`Scope`（`scope`）、`Basis`（`basis`）和 `Quote`（`quote`）。`items: []` 显示为 `Items: []`，skip 也不能省略 Decision 或 Items。
+- 每条实际提供的可选字段同样完整展开：`Workspaces`（`workspaces`）、`Confirmation Quote`（`confirmation_quote`）、`Derived From`（`derived_from`）以及 `Change`（`change`）中的 `Kind`（`kind`）和 `Target`（`target`）。
+- 顶层提供 `used` 时，显示 `Used` 并逐个列出全部记忆 ID；`used: []` 显示为 `Used: []`。未提供的可选字段不补造，也不把缺省写成空数组。
+- 所有字段的正文、理由、来源引文、UUID、目录和数组成员必须完整保留，不缩写、不截断，不用“略”“等”或省略号替代内容。长值通过缩进和换行保持可读，不能为了精简文案删除协议数据。
+
+以下是格式示例；实际回复使用本轮真实声明的全部字段和值：
 
 ```text
 JTH · 附注
 
-参考：已有发布流程。
-准备记录：本次正式发布结果。
-原因：更新此前仅完成本地打包的状态。
+Decision
+  Action: record
+  Reason: 用户明确指定项目使用 pnpm。
+
+Items
+  [1]
+    Text: 项目使用 pnpm。
+    Scope: project
+    Workspaces:
+      - /absolute/project-a
+    Basis: user_statement
+    Quote: 项目使用 pnpm。
+
 保存状态：已生成声明，入库尚待确认。
 ```
 
-同一回复中的 Flow 和 Memo 说明共用一个附注块。附注必须与实际声明一致，不能把待记录写成已入库；没有真实后台结果时不宣称保存成功。附注只是给用户阅读的说明，不作为后台提取来源。
+同一回复中的 Flow 和 Memo 说明共用一个附注块。保存状态单独说明，不混入声明字段；不能把待记录写成已入库，没有真实后台结果时不宣称保存成功。附注只是给用户阅读的完整投影，不作为后台提取来源；仍由同一次回复生成，不是固定脚本自动渲染，不承诺零额外输出 token。
 
 ## 机器声明
 
 最终回复末尾最多一个独立的 HTML 注释声明，放在可读附注代码块关闭之后，不放进任何代码块，也不添加引用前缀。保留现有 JSON 契约，后台仍只解析这份声明；可读附注不能替代它：
 
 ```text
-<!-- jth-memory {"decision":{"action":"record","reason":"用户明确的新项目决定，后续需要复用。"},"items":[{"text":"短事实","scope":"project","basis":"user_statement","quote":"此前消息中的连续原文"}]} -->
+<!-- jth-memory {"decision":{"action":"record","reason":"用户明确指定项目使用 pnpm。"},"items":[{"text":"项目使用 pnpm。","scope":"project","workspaces":["/absolute/project-a"],"basis":"user_statement","quote":"项目使用 pnpm。"}]} -->
 ```
 
 - `decision` 保存主 Agent 的实际决定和简短理由：`action` 为 `record` 或 `skip`，`reason` 为本轮真实判断，最多 240 字符。`record` 至少附一条 `items`；`skip` 的 `items` 必须为空，可保留真实 `used`。
@@ -60,7 +78,19 @@ JTH · 附注
 - 已知的有效记忆已准确覆盖本轮结论，没有需要补充、更正或保留的冲突。需要确认是否重复时再按需检索，不机械地每轮新增读写。
 - 用户明确禁止保存，按其禁止范围跳过。
 
-仅因代码或文档已有、用户没有再次要求“记住”，不能跳过尚未覆盖的可复用决定及理由。记忆以内容本体为主，文档位置仅辅助定位。skip 保留真实短理由，不编造条目：
+仅因代码或文档已有、用户没有再次要求“记住”，不能跳过尚未覆盖的可复用决定及理由。记忆以内容本体为主，文档位置仅辅助定位。skip 保留真实理由和空 Items；存在 Used 时仍完整展示，不编造条目。对应可读附注示例：
+
+```text
+JTH · 附注
+
+Decision
+  Action: skip
+  Reason: 本轮只解释既有规则，没有新增决定或可复用事实。
+
+Items: []
+```
+
+对应机器声明：
 
 ```text
 <!-- jth-memory {"decision":{"action":"skip","reason":"本轮只解释既有规则，没有新增决定或可复用事实。"},"items":[]} -->
