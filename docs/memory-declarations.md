@@ -34,15 +34,25 @@ flowchart TD
 
 后台在本机读取来源日志；发送给 Embedding 的只有新记忆正文。聊天记录、引文、工具输出和存储字段不会重新发送给提炼模型。检索继续调用查询 Embedding：普通 `memo search` 默认返回三条摘要，详情按需 `memo read`。原生 Flow 按需调用这些工具；五分钟缓存和自动召回只保留在显式旧 Flow 路径。重复候选只做展示分组，不把相似正文语义合并或覆盖事实。
 
-实际检索或读取后，主 Agent 在对话中简报真实结果，例如 `JTH Memo｜检索返回 3 条，已读取 2 条`。未命中或失败分别说明；同批合并，不把读取当作采纳，不为显示回执额外检索。CLI 的 JSON 输出不变。
+实际检索或读取后，主 Agent 在附注中简报真实结果，例如 `# 记忆检索：返回 3 条，已读取 2 条`。未命中或失败分别说明；同批合并，不把读取当作采纳，不为显示回执额外检索。CLI 的 JSON 输出不变。
 
 ## 声明契约
 
-最终回复末尾独立一行，使用以下格式；代码块内的示例不会被处理：
+最终回复末尾只输出一份带语法高亮的声明代码块，围栏信息为 `yaml jth-memory`；后台直接解析块内字段，不再另外输出 HTML 标签或一份相同 JSON。所有实际字段、条目、引文和 ID 完整保留，不以摘要替代。以下示例使用未标记的 `yaml` 围栏避免执行；实际收口时加上 `jth-memory` 标记：
 
-```text
-<!-- jth-memory {"decision":{"action":"record","reason":"项目包管理约定需要后续复用。"},"items":[{"text":"项目使用 pnpm 管理依赖。","scope":"project","basis":"user_statement","quote":"项目使用 pnpm"}]} -->
+```yaml
+# JTH · 附注
+decision:
+  action: "record"
+  reason: "项目包管理约定需要后续复用。"
+items:
+  - text: "项目使用 pnpm 管理依赖。"
+    scope: "project"
+    basis: "user_statement"
+    quote: "项目使用 pnpm"
 ```
+
+同结构的 `json jth-memory` 围栏也可执行。只有最终回复末尾的顶层标记块会被处理；普通未标记块、引用和嵌套示例不执行。块必须完整关闭，之后不追加内容。YAML 字符串用双引号和 JSON 转义保留原值；重复键、多文档和 alias 会被拒绝，声明仍受 8192 字节及原字段约束。旧日志和待处理队列中的 HTML 注释声明继续兼容，不清理历史材料。
 
 `scope` 使用已有的 `project / business / user / current_task / unspecified`。事实依据为 `user_statement / user_confirmed / tool_observation`；未确认建议可用 `assistant_proposal / agent_inference`，进入候选集合。`quote` 是此前真实消息中的短连续原文，不用声明自身作为证据。
 
@@ -52,8 +62,17 @@ flowchart TD
 
 此时使用 `user_confirmed`，`quote` 引用助手方案，`confirmation_quote` 引用后续用户确认或修改。每段最多 240 字符，尽量包含具体选项和约束，避免孤立、含糊的引文。例如助手提出方案 A 与“方案 B：每 15 分钟反馈，最多 300 字”，用户回复“采用方案 B，改成 200 字以内，可以，你做吧”，声明为：
 
-```text
-<!-- jth-memory {"items":[{"text":"用户已批准每 15 分钟反馈，最多 200 字；待实施。","scope":"project","basis":"user_confirmed","quote":"方案 B：每 15 分钟反馈，最多 300 字","confirmation_quote":"采用方案 B，改成 200 字以内，可以，你做吧"}]} -->
+```yaml
+# JTH · 附注
+decision:
+  action: "record"
+  reason: "用户明确采纳并修改了反馈频率方案。"
+items:
+  - text: "用户已批准每 15 分钟反馈，最多 200 字；待实施。"
+    scope: "project"
+    basis: "user_confirmed"
+    quote: "方案 B：每 15 分钟反馈，最多 300 字"
+    confirmation_quote: "采用方案 B，改成 200 字以内，可以，你做吧"
 ```
 
 后台只接受真实用户确认和它之前的助手方案；助手复述确认语不能充当用户确认。两条消息写入已有 `source_message_ids`，`memo read` 可读到两份来源，不新增数据库表或模型调用。来源缺失、角色错误或先后颠倒时保留本地诊断。双方是否在语义上指向同一决策，仍由主 Agent 核对，程序不按“可以”关键词自动批准。

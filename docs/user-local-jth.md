@@ -29,8 +29,20 @@ Codex 原生记忆、计划工具、模型和权限继续沿用宿主配置。JT
 
 默认读取当前会话绑定目录的项目记忆和用户级记忆。只有一个目录时，声明可以省略 `workspaces`；多目录会话中，明确属于其他目录的项目条目使用其真实绑定路径：
 
-```text
-<!-- jth-memory {"items":[{"text":"B 的接口使用固定分页协议。","scope":"project","basis":"tool_observation","quote":"此前真实工具输出中的连续原文","workspaces":["/workspace/B"]}]} -->
+以下未标记的 YAML 仅演示字段；实际最终回复使用 `yaml jth-memory` 围栏，代码块直接作为唯一声明：
+
+```yaml
+# JTH · 附注
+decision:
+  action: "record"
+  reason: "保留 B 项目已核实的接口契约。"
+items:
+  - text: "B 的接口使用固定分页协议。"
+    scope: "project"
+    basis: "tool_observation"
+    quote: "此前真实工具输出中的连续原文"
+    workspaces:
+      - "/workspace/B"
 ```
 
 `workspaces` 只适用于项目条目，必须是本会话真实绑定目录的非空子集。省略时归入主目录。共同结论选择多个目录，后台保存一条共同事实，而不是复制到各目录。来源会话、消息、引文、版本和日志位置保留。

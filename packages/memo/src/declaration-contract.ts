@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { isAbsolute } from 'node:path'
+import { parseDocument } from 'yaml'
 import { extractionSchema } from './contracts.ts'
 import { recordId } from './record-contract.ts'
 import type { RecordDraft } from './record-contract.ts'
@@ -50,21 +51,68 @@ export const declarationSchema = z.strictObject({
 })
 export type MemoryDeclaration = z.infer<typeof declarationSchema>
 
-/** Only a trailing declaration outside a code fence is executable; examples remain ordinary text. */
-export function parseDeclaration(text: string): MemoryDeclaration | null {
-  const start = text.lastIndexOf(declarationMarker)
-  if (start < 0) return null
-  let fence: { character: string, length: number } | undefined
-  for (const line of text.slice(0, start).split('\n')) {
+export interface DeclarationBlock {
+  start: number
+  format: 'yaml' | 'json' | 'legacy-json'
+  content: string
+}
+
+interface LocatedDeclaration extends DeclarationBlock { complete: boolean }
+
+function locateDeclarationBlock(text: string): LocatedDeclaration | null {
+  let fence: { character: string, length: number, start: number, contentStart: number, format?: 'yaml' | 'json' } | undefined
+  let legacy: LocatedDeclaration | null = null
+  let offset = 0
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.replace(/\r$/, '')
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
-    if (!marker) continue
-    if (!fence) fence = { character: marker[1][0], length: marker[1].length }
-    else if (marker[1][0] === fence.character && marker[1].length >= fence.length && !marker[2].trim()) fence = undefined
+    if (fence) {
+      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && !marker[2].trim()) {
+        if (fence.format && !text.slice(offset + rawLine.length).trim()) {
+          return { start: fence.start, format: fence.format, content: text.slice(fence.contentStart, offset), complete: true }
+        }
+        fence = undefined
+      }
+    } else if (marker) {
+      const declaration = /^(`{3,}|~{3,})(yaml|json)[ \t]+jth-memory[ \t]*$/.exec(line)
+      fence = {
+        character: marker[1][0], length: marker[1].length, start: offset, contentStart: offset + rawLine.length + 1,
+        ...(declaration ? { format: declaration[2] as 'yaml' | 'json' } : {}),
+      }
+    } else if (line.trimStart().startsWith(declarationMarker)) {
+      const start = offset + line.length - line.trimStart().length
+      const block = text.slice(start).trimEnd()
+      const complete = block.endsWith('-->')
+      if (complete || !block.includes('-->')) {
+        legacy = { start, format: 'legacy-json', content: block.slice(declarationMarker.length, complete ? -3 : undefined).trim(), complete }
+      }
+    }
+    offset += rawLine.length + 1
   }
-  if (fence) return null
-  if (text.slice(text.lastIndexOf('\n', start - 1) + 1, start).trim()) return null
-  const block = text.slice(start).trimEnd()
-  if (!block.endsWith('-->')) throw new Error('记忆声明未完整结束；原文保留，正常回复不受影响')
-  if (Buffer.byteLength(block) > 8192) throw new Error('记忆声明超过 8192 字节')
-  return declarationSchema.parse(JSON.parse(block.slice(declarationMarker.length, -3).trim()))
+  return fence?.format
+    ? { start: fence.start, format: fence.format, content: text.slice(fence.contentStart), complete: false }
+    : legacy
+}
+
+/** Locate declaration boundaries without trusting their syntax, so invalid declarations never become evidence. */
+export function findDeclarationBlock(text: string): DeclarationBlock | null {
+  const block = locateDeclarationBlock(text)
+  if (!block) return null
+  const { complete: _complete, ...declaration } = block
+  return declaration
+}
+
+/** Only trailing marked code fences or legacy declarations outside a code fence are executable; examples remain ordinary text. */
+export function parseDeclaration(text: string): MemoryDeclaration | null {
+  const block = locateDeclarationBlock(text)
+  if (!block) return null
+  if (!block.complete) throw new Error('记忆声明未完整结束；原文保留，正常回复不受影响')
+  if (Buffer.byteLength(text.slice(block.start).trimEnd()) > 8192) throw new Error('记忆声明超过 8192 字节')
+  if (block.format === 'legacy-json') return declarationSchema.parse(JSON.parse(block.content))
+  // JSON.parse keeps the JSON fence strict; the YAML document check also rejects duplicate JSON keys.
+  if (block.format === 'json') JSON.parse(block.content)
+  const document = parseDocument(block.content, { strict: true, uniqueKeys: true, stringKeys: true })
+  if (document.errors.length) throw document.errors[0]
+  if (document.warnings.length) throw document.warnings[0]
+  return declarationSchema.parse(document.toJS({ maxAliasCount: 0 }))
 }

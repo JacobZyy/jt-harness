@@ -16,7 +16,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-test('installed declaration CLI persists a cross-turn approval with both sources, defaults to index-only and stays idempotent', { skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 20000 }, async () => {
+test('installed declaration CLI persists a single marked YAML block with both approval sources and stays index-only and idempotent', { skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 20000 }, async () => {
   const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-declaration-cli-')))
   const home = resolve(directory, 'codex'), source = resolve(home, 'sessions/rollout-declaration-cli-session.jsonl'), envFile = resolve(directory, '.env')
   const root = fileURLToPath(new URL('../../', import.meta.url)), execute = promisify(execFile)
@@ -60,7 +60,20 @@ test('installed declaration CLI persists a cross-turn approval with both sources
     hookCommand = hooks.Stop.flatMap((group: { hooks: { command: string, statusMessage: string }[] }) => group.hooks)
       .find((handler: { statusMessage: string }) => handler.statusMessage === 'jth memo declaration').command
     const row = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: new Date().toISOString(), payload }) + '\n'
-    const text = '<!-- jth-memory {"items":[{"text":"项目已决定使用 pnpm，待实施。","scope":"project","basis":"user_confirmed","quote":"建议项目使用 pnpm。","confirmation_quote":"可以，你做吧。"}]} -->'
+    const text = [
+      '```yaml jth-memory',
+      '# JTH · 附注',
+      'decision:',
+      '  action: "record"',
+      '  reason: "用户确认项目使用 pnpm。"',
+      'items:',
+      '  - text: "项目已决定使用 pnpm，待实施。"',
+      '    scope: "project"',
+      '    basis: "user_confirmed"',
+      '    quote: "建议项目使用 pnpm。"',
+      '    confirmation_quote: "可以，你做吧。"',
+      '```',
+    ].join('\n')
     await writeFile(source, row('session_meta', { id: 'declaration-cli-session', cwd: directory, runtime_workspace_roots: [directory] })
       + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'proposal', type: 'AgentMessage', content: [{ type: 'text', text: '建议项目使用 pnpm。' }] } })
       + row('event_msg', { type: 'item_completed', thread_id: 'declaration-cli-session', item: { id: 'u', type: 'UserMessage', content: [{ type: 'text', text: '可以，你做吧。' }] } })

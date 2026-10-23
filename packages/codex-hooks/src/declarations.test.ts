@@ -12,7 +12,9 @@ import { configureHooks } from './install.ts'
 const at = '2026-01-01T00:00:00Z'
 const row = (type: string, payload: unknown) => JSON.stringify({ timestamp: at, type, payload }) + '\n'
 const message = (id: string, type: string, text: string) => row('event_msg', { type: 'item_completed', thread_id: 'parent', item: { id, type, content: [{ type: 'text', text }] } })
-const declaration = (extra: object = {}) => `<!-- jth-memory ${JSON.stringify({ items: [{ text: '项目使用 pnpm。', scope: 'project', basis: 'user_statement', quote: '项目使用 pnpm', ...extra }] })} -->`
+const declarationItem = (extra: object = {}) => ({ text: '项目使用 pnpm。', scope: 'project', basis: 'user_statement', quote: '项目使用 pnpm', ...extra })
+const declaration = (extra: object = {}) => '```yaml jth-memory\n# JTH · 附注\ndecision:\n  action: "record"\n  reason: "保留已经确认的项目约定。"\nitems:\n  - ' + JSON.stringify(declarationItem(extra)) + '\n```'
+const legacyDeclaration = (extra: object = {}) => `<!-- jth-memory ${JSON.stringify({ items: [declarationItem(extra)] })} -->`
 async function fixture() {
   const directory = await mkdtemp(resolve(tmpdir(), 'jth-declaration-'))
   const home = resolve(directory, 'codex'), source = resolve(home, 'sessions/parent.jsonl')
@@ -34,6 +36,34 @@ test('declaration parser ignores normal replies and fenced examples, and bounds 
   assert.equal(parseDeclaration(declaration({ basis: 'user_confirmed', confirmation_quote: '可以，按这个做' }))!.items[0].confirmation_quote, '可以，按这个做')
   assert.throws(() => parseDeclaration(declaration({ confirmation_quote: '可以，按这个做' })), /仅用于 user_confirmed/)
   assert.throws(() => parseDeclaration(declaration({ basis: 'user_confirmed', confirmation_quote: '长'.repeat(241) })), /240/)
+})
+
+test('unmarked YAML remains an ordinary reply and cannot stage a declaration', async () => {
+  const f = await fixture()
+  const text = declaration().replace('```yaml jth-memory', '```yaml')
+  try {
+    await appendFile(f.source, message('user', 'UserMessage', '项目使用 pnpm。') + message('final', 'AgentMessage', text))
+    await f.capture(text)
+    assert.deepEqual(await collectDeclarations(f.config), { received: 0, skipped: 1, errors: [] })
+    await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/records')), { code: 'ENOENT' })
+  } finally { await f.cleanup() }
+})
+
+test('malformed marked declarations remain diagnostics without staging records', async () => {
+  for (const text of ['```yaml jth-memory\nitems: [\n```', '```json jth-memory\n{"items":', declaration().slice(0, -3)]) {
+    const f = await fixture()
+    try {
+      await appendFile(f.source, message('final', 'AgentMessage', text))
+      const capture = await f.capture(text)
+      const result = await collectDeclarations(f.config)
+      assert.equal(result.received, 0)
+      assert.equal(result.errors.length, 1)
+      const diagnostic = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/declaration-errors', `${capture!.id}.json`), 'utf8'))
+      assert.equal(diagnostic.observation.declaration, 'invalid')
+      assert.equal(diagnostic.observation.stage, 'failed')
+      await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/records')), { code: 'ENOENT' })
+    } finally { await f.cleanup() }
+  }
 })
 
 test('every main Stop stays observable; source-bound declarations are staged once and malformed ones stay diagnostic', async () => {
@@ -76,7 +106,7 @@ test('every main Stop stays observable; source-bound declarations are staged onc
 
 test('skip decisions remain operational evidence and turn counters never claim exact declaration cost', async () => {
   const f = await fixture()
-  const skip = `<!-- jth-memory ${JSON.stringify({ items: [], decision: { action: 'skip', reason: '这轮只有临时操作。' } })} -->`
+  const skip = '```yaml jth-memory\ndecision:\n  action: "skip"\n  reason: "这轮只有临时操作。"\nitems: []\n```'
   const tokens = (total: object, last?: object) => row('event_msg', { type: 'token_count', info: { total_token_usage: total, last_token_usage: last } })
   try {
     const snapshotId = 'a'.repeat(64)
@@ -103,8 +133,8 @@ test('old declarations preserve a missing decision and incomplete usage stays un
   try {
     await appendFile(f.source, message('user', 'UserMessage', '项目使用 pnpm。')
       + row('event_msg', { type: 'token_count', info: { last_token_usage: { input_tokens: 7 }, total_token_usage: { input_tokens: 7 } } })
-      + message('final', 'AgentMessage', declaration()))
-    const capture = await f.capture(declaration())
+      + message('final', 'AgentMessage', legacyDeclaration()))
+    const capture = await f.capture(legacyDeclaration())
     assert.equal((await collectDeclarations(f.config)).received, 1)
     const observed = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/declaration-events', `${capture!.id}.json`), 'utf8'))
     assert.equal(observed.observation.declaration, 'present')
@@ -118,10 +148,10 @@ test('native WebSearch records retain tool evidence and do not block later decla
   const f = await fixture()
   try {
     const action = { type: 'search', query: '包管理器文档', queries: ['包管理器文档'] }
-    const text = `<!-- jth-memory ${JSON.stringify({ items: [
+    const text = '```json jth-memory\n' + JSON.stringify({ items: [
       { text: '本轮搜索了包管理器文档。', scope: 'current_task', basis: 'tool_observation', quote: '包管理器文档' },
       { text: '项目使用 pnpm。', scope: 'project', basis: 'user_statement', quote: '项目使用 pnpm' },
-    ] })} -->`
+    ] }) + '\n```'
     await appendFile(f.source, row('event_msg', { type: 'item_completed', thread_id: 'parent', item: { type: 'WebSearch', id: 'search', query: action.query, action } })
       + message('user', 'UserMessage', '项目使用 pnpm。') + message('final', 'AgentMessage', text))
     await f.capture(text)
@@ -210,7 +240,7 @@ test('correction versions come from a prior read receipt and statements cannot c
 
 test('usage-only declarations require a prior read and do not create memory facts', async () => {
   const f = await fixture(), id = randomUUID(), version = 'c'.repeat(64)
-  const text = `<!-- jth-memory ${JSON.stringify({ items: [], used: [id] })} -->`
+  const text = '```yaml jth-memory\ndecision:\n  action: "skip"\n  reason: "没有新增事实，记录实际采用。"\nitems: []\nused:\n  - ' + JSON.stringify(id) + '\n```'
   try {
     await appendFile(f.source, message('final', 'AgentMessage', text))
     await f.capture(text)
@@ -244,6 +274,30 @@ test('recalled tool output and earlier declaration blocks cannot echo into fresh
     const evidence = await readEvidence(f.config, staged.evidence_id)
     assert.equal(evidence.submission.messages[0].role, 'user')
   } finally { await f.cleanup() }
+})
+
+test('new and legacy declarations never become evidence, including malformed marked blocks', async () => {
+  const quote = '只存在于声明中的约定'
+  for (const previous of [
+    declaration({ quote }),
+    '```json jth-memory\n' + JSON.stringify({ items: [declarationItem({ quote })] }) + '\n```',
+    legacyDeclaration({ quote }),
+    '```yaml jth-memory\nitems: [\nquote: ' + JSON.stringify(quote) + '\n```',
+    '```json jth-memory\n{"quote": ' + JSON.stringify(quote) + '\n```',
+    '```yaml jth-memory\nquote: ' + JSON.stringify(quote),
+    `<!-- jth-memory {"quote": ${JSON.stringify(quote)} -->`,
+  ]) {
+    const f = await fixture()
+    const text = declaration({ quote })
+    try {
+      await appendFile(f.source, message('previous', 'AgentMessage', '此前回复。\n' + previous) + message('final', 'AgentMessage', text))
+      await f.capture(text)
+      const result = await collectDeclarations(f.config)
+      assert.equal(result.received, 0)
+      assert.match(result.errors[0].error, /真实来源/)
+      await assert.rejects(readdir(resolve(f.config.dataDir, 'codex/records')), { code: 'ENOENT' })
+    } finally { await f.cleanup() }
+  }
 })
 
 test('derived candidates bind evidence-level reads in this session and cannot masquerade as facts', async () => {

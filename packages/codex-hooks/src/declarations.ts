@@ -2,7 +2,7 @@ import { readdir, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { declarationMarker, parseDeclaration, evidenceSchema, recordDraftSchema, isRecalledMemory } from '@jacob-z/jt-harness/memo/contracts'
+import { findDeclarationBlock, parseDeclaration, evidenceSchema, recordDraftSchema, isRecalledMemory } from '@jacob-z/jt-harness/memo/contracts'
 import type { Submission } from '@jacob-z/jt-harness/memo/contracts'
 import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { captureEvent, captureSchema, codexDirectory, hash, hookEventSchema, readJson, writeJson } from './capture.ts'
@@ -55,10 +55,9 @@ function recalledOutput(value: unknown): boolean {
 
 function sourceText(message: Submission['messages'][number]) {
   if (message.role !== 'assistant') return message.text
-  try { if (!parseDeclaration(message.text)) return message.text }
-  catch { /* A previous malformed declaration is not evidence either. */ }
-  const marker = message.text.lastIndexOf(declarationMarker)
-  return marker < 0 ? message.text : message.text.slice(0, marker)
+  /* A previous malformed declaration is not evidence either. */
+  const block = findDeclarationBlock(message.text)
+  return block ? message.text.slice(0, block.start) : message.text
 }
 
 async function prepareDeclaration(capture: Capture, config: CapturePaths, observation: DeclarationObservation) {
