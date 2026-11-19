@@ -20,7 +20,7 @@ import { startWorker } from './background.ts'
 import { receiveRecords, receiveDshCaptures } from './ingest.ts'
 import { schemaVersion, readAgentOutputs, readIntakeRecovery, recoverIntake } from '@jacob-z/jt-harness/memo'
 import { rememberEntryRead } from '@jacob-z/jt-harness/codex-hooks'
-import { boundMemoryEntries, readMemory, memoryUses, retrievalInputSchema, sanitizeMemoryValue, truncateUnicode, withMemoryContext } from '@jacob-z/jt-harness/memo'
+import { boundMemoryEntries, compareMatchedSubjects, readMemory, memoryUses, retrievalInputSchema, sanitizeMemoryValue, truncateUnicode, withMemoryContext } from '@jacob-z/jt-harness/memo'
 
 const help = `jth init  问答式初始化：目录名默认项目、复用全局配置、自动建表与接入检查
 jth analysis prepare|evidence|report|usage  按需分析 Workflow 与 Memo；只读真实记录，不自动评分或设置 Token 上限
@@ -42,8 +42,9 @@ jth memo <command>
   work [--index]               接收声明并生成向量；--legacy 才处理历史 DSH 队列
   retry <submission-id>        重试失败任务，复用已保存提炼
   recover <id> [file.json|-]   查看未接收条目；按路径提交 replace/dismiss 修正和原因
-  recall <query> <scope>       本地关键词线索，不调用 Embedding
-  search <query> <scope>       默认关键词＋向量混合召回，返回命中依据
+  recall <query> [scope]       本地关键词线索，不调用 Embedding
+  search <query> [scope]       默认关键词＋向量混合召回，返回命中依据
+  subject <名称> [scope]       精确列出此需求当前有效的已发布条目，默认使用绑定项目，支持分页
   read <entry-id>              读取正文与来源证据
   usage <scope>               查看主 Agent 声明的采用反馈，不是评分
   read --submission <id>       读取批次、修订证据和提交回执
@@ -57,10 +58,11 @@ jth memo <command>
   archives                    查看归档条目
   restore <id>                恢复归档条目，必须提供 --reason
 
-scope 必须选一种：--project <id>（可重复）、--business <id>（可重复）、
+显式 scope 选一种：--project <id>（可重复）、--business <id>（可重复）、
   --session <id>、--user、--submission <id>
 search 可选：--limit <1..50>、--candidates（或 --proposals）、--history、--archived
-search/read/recall 可选：--as-of <带时区 ISO 时间>，查看当时已知且已生效的状态
+search/read/recall/subject 可选：--as-of <带时区 ISO 时间>，查看当时已知且已生效的状态
+subject 可选：--limit <1..20>（默认 10）、--offset <非负整数>。下一页使用 next_offset 和相同的 as_of。未标注需求名的旧记忆可用 recall 查找。
 search 可选：--mode hybrid|keyword|semantic、--min-similarity <0..1>（默认 0.6，仅向量通道）
 read 可选：--level summary|evidence|full；默认 full 保持原 JSON 契约，Agent 优先 evidence
 recall 可选：--limit <1..50>；usage 可用 --session <会话ID> 或其他显式 scope
@@ -77,7 +79,7 @@ const optionTypes = {
   wait: { type: 'boolean' }, model: { type: 'string' }, provider: { type: 'string' },
   project: { type: 'string', multiple: true }, business: { type: 'string', multiple: true },
   session: { type: 'string' }, user: { type: 'boolean' }, submission: { type: 'string' },
-  limit: { type: 'string' }, proposals: { type: 'boolean' },
+  limit: { type: 'string' }, offset: { type: 'string' }, proposals: { type: 'boolean' },
   history: { type: 'boolean' }, summary: { type: 'boolean' },
   'as-of': { type: 'string' }, candidates: { type: 'boolean' }, archived: { type: 'boolean' }, review: { type: 'boolean' },
   reason: { type: 'string' }, evidence: { type: 'string' },
@@ -89,6 +91,7 @@ const commandOptions: Record<string, string[]> = {
   init: [], send: ['wait', 'model', 'provider', 'review', 'legacy'], status: ['summary'], work: ['legacy', 'index'], retry: ['timeout-ms', 'legacy', 'provider', 'model'],
   search: ['project', 'business', 'session', 'user', 'submission', 'limit', 'proposals', 'history', 'candidates', 'archived', 'as-of', 'mode', 'min-similarity'],
   recall: ['project', 'business', 'session', 'user', 'submission', 'limit', 'as-of'],
+  subject: ['project', 'business', 'session', 'user', 'submission', 'limit', 'offset', 'as-of'],
   usage: ['project', 'business', 'session', 'user', 'submission', 'limit'],
   read: ['submission', 'as-of', 'source-session', 'level'], doctor: [], stats: [], review: ['limit', 'reason', 'evidence'],
   archive: ['session', 'reason'], restore: ['reason'], archives: ['limit'],
@@ -126,7 +129,7 @@ export async function main(root: string, args = process.argv.slice(2)) {
     if (invalidOptions.length) throw new Error(`${command} 不支持：${invalidOptions.join(', ')}`)
     const count = command === 'status' ? operands.length <= 1
       : command === 'recover' ? operands.length >= 1 && operands.length <= 2
-      : ['send', 'retry', 'search', 'recall', 'outputs'].includes(command) ? operands.length === 1
+      : ['send', 'retry', 'search', 'recall', 'subject', 'outputs'].includes(command) ? operands.length === 1
       : command === 'read' ? operands.length + Number(Boolean(values.submission)) === 1
       : command === 'review' ? (operands[0] === 'list' ? operands.length === 1 : ['approve', 'reject'].includes(operands[0]) && operands.length === 2)
       : command === 'archive' ? operands.length + Number(Boolean(values.session)) === 1
@@ -147,10 +150,11 @@ export async function main(root: string, args = process.argv.slice(2)) {
     if (values.level && (!['summary', 'evidence', 'full'].includes(values.level) || values.submission)) throw new Error('--level 仅用于单条记忆，取 summary、evidence 或 full')
     const asOf = values['as-of'] ? timestampSchema.parse(values['as-of']) : undefined
     config = await loadWorkspaceConfig(root, values['env-file'])
-    if (['search', 'recall'].includes(command) && !scopes.length) {
+    if (['search', 'recall', 'subject'].includes(command) && !scopes.length) {
       const context = await automaticWorkspaceScope({ cwd: process.cwd(), session_id: process.env.CODEX_THREAD_ID },
         resolve(process.env.CODEX_HOME ?? resolve(homedir(), '.codex')))
-      scopes.push({ kind: 'project', project_ids: context.scope.project_ids }, { kind: 'user' })
+      scopes.push({ kind: 'project', project_ids: context.scope.project_ids })
+      if (command !== 'subject') scopes.push({ kind: 'user' })
     }
     if (!config.databaseUrl) throw new Error('请在 .env 配置 JTH_DATABASE_URL')
     pool = await connectDatabase(config)
@@ -228,6 +232,15 @@ export async function main(root: string, args = process.argv.slice(2)) {
         break
       }
       case 'usage': result = await memoryUses(pool, scopeFilterSchema.parse(scopes[0]), limit); break
+      case 'subject': {
+        const page = await storage.listSubject({ subject: operands[0], scope: scopeFilterSchema.parse(scopes[0]), limit, offset: Number(values.offset ?? 0), as_of: asOf })
+        result = withMemoryContext(sanitizeMemoryValue({ ...page, entries: page.entries.map(entry => {
+          const preview = truncateUnicode(entry.content, 240)
+          return { id: entry.id, state: entry.state, preview, preview_truncated: preview !== entry.content,
+            next: `jth memo read ${entry.id} --level evidence${asOf ? ` --as-of ${asOf}` : ''}` }
+        }) }), 'cli')
+        break
+      }
       case 'recall':
       case 'search': {
         const mode = retrievalInputSchema.shape.mode.parse(command === 'recall' ? 'keyword' : values.mode)
@@ -242,7 +255,8 @@ export async function main(root: string, args = process.argv.slice(2)) {
         const matches = await Promise.all(scopes.map(scope => storage.retrieve({ ...query, scope: scopeFilterSchema.parse(scope) })))
         const found = matches[0]
         const entries = matches.flatMap(match => match.entries).filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index)
-          .sort((a, b) => b.match.rank_score - a.match.rank_score).slice(0, limit)
+          .sort((a, b) => (mode === 'keyword' ? compareMatchedSubjects(a.match, b.match) : 0)
+            || b.match.rank_score - a.match.rank_score).slice(0, limit)
         result = boundMemoryEntries({ space: found.space, mode: found.mode, query: query.query, min_similarity: mode === 'keyword' ? null : query.min_similarity,
           scopes: scopes.map(scope => scopeFilterSchema.parse(scope)), notice: '分数表示检索匹配，不是正确性或采用评分；候选不够相关时可为空。', entries: entries.map(entry => ({
           id: entry.id, submission_id: entry.submission_id, collection: entry.collection, scope: entry.scope,

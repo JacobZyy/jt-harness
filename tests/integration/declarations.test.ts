@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { Pool } from 'pg'
 import { loadConfig, prepareDatabase, MemoStorage, runIndexWorker, retryJob, enqueue, executionProfile, storageDoctor, recordDeclaration } from '@jt-harness/memo'
 import type { Evidence, MemoryDeclaration, RecordDraft } from '@jt-harness/memo/contracts'
-import { captureDeclaration, rememberEntryRead } from '@jt-harness/codex-hooks'
+import { captureDeclaration, memoryCues, rememberEntryRead } from '@jt-harness/codex-hooks'
 import type { CaptureSettings } from '@jt-harness/codex-hooks'
 import { receiveRecords } from '../../packages/cli/src/ingest.ts'
 import { ensureUserConfig } from '../../packages/cli/src/configuration.ts'
@@ -15,6 +15,100 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+
+test('a later session resumes a requirement and sees only the latest delivery status for each field', { skip: !process.env.JTH_TEST_DATABASE_URL }, async t => {
+  const pool = new Pool({ connectionString: process.env.JTH_TEST_DATABASE_URL })
+  const workspace = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-resume-requirement-')))
+  const home = resolve(workspace, 'codex'), envFile = resolve(workspace, '.env'), project = 'requirement-resume'
+  t.after(async () => { await pool.end(); await rm(workspace, { recursive: true, force: true }) })
+  assert.equal((await pool.query('SELECT current_database() AS name')).rows[0].name, 'jth_test')
+  await prepareDatabase(pool, true)
+  await mkdir(resolve(home, 'sessions'), { recursive: true })
+  await writeFile(envFile, `JTH_DATABASE_URL=${process.env.JTH_TEST_DATABASE_URL}\nJTH_DATA_DIR=${workspace}/data\nEMBEDDING_API_KEY=test\nEMBEDDING_BASE_URL=https://example.invalid/v1\nEMBEDDING_MODEL=requirement-fixture\nEMBEDDING_DIMENSIONS=2\n`)
+  const config = await loadConfig(workspace, envFile, {})
+  const storage = new MemoStorage(pool)
+  const settings = { workspace, codex_home: home, env_file: envFile, enabled_at: '2026-01-01T00:00:00Z', scope: { project_ids: [project], business_ids: [] } }
+  t.mock.method(globalThis, 'fetch', async (url: Parameters<typeof fetch>[0]) => {
+    assert.equal(String(url), 'https://example.invalid/v1/embeddings')
+    return Response.json({ model: 'requirement-fixture', data: [{ index: 0, embedding: [1, 0] }] })
+  })
+  const publish = async (sessionId: string, items: MemoryDeclaration['items']) => {
+    const transcript = resolve(home, 'sessions', `${sessionId}.jsonl`)
+    const row = (type: string, payload: unknown) => JSON.stringify({ type, timestamp: new Date().toISOString(), payload })
+    const itemRow = (item: object) => row('event_msg', { type: 'item_completed', thread_id: sessionId, item })
+    const answer = ['```json jth-memory', JSON.stringify({ decision: { action: 'record', reason: '保留本次核实的需求交付情况。' }, items }), '```'].join('\n')
+    await writeFile(transcript, [
+      row('session_meta', { id: sessionId, cwd: workspace }),
+      ...items.map((item, i) => itemRow({ type: 'CommandExecution', id: `inspect-${i}`, status: 'completed', aggregated_output: item.quote })),
+      itemRow({ type: 'AgentMessage', id: 'answer', content: [{ type: 'text', text: answer }] }),
+    ].join('\n') + '\n')
+    await captureDeclaration({ hook_event_name: 'Stop', cwd: workspace, session_id: sessionId, transcript_path: transcript, last_assistant_message: answer }, settings, config)
+    const received = await receiveRecords(pool, config)
+    assert.deepEqual(received.declaration_errors, [])
+    assert.deepEqual(received.errors, [])
+    assert.equal((await runIndexWorker(pool, async () => config)).completed, 1)
+  }
+  const cues = async (sessionId: string, prompt: string, projectId = project) => {
+    const event = { hook_event_name: 'UserPromptSubmit', session_id: sessionId, cwd: workspace, prompt }
+    const result = await memoryCues(event, { ...settings, scope: { project_ids: [projectId], business_ids: [] } }, config, storage)
+    assert(result.hookSpecificOutput)
+    return JSON.parse(result.hookSpecificOutput.additionalContext).cues as { id: string, preview: string }[]
+  }
+  const question = '继续看需求 7135550442，上次说的后端字段还有哪些没交付？'
+  const subject = '商家寄卖选品'
+  const questionByName = '接着看看商家寄卖选品上次核对出的交付缺口还有哪些要跟进'
+  const originalFee = '需求 7135550442：寄卖退回，后端 v1 缺少运费 refundFee，前端结算页等待接入。'
+  const openAddress = '需求 7135550442：寄卖退回，后端 v1 缺少退回地址 returnAddress，待后端补充。'
+  const deliveredFee = '需求 7135550442：寄卖退回，后端 v2 已交付 refundFee，前端结算页仍待接入。'
+  const observation = (text: string, quote: string): MemoryDeclaration['items'][number] => ({
+    text, subject, quote: `${subject}：${quote}`, basis: 'tool_observation', scope: 'project',
+  })
+  await publish('requirements-a', [
+    observation(originalFee, 'v1 契约缺少 refundFee，结算页没有运费可读。'),
+    observation(openAddress, 'v1 退回详情契约尚未提供 returnAddress。'),
+  ])
+
+  assert.deepEqual(await cues('requirements-b', '早上好'), [])
+  const previous = await cues('requirements-b', question)
+  assert.deepEqual(new Set(previous.map(entry => entry.preview)), new Set([originalFee, openAddress]))
+  const fee = previous.find(entry => entry.preview === originalFee)!
+  const execute = promisify(execFile)
+  const read = async (id: string, sessionId: string) => JSON.parse((await execute(process.execPath, [
+    'bin/jth.ts', 'memo', 'read', id, '--level', 'full', '--source-session', sessionId, '--env-file', envFile,
+  ])).stdout)
+  const old = await read(fee.id, 'requirements-b')
+  assert.equal(old.source.session_id, 'requirements-a')
+  assert.equal(old.messages[0].role, 'tool')
+  assert(old.messages[0].text.includes('v1 契约缺少 refundFee'))
+  await publish('requirements-b', [{
+    text: deliveredFee, quote: 'v2 返回 refundFee，前端结算页尚未读取该字段。', basis: 'tool_observation', scope: 'project',
+    change: { kind: 'correction', target: fee.id },
+  }])
+
+  assert.deepEqual(await cues('requirements-c', '你好'), [])
+  const current = await cues('requirements-c', questionByName)
+  assert.deepEqual(new Set(current.map(entry => entry.preview)), new Set([deliveredFee, openAddress]))
+  assert.equal((await storage.getEntry(fee.id)).state, 'superseded')
+  const updated = await read(current.find(entry => entry.preview === deliveredFee)!.id, 'requirements-c')
+  assert.equal(updated.source.session_id, 'requirements-b')
+  assert.deepEqual(updated.project_ids, [project])
+  assert(updated.messages[0].text.includes('v2 返回 refundFee'))
+  const list = await storage.listSubject({ subject, scope: { kind: 'project', project_ids: [project] }, limit: 20, offset: 0 })
+  const openAddressId = previous.find(entry => entry.preview === openAddress)!.id
+  assert.equal(list.total, 2)
+  assert.deepEqual(new Set(list.entries.map(entry => entry.id)), new Set([updated.id, openAddressId]))
+  assert(!list.entries.some(entry => entry.id === fee.id), 'The superseded fee gap must be absent from the current requirement list')
+  assert.deepEqual(await cues('requirements-other', question, 'unrelated-project'), [])
+  assert.deepEqual(await cues('requirements-other', questionByName, 'unrelated-project'), [])
+
+  const renamed = '退回结算'
+  await publish('requirements-c', [{
+    text: deliveredFee, subject: renamed, quote: '退回结算已独立为需求，接口已提供运费，结算页仍待接入。', basis: 'tool_observation', scope: 'project',
+    change: { kind: 'correction', target: updated.id },
+  }])
+  assert.deepEqual((await cues('requirements-d', '退回结算的缺口还有哪些')).map(entry => entry.preview), [deliveredFee])
+  assert.deepEqual((await cues('requirements-e', questionByName)).map(entry => entry.preview), [openAddress])
+})
 
 test('installed declaration CLI persists a single marked YAML block with both approval sources and stays index-only and idempotent', { skip: !process.env.JTH_TEST_DATABASE_URL, timeout: 20000 }, async () => {
   const directory = await realpath(await mkdtemp(resolve(tmpdir(), 'jth-declaration-cli-')))

@@ -1,6 +1,6 @@
 import type { MemoStorage } from './storage/storage.ts'
 import { z } from 'zod'
-import { queryTerms } from './retrieval.ts'
+import { queryTerms, subjectNames } from './retrieval.ts'
 import { sanitizeMemoryValue, unicodeLength, truncateUnicode, withMemoryContext } from './memory-context.ts'
 
 export const readLevelSchema = z.enum(['summary', 'evidence', 'full'])
@@ -83,9 +83,10 @@ export function readMemory(entry: ReadEntry, input = 'full'): ReadEntry | Record
   const level = readLevelSchema.parse(input)
   if (level === 'full') return entry
   const { id, content, basis, scope, project_ids, business_ids, state, claim_status, archived, version, source_occurred_at, valid_from, valid_until } = entry
+  const subjects = subjectNames(entry.entities)
   const next = `jth memo read ${id} --level ${level === 'summary' ? 'evidence' : 'full'}`
   const summary = { id, content, basis, scope, project_ids, business_ids, state, claim_status, archived, version, source_occurred_at, valid_from, valid_until,
-    level, next,
+    level, next, ...(subjects.length ? { subjects } : {}),
     ...(entry.derivation ? {
       derivation: {
         stale: entry.derivation.stale,

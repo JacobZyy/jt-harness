@@ -444,3 +444,26 @@ test('global cues read joined aliases while routing guidance and user runtime st
     assert.equal(await readJson(resolve(f.a, '.jth/monitor.json')), undefined)
   } finally { await f.cleanup() }
 })
+
+test('follow-up cues recognize a newly named requirement and avoid repeating its lookup', async () => {
+  const f = await fixture()
+  try {
+    const queries: string[] = []
+    const storage = { retrieve: async ({ query }: { query: string }) => {
+      queries.push(query)
+      return { entries: [] }
+    } } as unknown as Parameters<typeof memoryCues>[3]
+    const ask = async (prompt: string) => {
+      queries.length = 0
+      await memoryCues({ ...f.event, hook_event_name: 'UserPromptSubmit', prompt }, f.settings, f.config, storage)
+      return [...new Set(queries)]
+    }
+    assert.deepEqual(await ask('先熟悉下项目'), ['先熟悉下项目'])
+    assert.deepEqual(await ask('看需求 7135550442 的字段交付'), ['7135550442'])
+    assert.deepEqual(await ask('继续看 https://project.example/team/story/detail/7135550442'), [])
+    assert.deepEqual(await ask('比较需求 7135550442 和需求 99887766'), [])
+    assert.deepEqual(await ask('继续《商家寄卖》的字段分析'), ['商家寄卖'])
+    assert.deepEqual(await ask('查一下 APP-42'), ['APP-42'])
+    assert.deepEqual(await ask('好的'), [])
+  } finally { await f.cleanup() }
+})

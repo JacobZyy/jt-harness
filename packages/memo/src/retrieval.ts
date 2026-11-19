@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { scopeFilterSchema, vectorSchema } from './storage/contract.ts'
 import { timestampSchema } from './contracts.ts'
+import { memorySubjectPrefix } from './declaration-contract.ts'
 
 export const retrievalInputSchema = z.strictObject({
   query: z.string().trim().min(1).max(2000), scope: scopeFilterSchema,
@@ -49,6 +50,10 @@ function normalizedTime(value: Date | string | null | undefined) {
   return parsed === null ? String(value ?? '') : new Date(parsed).toISOString()
 }
 
+export function subjectNames(entities: string[]) {
+  return entities.filter(entity => entity.startsWith(memorySubjectPrefix)).map(entity => entity.slice(memorySubjectPrefix.length))
+}
+
 function duplicateKey(entry: RetrievalRow) {
   const scope = entry.scope === 'project'
     ? [entry.scope, [...(entry.project_ids ?? [])].sort()]
@@ -60,7 +65,7 @@ function duplicateKey(entry: RetrievalRow) {
           ? [entry.scope, entry.submission_id ?? '']
           : [entry.scope ?? '']
   return JSON.stringify([
-    entry.content, scope,
+    entry.content, scope, subjectNames(entry.entities).sort(),
     normalizedTime(entry.valid_from), normalizedTime(entry.valid_until),
   ])
 }
@@ -77,8 +82,15 @@ function compareQualification(a: RetrievalRow, b: RetrievalRow) {
   return (qualificationRank[b.claim_status ?? 'candidate'] ?? 0) - (qualificationRank[a.claim_status ?? 'candidate'] ?? 0)
 }
 
-function compareLexical(a: RetrievalRow & { match: { phrase_match: boolean, keyword_coverage: number } }, b: RetrievalRow & { match: { phrase_match: boolean, keyword_coverage: number } }) {
-  return Number(b.match.phrase_match) - Number(a.match.phrase_match)
+type LexicalRow = RetrievalRow & { match: { phrase_match: boolean, keyword_coverage: number, matched_subject: string | null } }
+
+export function compareMatchedSubjects(a: { matched_subject?: string | null }, b: { matched_subject?: string | null }) {
+  return (b.matched_subject?.length ?? 0) - (a.matched_subject?.length ?? 0)
+}
+
+function compareLexical(a: LexicalRow, b: LexicalRow) {
+  return compareMatchedSubjects(a.match, b.match)
+    || Number(b.match.phrase_match) - Number(a.match.phrase_match)
     || b.match.keyword_coverage - a.match.keyword_coverage
     || compareQualification(a, b)
     || compareSourceDate(a, b)
@@ -86,16 +98,28 @@ function compareLexical(a: RetrievalRow & { match: { phrase_match: boolean, keyw
 }
 
 export function rankMemories<T extends RetrievalRow>(rows: T[], input: z.infer<typeof retrievalInputSchema>) {
-  const terms = queryTerms(input.query), phrase = input.query.toLowerCase()
+  const phrase = input.query.toLowerCase()
+  // A work item number or ticket key identifies one requirement, including beside Chinese text.
+  const ticket = /^(?:[a-z][a-z0-9]+-)?\d+$/.test(phrase) ? new RegExp(`\\b${phrase}\\b`) : undefined
+  const terms = ticket ? [phrase] : queryTerms(input.query)
   const candidates = rows.map(entry => {
-    const text = `${entry.content}\n${entry.entities.join(' ')}`.toLowerCase()
-    const matched = terms.filter(term => text.includes(term))
-    const phraseMatch = entry.content.toLowerCase().includes(phrase)
+    const names = subjectNames(entry.entities).sort((a, b) => b.length - a.length)
+    const subject = names.find(name => {
+      const term = name.toLowerCase()
+      if (!term || !phrase.includes(term)) return false
+      const start = /^\w/.test(term) ? '\\b' : ''
+      const end = /\w$/.test(term) ? '\\b' : ''
+      return new RegExp(start + RegExp.escape(term) + end).test(phrase)
+    })
+    const text = [entry.content, ...entry.entities.filter(entity => !entity.startsWith(memorySubjectPrefix)), ...names].join('\n').toLowerCase()
+    const matched = terms.filter(term => ticket ? ticket.test(text) : text.includes(term))
+    const content = entry.content.toLowerCase()
+    const phraseMatch = ticket ? ticket.test(content) : content.includes(phrase)
     const coverage = terms.length ? matched.length / terms.length : 0
     const similarity = entry.distance === null ? null : 1 - entry.distance
-    return { ...entry, match: { matched_terms: matched, phrase_match: phraseMatch, keyword_coverage: coverage, similarity, rank_score: 0, duplicate_ids: [] as string[] } }
+    return { ...entry, match: { matched_terms: matched, matched_subject: subject ?? null, phrase_match: phraseMatch, keyword_coverage: coverage, similarity, rank_score: 0, duplicate_ids: [] as string[] } }
   })
-  const keyword = input.mode === 'semantic' ? [] : candidates.filter(entry => entry.match.keyword_coverage >= 0.5)
+  const keyword = input.mode === 'semantic' ? [] : candidates.filter(entry => entry.match.matched_subject || entry.match.keyword_coverage >= 0.5)
     .sort(compareLexical)
   const semantic = input.mode === 'keyword' ? [] : candidates.filter(entry => entry.match.similarity !== null && entry.match.similarity >= input.min_similarity)
     .sort((a, b) => b.match.similarity! - a.match.similarity! || compareLexical(a, b))

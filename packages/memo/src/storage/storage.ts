@@ -13,6 +13,7 @@ import { readActions } from './management.ts'
 import { entryVersion, versionExpression, versionExpressionFor } from '../version.ts'
 import type { IntakeIssue } from '../intake.ts'
 import { rankMemories, retrievalInputSchema, type RetrievalInput } from '../retrieval.ts'
+import { memorySubjectPrefix, memorySubjectSchema } from '../declaration-contract.ts'
 import { derivationSnapshotStale, readDerivations } from './derivations.ts'
 
 interface SubmissionRow {
@@ -219,7 +220,23 @@ export class MemoStorage {
     return { space: found.space, mode: query.mode, entries: rankMemories(found.entries, query) }
   }
 
-  private async candidates(query: Pick<z.infer<typeof retrievalInputSchema>, 'scope' | 'space_id' | 'vector' | 'limit' | 'include_candidates' | 'include_history' | 'include_archived' | 'as_of'>, all: boolean) {
+  async listSubject(input: { subject: string, scope: RetrievalInput['scope'], limit: number, offset: number, as_of?: string }) {
+    const subject = memorySubjectSchema.parse(input.subject)
+    const limit = z.number().int().min(1).max(20).parse(input.limit)
+    const offset = z.number().int().nonnegative().parse(input.offset)
+    const scope = retrievalInputSchema.shape.scope.parse(input.scope)
+    // Keep PostgreSQL's timestamp precision when resuming a page after a correction.
+    const asOf = input.as_of === undefined
+      ? (await this.pool.query<{ instant: string }>("SELECT to_jsonb(CURRENT_TIMESTAMP) #>> '{}' AS instant")).rows[0].instant
+      : timestampSchema.parse(input.as_of)
+    const found = await this.candidates({ scope, as_of: asOf, limit, include_candidates: false, include_history: false, include_archived: false }, true, subject)
+    const total = found.entries.length
+    const entries = found.entries.slice(offset, offset + limit)
+    const hasMore = offset + entries.length < total
+    return { subject, scope, as_of: asOf, total, limit, offset, has_more: hasMore, next_offset: hasMore ? offset + entries.length : null, entries }
+  }
+
+  private async candidates(query: Pick<z.infer<typeof retrievalInputSchema>, 'scope' | 'space_id' | 'vector' | 'limit' | 'include_candidates' | 'include_history' | 'include_archived' | 'as_of'>, all: boolean, subject?: string) {
     let space: EmbeddingSpace | null = null
     if (query.vector) {
       const found = await this.pool.query<{ definition: EmbeddingSpace }>('SELECT definition FROM jt_memo.embedding_spaces WHERE id = $1', [query.space_id])
@@ -246,13 +263,16 @@ export class MemoStorage {
         AND (e.claim_status IN ('asserted','observed','verified') OR ($6::boolean AND e.claim_status='candidate'))
         AND ($7::boolean OR e.state IN ('active','conflicted')) AND e.state<>'pending'
         AND ($9::boolean OR NOT e.archived)
+        AND ($11::text IS NULL OR EXISTS (
+          SELECT 1 FROM unnest(e.entities) AS entity WHERE lower(entity) = lower($11)
+        ))
         AND (($3 = 'project' AND e.project_ids <@ $4::text[])
           OR ($3 = 'business' AND e.business_ids <@ $4::text[])
           OR ($3 = 'current_task' AND e.source_session_id = $5)
           OR ($3 = 'unspecified' AND e.submission_id = $5)
           OR $3 = 'user')
       ORDER BY distance NULLS LAST, e.id
-    `, [query.space_id ?? null, query.vector ? JSON.stringify(query.vector) : null, scope.kind, scopeIds, sourceId, query.include_candidates, query.include_history, query.as_of ?? null, query.include_archived, all])
+    `, [query.space_id ?? null, query.vector ? JSON.stringify(query.vector) : null, scope.kind, scopeIds, sourceId, query.include_candidates, query.include_history, query.as_of ?? null, query.include_archived, all, subject ? memorySubjectPrefix + subject : null])
     const entries = matches.rows.filter(entry => query.include_history || !derivationSnapshotStale(entry.derivation_data))
       .slice(0, all ? undefined : query.limit)
       .map(({ derivation_data: _derivationData, ...entry }) => entry)

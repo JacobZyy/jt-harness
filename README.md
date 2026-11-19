@@ -42,7 +42,7 @@ Workflow Policy 默认 adaptive：普通问答直接回答，有界小改直接�
 
 检查点复用原生计划、会话记录、必要的证据文件与 Git 提交。主 Agent 直接运行项目检查并核对产出，通过后更新计划和 Goal；不为每次工具调用复制一份流程日志。权限、会话恢复和压缩使用 Codex 自带机制。
 
-通过 `flow status` 查看 `memo_scope`。Memo 在启动/恢复后的首次输入提供有限关键词线索；同一会话的新任务由主 Agent 主动 `recall`，需要时 `search` 深查、`read --level evidence` 展开。Flow 不运行旧自动召回循环；线索不读取旧任务或调用模型。主会话末尾短声明的后台存储与 Embedding 保持独立。
+通过 `flow status` 查看 `memo_scope`。Memo 优先保留可以接着做的需求分析，包括上次核实的接口能力、缺少的字段、调用方接入情况和待办。新会话或后续追问可以按需求名、编号找回线索；完整清单用 `jth memo subject '需求名'` 分页读取。历史无名称标签的条目仍可用 `recall` 找回。Agent 按来源核对最新契约，并在原范围修订已变化的缺口。
 
 历史 PostgreSQL 任务、绑定、回执和 SQLite 迁移材料不删除；显式使用：
 
@@ -256,7 +256,7 @@ Agent 模型、向量空间和原材料在接收时固定；重复提交不会�
 
 `status` 列出状态计数与最近 20 个任务；指定 ID 后显示尝试次数、错误、提炼和比较两个阶段的 DSH session ID、索引提交回执及直接修订数量。`read --submission` 可以查看完整提炼结果和修订证据。
 
-`search` 必须显式指定一种范围，默认混合检索，3 条、最多 50 条；只输出 400 字符以内的正文预览及匹配依据，不返回向量。`recall` 只用本地关键词。`read --level evidence` 给出有界证据片段，`--level full` 保留完整原文；默认 full 兼容旧输出。
+`search` 默认混合检索，返回 3 条，最多 50 条。每条包含 400 字符以内的正文预览及匹配依据。`recall` 只用本地关键词。两者省略范围时查绑定项目和用户偏好。`subject` 默认只列绑定项目的同名需求，可使用 `--business` 等参数切换范围。`read --level evidence` 给出证据片段与已标注的需求名，默认的 `full` 保留完整原文。
 
 默认搜索只返回已入库、当前有效、未归档且具有可用来源资格的条目。`state` 区分 `pending/active/conflicted/superseded/scheduled/expired`，`claim_status` 区分来源和审核资格，`archived` 单独表示归档。`--history` 包含被更正、过期、未生效的条目；`--candidates` 包含待审条目（兼容原 `--proposals`）；`--archived` 包含归档。被拒绝的条目仍可按 ID 读取，不进入默认或候选搜索。
 

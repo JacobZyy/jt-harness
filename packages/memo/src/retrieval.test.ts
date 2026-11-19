@@ -2,6 +2,30 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { rankMemories, queryTerms, retrievalInputSchema } from './retrieval.ts'
 
+test('a work item identifier matches the whole key in prose or entities', () => {
+  const rows = [
+    { id: 'target', content: '需求42待核实', entities: ['APP-42'], distance: null },
+    { id: 'other', content: '需求420和 APP-420', entities: [], distance: null },
+  ]
+  for (const query of ['42', 'APP-42']) {
+    const input = retrievalInputSchema.parse({ query, mode: 'keyword', scope: { kind: 'project', project_ids: ['test'] } })
+    assert.deepEqual(rankMemories(rows, input).map(entry => entry.id), ['target'])
+  }
+})
+
+test('a natural question prefers its more specific subject and keeps equal text from different requirements distinct', () => {
+  const rows = [
+    { id: 'general', content: '待确认费用字段', entities: ['subject:供货'], distance: null },
+    { id: 'shipping', content: '待确认费用字段', entities: ['subject:供货发货'], distance: null },
+    { id: 'other', content: '待确认费用字段', entities: ['subject:ship'], distance: null },
+  ]
+  const input = retrievalInputSchema.parse({ query: '上次我们在供货发货核对的事情进展怎样', mode: 'keyword', scope: { kind: 'user' } })
+  const result = rankMemories(rows, input)
+  assert.deepEqual(result.map(entry => entry.id), ['shipping', 'general'])
+  assert.equal(result[0].match.matched_subject, '供货发货')
+  assert.deepEqual(rankMemories(rows, { ...input, query: 'membership status' }), [])
+})
+
 test('hybrid retrieval preserves exact identifiers, semantic matches and an empty-result path', () => {
   const rows = [
     { id: 'exact', content: 'saveSegmentQcDraft 使用 operatorAuthUid', entities: [], distance: 0.9 },

@@ -21,7 +21,9 @@ const entry = (content: string): Entry => ({
 
 test('evidence stays within Unicode budget and full read remains canonical', () => {
   const full = entry(`建议使用 Bearer secret-token-value。${'事实'.repeat(2_000)}`)
+  full.entities = ['subject:商家寄卖选品', 'refundFee']
   const evidence = readMemory(full, 'evidence')
+  assert.deepEqual(evidence.subjects, ['商家寄卖选品'])
   assert(Array.from(JSON.stringify(evidence, null, 2)).length <= 12_000)
   assert.equal(evidence.id, full.id)
   assert.equal(evidence.version, full.version)

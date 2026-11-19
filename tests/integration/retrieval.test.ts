@@ -26,12 +26,12 @@ test('retrieval, evidence levels, lifecycle cues and usage feedback preserve sco
     const config = await loadConfig(process.cwd(), envFile)
     const storage = new MemoStorage(pool)
     const space = { id: `space-${project}`, provider: 'https://example.invalid/v1', model: 'fixture', dimensions: 2, input_version: 'content-v1' as const }
-    const add = async (content: string, projects: string[], vector: number[]) => {
+    const add = async (content: string, projects: string[], vector: number[], entities: string[] = []) => {
       const id = randomUUID(), text = '上下文。'.repeat(300) + content
       const stored = await storage.store({ submission: { schema_version: 1, submission_id: id,
         source: { provider: 'codex', session_id: session }, scope: { project_ids: projects, business_ids: [] },
         messages: [{ message_id: 'u', role: 'user', text, occurred_at: '2026-01-01T00:00:00Z' }] },
-        extraction: { schema_version: 1, memories: [{ content, basis: 'user_statement', scope: 'project', source_message_ids: ['u'] }], proposals: [], revisions: [] },
+        extraction: { schema_version: 1, memories: [{ content, basis: 'user_statement', scope: 'project', source_message_ids: ['u'], entities }], proposals: [], revisions: [] },
         run: { session_id: 'fixture', provider: 'fixture', model: 'fixture' } })
       const entry = (await storage.getSubmission(id)).entries[0]
       await storage.index({ submission_id: id, space, embeddings: [{ entry_id: entry.id, content_sha256: entry.content_sha256, vector }] })
@@ -92,6 +92,28 @@ test('retrieval, evidence levels, lifecycle cues and usage feedback preserve sco
     assert.equal((await memoryUses(pool, { kind: 'project', project_ids: [otherProject] })).uses.length, 0)
     assert.equal((await cli('usage', '--session', session)).uses.length, 1)
     assert.deepEqual(await storage.getEntry(exact), full)
+    const subject = '退回 API', tags = ['subject:' + subject]
+    const ids = []
+    for (const field of ['fee', 'addressId', 'status', 'shippingMode']) ids.push(await add(field, [project], [1, 0], tags))
+    await add('另一个需求', [project], [1, 0], ['subject:退回 API 批量版'])
+    await add('共管字段', [project, otherProject], [1, 0], tags)
+    await add('退回 API 旧记录没有 subject', [project], [1, 0])
+    const page = (...args: string[]) => cli('subject', '退回 api', '--project', project, '--limit', '2', ...args)
+    const first = await page()
+    assert.equal(first.total, 4)
+    assert.equal(first.has_more, true)
+    assert.equal(first.next_offset, 2)
+    assert.match(first.entries[0].next, /--level evidence/)
+    await manageEntry(pool, { action: 'archive', entry_id: ids[0], reason: '该字段已经下线' })
+    const second = await page('--offset', String(first.next_offset), '--as-of', first.as_of)
+    assert.equal(second.has_more, false)
+    assert.equal(second.next_offset, null)
+    assert.equal(second.total, 4)
+    assert.deepEqual([...first.entries, ...second.entries].map(entry => entry.id), ids.toSorted())
+    assert.equal((await page()).total, 3)
+    const end = await page('--offset', '9')
+    assert.equal(end.next_offset, null)
+    assert.deepEqual(end.entries, [])
     await manageEntry(pool, { action: 'archive', entry_id: exact, reason: 'fixture retirement' })
     assert.equal((await storage.retrieve({ ...input, mode: 'keyword' })).entries.length, 0)
     assert.equal((await storage.retrieve({ ...input, mode: 'keyword', include_archived: true })).entries.length, 1)

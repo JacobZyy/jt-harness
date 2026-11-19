@@ -6,11 +6,14 @@ import { recordId } from './record-contract.ts'
 import type { RecordDraft } from './record-contract.ts'
 
 export const declarationMarker = '<!-- jth-memory'
+export const memorySubjectPrefix = 'subject:'
+export const memorySubjectSchema = z.string().trim().min(1).max(200 - memorySubjectPrefix.length).regex(/^[^\r\n]+$/, 'subject 须为单行名称')
 export const declarationId = (draft: RecordDraft) => recordId(draft).replace(/^record-/, 'declaration-')
 const fact = extractionSchema.shape.memories.element.shape
 export const declarationSchema = z.strictObject({
   items: z.array(z.strictObject({
     text: z.string().trim().min(1), scope: fact.scope,
+    subject: memorySubjectSchema.optional(),
     workspaces: z.array(z.string().refine(isAbsolute, '工作目录必须使用绝对路径')).min(1).optional(),
     basis: z.enum(['user_statement', 'user_confirmed', 'tool_observation', 'assistant_proposal', 'agent_inference']),
     quote: z.string().trim().min(1).max(240),
@@ -35,6 +38,9 @@ export const declarationSchema = z.strictObject({
     context.addIssue({ code: 'custom', message: 'confirmation_quote 仅用于 user_confirmed 声明' })
   }
   for (const item of value.items) {
+    if (item.subject && item.scope === 'user') {
+      context.addIssue({ code: 'custom', message: '用户偏好不使用需求名称 subject' })
+    }
     if (item.workspaces && item.scope !== 'project') {
       context.addIssue({ code: 'custom', message: 'workspaces 仅用于 project 声明' })
     }

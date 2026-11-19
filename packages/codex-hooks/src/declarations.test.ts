@@ -31,6 +31,9 @@ test('declaration parser ignores normal replies and fenced examples, and bounds 
   assert.equal(parseDeclaration('```text\n' + declaration() + '\n```'), null)
   assert.equal(parseDeclaration('引用示例：' + declaration()), null)
   assert.equal(parseDeclaration('任务完成。\n' + declaration())!.items[0].text, '项目使用 pnpm。')
+  assert.equal(parseDeclaration(declaration({ subject: ' 供货发货 ' }))!.items[0].subject, '供货发货')
+  for (const subject of [' ', '两行\n名称', '长'.repeat(193)]) assert.throws(() => parseDeclaration(declaration({ subject })))
+  assert.throws(() => parseDeclaration(declaration({ scope: 'user', subject: '供货发货' })), /用户偏好/)
   assert.throws(() => parseDeclaration('<!-- jth-memory {} -->'))
   assert.throws(() => parseDeclaration(declaration({ text: '长'.repeat(501) })), /500/)
   assert.equal(parseDeclaration(declaration({ basis: 'user_confirmed', confirmation_quote: '可以，按这个做' }))!.items[0].confirmation_quote, '可以，按这个做')
@@ -223,14 +226,16 @@ test('correction versions come from a prior read receipt and statements cannot c
   const f = await fixture(), target = randomUUID(), version = 'a'.repeat(64)
   try {
     await rememberEntryRead(f.config, 'parent', target, version)
-    await appendFile(f.source, message('u1', 'UserMessage', '项目使用 pnpm，替代旧约定。'))
-    const text = declaration({ change: { kind: 'correction', target } })
+    const content = '供货发货的订单号已补齐，仍待前端接入。'
+    await appendFile(f.source, message('u1', 'UserMessage', content))
+    const text = declaration({ subject: '供货发货', text: content, quote: content, change: { kind: 'correction', target } })
     await appendFile(f.source, message('a1', 'AgentMessage', text))
     await f.capture(text)
     assert.equal((await collectDeclarations(f.config)).errors.length, 0)
     const file = (await readdir(resolve(f.config.dataDir, 'codex/records')))[0]
     const staged = JSON.parse(await readFile(resolve(f.config.dataDir, 'codex/records', file), 'utf8'))
     assert.equal(staged.draft.changes[0].expected_version, version)
+    assert.deepEqual(staged.draft.extraction.memories[0].entities, ['subject:供货发货'])
     const invented = declaration({ quote: '只存在于声明中的话' })
     await appendFile(f.source, message('a2', 'AgentMessage', invented))
     await f.capture(invented)

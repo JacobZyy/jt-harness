@@ -1,1 +1,1 @@
-export const memoEntryContext = '需要历史依据，或处理可复用事实、明确决定时，按 jth-memo Skill 执行。收口用短声明记录 record/skip 决定与实际理由；缺失保持未知，日常不评分。'
+export const memoEntryContext = '按 jth-memo Skill 优先记录下次能接着做的需求分析：已核实的交付、缺口、待办和依据，可变状态带上核对版本或时间。再提同一需求时按名称、编号或接口找回前次分析，读证据、复核变化并修订旧结论。也保留可复用的决定与偏好。收口短声明 record/skip 及理由；未知保持未知。'

@@ -2,7 +2,7 @@ import { readdir, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { findDeclarationBlock, parseDeclaration, evidenceSchema, recordDraftSchema, isRecalledMemory } from '@jacob-z/jt-harness/memo/contracts'
+import { findDeclarationBlock, parseDeclaration, evidenceSchema, recordDraftSchema, isRecalledMemory, memorySubjectPrefix } from '@jacob-z/jt-harness/memo/contracts'
 import type { Submission } from '@jacob-z/jt-harness/memo/contracts'
 import { matchesConfigFile } from '@jacob-z/jt-harness/memo/config'
 import { captureEvent, captureSchema, codexDirectory, hash, hookEventSchema, readJson, writeJson } from './capture.ts'
@@ -141,7 +141,9 @@ async function prepareDeclaration(capture: Capture, config: CapturePaths, observ
     for (const itemIndex of group.itemIndexes) {
       const item = declaration.items[itemIndex]
       const sourceIds = itemSources[itemIndex].map(message => message.message_id)
-      const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds }
+      const fact = { content: item.text, scope: item.scope, source_message_ids: sourceIds,
+        ...(item.subject ? { entities: [memorySubjectPrefix + item.subject] } : {}),
+      }
       if (item.basis === 'assistant_proposal' || item.basis === 'agent_inference') {
         const proposal_index = draft.extraction.proposals.length
         draft.extraction.proposals.push({ ...fact, basis: item.basis })

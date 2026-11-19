@@ -6,15 +6,35 @@ import type { Submission } from './contracts.ts'
 import type { Extraction } from './contracts.ts'
 import type { Config } from './config.ts'
 import { MemoStorageError, sha256 } from './storage/contract.ts'
-import { relationSchema, validateRelations } from './storage/relations.ts'
+import { relationSchema, scopeProvided, validateRelations, type StateEntry } from './storage/relations.ts'
 import { MemoStorage } from './storage/storage.ts'
 import { transaction } from './storage/database.ts'
 import { entryVersion } from './version.ts'
 import { entryMetadata } from './storage/metadata.ts'
-import { declarationId } from './declaration-contract.ts'
+import { declarationId, memorySubjectPrefix } from './declaration-contract.ts'
 import { validateDerivations } from './storage/derivations.ts'
 
 type Fact = Extraction['memories'][number] | Extraction['proposals'][number]
+type Change = NonNullable<RecordDraft['changes']>[number]
+
+async function priorEntries(client: PoolClient, ids: string[]) {
+  return ids.length ? (await client.query<StateEntry>('SELECT * FROM jt_memo.entry_states WHERE id=ANY($1::uuid[])', [ids])).rows : []
+}
+
+/** Keep the original draft identity; apply the subject to the stored extraction and its deduplication key. */
+function revisionEntities(fact: Fact, changes: Change[], previous: StateEntry[], submission: Submission) {
+  const declared = fact.entities ?? []
+  if (declared.some(entity => entity.startsWith(memorySubjectPrefix))) return declared
+  const inherited = new Set<string>()
+  for (const change of changes) {
+    const old = previous.find(entry => entry.id === change.previous_entry_id)
+    if (!old || old.scope !== fact.scope || !scopeProvided(old, submission)) continue
+    for (const entity of old.entities) if (entity.startsWith(memorySubjectPrefix)) inherited.add(entity)
+  }
+  if (!inherited.size) return declared
+  if (inherited.size > 1) throw new Error('修订目标包含多个需求名，请明确本条的 subject。')
+  return [...declared, ...inherited]
+}
 export interface DeclarationReceipt {
   status: 'accepted', declaration_id: string, submission_id: string | null, entry_ids: string[],
   new_facts: number, linked_sources: number, index_status: 'queued' | 'reused', duplicate: boolean,
@@ -35,6 +55,7 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('jt_memo:declarations',0))")
     const prior = (await client.query<{ result: DeclarationReceipt }>('SELECT result FROM jt_memo.declaration_receipts WHERE id=$1', [id])).rows[0]
     if (prior) return { ...prior.result, duplicate: true }
+    const previous = await priorEntries(client, draft.changes.map(change => change.previous_entry_id))
     const facts: { fact: Fact, collection: 'memories' | 'proposals', index: number }[] = [
       ...draft.extraction.memories.map((fact, index) => ({ fact, collection: 'memories' as const, index })),
       ...draft.extraction.proposals.map((fact, index) => ({ fact, collection: 'proposals' as const, index })),
@@ -47,8 +68,10 @@ export async function recordDeclaration(database: Pool | PoolClient, input: Reco
     const derivations = draft.derivations ?? []
     const derivationByProposal = new Map(derivations.map(item => [item.proposal_index, item]))
     for (const { fact, collection, index } of facts) {
-      const changed = collection === 'memories' && draft.changes.some(change => change.current_memory_index === index)
+      const changes = collection === 'memories' ? draft.changes.filter(change => change.current_memory_index === index) : []
+      const changed = changes.length > 0
       const metadata = entryMetadata(fact, evidence.submission)
+      if (changed) metadata.entities = revisionEntities(fact, changes, previous, evidence.submission)
       const derivation = collection === 'proposals' ? derivationByProposal.get(index) : undefined
       const fingerprint = JSON.stringify([collection, fact.content, fact.basis, fact.scope, metadata.entities.toSorted(), metadata.valid_from, metadata.valid_until,
         derivation ? derivation.sources.toSorted((a, b) => a.entry_id.localeCompare(b.entry_id)) : null])
@@ -126,8 +149,16 @@ export async function recordMemories(database: Pool | PoolClient, input: RecordD
     }
     const ids = [...new Set([...draft.changes.map(change => change.previous_entry_id), ...derivations.flatMap(item => item.sources.map(source => source.entry_id))])].sort()
     await client.query('SELECT id FROM jt_memo.entries WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids])
+    const previous = await priorEntries(client, ids)
     for (const change of draft.changes) {
       if (change.expected_version !== await entryVersion(client, change.previous_entry_id)) throw new MemoStorageError('VERSION_CONFLICT', '旧记忆版本已变化；请重新 read 后提交，未修改旧事实')
+    }
+    for (const [index, fact] of extraction.memories.entries()) {
+      const changes = draft.changes.filter(change => change.current_memory_index === index)
+      if (changes.length) {
+        const entities = revisionEntities(fact, changes, previous, submission)
+        if (entities.length) fact.entities = entities
+      }
     }
     const checkedDerivations = await validateDerivations(client, derivations, extraction, submission)
     const storage = new MemoStorage(client)
@@ -143,7 +174,6 @@ export async function recordMemories(database: Pool | PoolClient, input: RecordD
       if (current_memory_index !== null && current_memory_index >= extraction.memories.length) throw new Error('current_memory_index 必须引用本批 memories 中的条目')
       return relationSchema.parse({ ...change, current_entry_id: current_memory_index === null ? null : stored.entry_ids[current_memory_index] })
     })
-    const previous = ids.length ? (await client.query('SELECT * FROM jt_memo.entry_states WHERE id=ANY($1::uuid[])', [ids])).rows : []
     validateRelations(relations, previous, saved.entries, submission, extraction)
     const plan = { relations, expected_versions: Object.fromEntries(draft.changes.map(change => [change.previous_entry_id, change.expected_version])) }
     await client.query(`INSERT INTO jt_memo.jobs(id,content_hash,payload,execution,kind,record_plan)
