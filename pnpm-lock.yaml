@@ -75,6 +75,9 @@ importers:
       '@inquirer/search':
         specifier: ^4.3.3
         version: 4.3.3(@types/node@22.20.3)
+      '@jacob-z/jth-core':
+        specifier: workspace:*
+        version: link:../jth-core
       '@jt-harness/codex-hooks':
         specifier: workspace:*
         version: link:../codex-hooks
@@ -114,6 +117,12 @@ importers:
       pg:
         specifier: 8.23.0
         version: 8.23.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
+  packages/jth-core:
+    dependencies:
       zod:
         specifier: 4.4.3
         version: 4.4.3

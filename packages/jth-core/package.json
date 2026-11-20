@@ -1,0 +1,20 @@
+{
+  "name": "@jacob-z/jth-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": { "types": "./src/index.ts", "import": "./src/index.ts" },
+    "./memo": { "types": "./src/memo/index.ts", "import": "./src/memo/index.ts" },
+    "./harness": { "types": "./src/harness/index.ts", "import": "./src/harness/index.ts" },
+    "./install": { "types": "./src/install/hooks.ts", "import": "./src/install/hooks.ts" },
+    "./hooks": { "types": "./src/hook-entries.ts", "import": "./src/hook-entries.ts" }
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --isolate --parallel=1 src"
+  }
+}

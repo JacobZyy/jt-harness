@@ -28,6 +28,31 @@
 
 会话内 `prepare / evidence / record` 保留为手动工具，默认声明流程不需要调用。`record` 只启动 index worker。协议、流程图与实测见 [主会话记忆声明](docs/memory-declarations.md)。
 
+## 文件记忆与 Harness（jth-core）
+
+`packages/jth-core` 是与上述 PostgreSQL 记忆、原生流程并行的另一套实现，按需启用。记忆是工作目录下的 JSONL 文件，不需要数据库、Embedding 和后台任务；Harness 把一次任务拆成若干阶段，每个阶段提交约定的证据后才进入下一阶段。两套实现不读写对方的数据，`jth init`、`jth memo`、`jth flow` 的原有行为不变。
+
+```sh
+jth init-v2                             # 准备当前目录，并安装用户级 Codex Hook
+jth memo core add '<结论>'               # 写入一条记忆
+jth memo core search '<关键词>'          # 关键词检索；recall 返回按提问整理的线索
+jth memo core useful <eventId>          # 标记被召回的记忆确实有用，影响后续排序
+jth memo core checkpoint '<一句话结论>'   # 置顶，随每次召回一起给出
+jth harness start --intent implement    # 开始一个流程
+jth harness status                      # 当前阶段与期望的证据
+jth harness submit --kind passing-test-observed --receipt receipt:<id>   # 提交证据，通过后进入下一阶段
+```
+
+`init-v2` 向 `$CODEX_HOME/hooks.json`（默认 `~/.codex/hooks.json`）写入下表的入口，同时移除旧的 `memo codex cue / declare` 和 `flow prompt` 入口，两套记忆不会同时注入。其他工具的 Hook 及其顺序保持不变，改动前的文件保存为 `hooks.json.jth-core.bak`。新写入的 Hook 需要在 Codex 中信任后才会执行。
+
+| 事件 | 命令 | 作用 |
+| --- | --- | --- |
+| `SessionStart`、`UserPromptSubmit` | `jth -- memo core cue` | 按提问检索记忆，注入线索、置顶内容和收口声明格式 |
+| `UserPromptSubmit` | `jth -- flow core entry` | 有进行中的 Harness 流程时注入当前阶段 |
+| `Stop` | `jth -- memo core declare` | 读取回复末尾的 `<!--memory: verified=yes, conclusion=… -->`，把已验证的结论写入记忆 |
+
+数据保存在运行 Codex 的工作目录：记忆在 `.jth-memo/`，流程状态在 `.jth/harness/`。这两个目录首次创建时自带忽略规则，不会进入该项目的提交。`jth init-v2 --remove-hooks` 移除 JTH 的记忆和流程入口（包括旧入口）；需要原有入口时再运行 `jth init`。
+
 ## Codex 原生流程
 
 用户级接入完成后，在任意工作目录查看当前范围：

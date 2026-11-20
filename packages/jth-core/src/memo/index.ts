@@ -1,0 +1,10 @@
+// Public API for jth-core memo system
+export { appendMemoEvent, memoEventSchema, type MemoEvent, type MemoScope, type AppendMemoOptions } from '../storage/events/events-write.ts'
+export { readAllMemoEvents, readMemoEventsForSpace } from '../storage/events/events-read.ts'
+export { searchMemoEvents, listMemoEvents, recordFeedback, readFeedbackScores, type SearchResult, type SearchOptions } from '../storage/views/query.ts'
+export { readPinned, writePinned, appendToPinned, type PinnedAppendOptions } from '../storage/govern/pinned.ts'
+export { parseMemoryDeclaration, stripMemoryDeclaration, buildMemoryDeclarationInstruction, DECL_OPEN, DECL_CLOSE, type MemoryDeclaration } from '../flow/declaration/protocol.ts'
+export { processAutoMemory, recordCheckpoint, type AutopilotOptions, type AutopilotResult } from '../flow/declaration/autopilot.ts'
+export { collectTurnRecall, buildRecallContextJson, type RecallResult, type RecallHit, type RecallOptions } from '../flow/recall/recall.ts'
+export { handleCueHook, handleStopHook, type HookEvent, type HookOutput, type MemoHookConfig, type StopHookResult } from '../flow/hooks.ts'
+export { memoRoot, fileEventsPath, filePinnedPath, recallFeedbackPath } from '../storage/base/fs.ts'

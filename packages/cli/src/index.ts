@@ -19,6 +19,8 @@ export async function run(root: string, args = process.argv.slice(2)) {
     || args[0] === 'migrate' && args.includes('--session-start')
     || args[0] === 'flow' && args[1] === 'prompt'
     || args[0] === 'memo' && args[1] === 'codex' && ['capture', 'declare', 'cue'].includes(args[2])
+    || args[0] === 'memo' && args[1] === 'core' && ['cue', 'declare'].includes(args[2])
+    || args[0] === 'flow' && args[1] === 'core' && args[2] === 'entry'
   let hookInput: unknown
   if (hook && !args.includes('--help') && !args.includes('-h')) {
     try { hookInput = await readHookInput() }
@@ -48,7 +50,7 @@ export async function run(root: string, args = process.argv.slice(2)) {
     const { databaseMain } = await import('./postgres.ts')
     return databaseMain(root, args.slice(1))
   }
-  if (args[0] === 'flow') {
+  if (args[0] === 'flow' && args[1] !== 'core') {
     const { flowMain } = await import('./flow.ts')
     return flowMain(root, args.slice(1), hookInput)
   }
@@ -65,5 +67,5 @@ export async function run(root: string, args = process.argv.slice(2)) {
     return inlineMain(root, args.slice(1))
   }
   const { main } = await import('./main.ts')
-  return main(root, args)
+  return main(root, args, hookInput)
 }

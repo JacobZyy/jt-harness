@@ -10,7 +10,7 @@ const digest = createHash('sha256')
 digest.update(await readFile(resolve(root, 'pnpm-lock.yaml')))
 await rm(target, { recursive: true, force: true })
 execFileSync('pnpm', ['--filter', '@jacob-z/jt-harness', 'deploy', '--prod', '--no-optional', '--legacy', target], { cwd: root, stdio: 'inherit' })
-for (const name of ['analysis', 'cli', 'codex-hooks', 'flow', 'memo']) {
+for (const name of ['analysis', 'cli', 'codex-hooks', 'flow', 'jth-core', 'memo']) {
   await rm(resolve(target, 'packages', name, 'dist'), { recursive: true, force: true })
   await rm(resolve(target, 'packages', name, 'node_modules/.bin'), { recursive: true, force: true })
 }

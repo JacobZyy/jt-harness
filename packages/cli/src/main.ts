@@ -27,6 +27,9 @@ jth analysis prepare|evidence|report|usage  按需分析 Workflow 与 Memo；只
 jth install|doctor|uninstall  独立安装、项目接入和运行诊断；运行 jth install --help
 jth monitor <command>  本地 Phoenix 与会话观测
 jth flow <command>  Codex 原生流程指导与 Memo 接入；运行 jth flow --help
+jth init-v2 [--skip-hooks|--remove-hooks]  文件记忆与 Harness（jth-core）：准备当前目录并安装用户级 Codex Hook
+jth memo core <command>  文件记忆，不依赖 PostgreSQL：add / search / recall / useful / checkpoint / read / list / pinned
+jth harness <command>  带证据门的阶段流程：policy / start / status / submit / reset
 jth db status|start|stop  本机 PostgreSQL 生命周期管理
 jth memo <command>
 
@@ -110,7 +113,41 @@ async function readSubmission(path: string) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
-export async function main(root: string, args = process.argv.slice(2)) {
+export async function main(root: string, args = process.argv.slice(2), hookInput?: unknown) {
+  // jth-core commands run before legacy memo/flow. Their workspace is the caller's cwd:
+  // `root` is the install directory and must never receive project state.
+  const [group, ...rest] = args.filter(a => a !== '--help' && a !== '-h')
+  if (group === 'harness') {
+    const { harnessMain } = await import('./harness-v2.ts')
+    return harnessMain(rest)
+  }
+  if (group === 'init-v2') {
+    const { initMain } = await import('./init-v2.ts')
+    return initMain(rest)
+  }
+  if (group === 'memo' && rest[0] === 'core') {
+    const sub = rest[1]
+    // Hook entry points: index.ts has already drained stdin, so the payload is passed on.
+    if (sub === 'cue') {
+      const { memoCueMain } = await import('../../jth-core/src/hook-entries.ts')
+      return memoCueMain(rest.slice(2), hookInput)
+    }
+    if (sub === 'declare') {
+      const { memoDeclareMain } = await import('../../jth-core/src/hook-entries.ts')
+      return memoDeclareMain(rest.slice(2), hookInput)
+    }
+    const { memoMain } = await import('./memo-v2.ts')
+    return memoMain(rest.slice(1))
+  }
+  if (group === 'memo' && rest[0] === 'v2') {
+    const { memoMain } = await import('./memo-v2.ts')
+    return memoMain(rest.slice(1))
+  }
+  if (group === 'flow' && rest[0] === 'core') {
+    const { flowEntryMain } = await import('../../jth-core/src/hook-entries.ts')
+    return flowEntryMain(rest.slice(2))
+  }
+
   let config: Config | undefined
   let pool: Pool | undefined
   const controller = new AbortController()

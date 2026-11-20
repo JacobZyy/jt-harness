@@ -10,7 +10,7 @@
     "setup:worktree": "bun scripts/setup-worktree.ts",
     "memo:extract": "bun packages/memo/src/agents/run.ts",
     "memo:eval": "bun packages/memo/src/agents/evaluation/run.ts",
-    "test": "bun test --isolate --parallel=1 --path-ignore-patterns=artifacts packages/analysis/src packages/flow/src packages/memo/src packages/codex-hooks/src packages/cli/src tests",
+    "test": "bun test --isolate --parallel=1 --path-ignore-patterns=artifacts packages/analysis/src packages/flow/src packages/memo/src packages/codex-hooks/src packages/cli/src packages/jth-core/src tests",
     "test:live": "DSH_MEMORY_LIVE=1 bun test --isolate --parallel=1 --path-ignore-patterns=artifacts packages/memo/src/agents/*.test.ts",
     "typecheck": "node scripts/typecheck.mjs",
     "bundle": "bun scripts/bundle.mjs",
